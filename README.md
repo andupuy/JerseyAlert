@@ -28,12 +28,12 @@ git add .
 # Faire le premier commit
 git commit -m "Initial commit - Vinted Bot"
 
-# Lier à votre dépôt GitHub (remplacez URL_DU_REPO)
-git remote add origin URL_DU_REPO
+# Lier à votre dépôt GitHub (remplacez VOTRE_PSEUDO)
+git remote add origin https://github.com/VOTRE_PSEUDO/JerseyAlert.git
 
 # Pousser
 git push -u origin main
 ```
 
 ### 4. Vérification
-Allez dans l'onglet **Actions** de votre dépôt GitHub. Vous devriez voir le workflow "Vinted Alert" démarrer.
+Allez dans l'onglet **Actions** de votre dépôt GitHub `JerseyAlert`. Vous devriez voir le workflow "Vinted Alert" démarrer.
