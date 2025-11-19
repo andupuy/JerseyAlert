@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ligue 2 Live</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-content">
+                <h1>LIGUE 2 <span class="highlight">BKT</span></h1>
+                <button id="refresh-btn" class="icon-btn" aria-label="Actualiser">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M23 4v6h-6"></path>
+                        <path d="M1 20v-6h6"></path>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                </button>
+            </div>
+            <nav class="date-nav">
+                <button class="date-chip active">Aujourd'hui</button>
+                <button class="date-chip">Demain</button>
+                <button class="date-chip">Sam. 23</button>
+            </nav>
+        </header>
+
+        <main id="main-content">
+            <!-- Views will be injected here by JS -->
+            <div id="match-list" class="view active"></div>
+            <div id="match-detail" class="view hidden"></div>
+        </main>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>

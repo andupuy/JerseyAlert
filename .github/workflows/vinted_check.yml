@@ -1,0 +1,40 @@
+name: Vinted Alert
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # Runs every 5 minutes
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  check-vinted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6 # Safety timeout
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+
+      - name: Run Vinted Bot (Loop Mode)
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        # Run for 280 seconds (4m 40s) with 20s interval
+        # This leaves 20s buffer before the next 5-min job starts
+        run: python vinted_bot.py --duration 280 --interval 20
+
+      - name: Commit state (Last Seen ID)
+        if: always() # Always run this step even if timeout occurs
+        run: |
+          git config --global user.name 'Vinted Bot'
+          git config --global user.email 'bot@noreply.github.com'
+          git add last_seen_id.txt
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last seen ID" && git push)
