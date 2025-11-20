@@ -29,29 +29,31 @@ def get_item_details(session, item_id):
     """Scrape item page to get description and all photos"""
     try:
         import re
+        import json as jsonlib
         detail_url = f"https://www.vinted.fr/items/{item_id}"
         print(f"Scraping: {detail_url}", flush=True)
         response = session.get(detail_url, timeout=10)
         response.raise_for_status()
         html = response.text
         
-        # Extract description from HTML
+        # Extract description from embedded JSON
         description = ''
-        desc_match = re.search(r'<div[^>]*itemprop="description"[^>]*>(.*?)</div>', html, re.DOTALL)
+        desc_match = re.search(r'"description":"([^"]*)"', html)
         if desc_match:
-            description = desc_match.group(1).strip()
-            # Remove HTML tags
-            description = re.sub(r'<[^>]+>', '', description)
-            description = description.replace('&nbsp;', ' ').strip()
+            description = desc_match.group(1)
+            # Decode unicode escapes
+            description = description.encode().decode('unicode_escape')
+            # Clean up
+            description = description.replace('\\n', '\n').replace('\\r', '').strip()
         
-        # Extract photo URLs from HTML
+        # Extract photo URLs from HTML (high quality ones)
         photos = []
-        photo_matches = re.findall(r'"url":"(https://images\d+\.vinted\.net/[^"]+)"', html)
+        photo_matches = re.findall(r'(https://images\d+\.vinted\.net/t/[^/]+/[^/]+/f800/[^\s"\'<>]+)', html)
         if photo_matches:
-            # Deduplicate and take first 3
+            # Deduplicate and take first 2
             seen = set()
             for url in photo_matches:
-                if url not in seen and len(photos) < 3:
+                if url not in seen and len(photos) < 2:
                     photos.append(url)
                     seen.add(url)
         
@@ -60,6 +62,7 @@ def get_item_details(session, item_id):
     except Exception as e:
         print(f"Error scraping item: {e}", flush=True)
         return None
+
 
 
 def send_discord_alert(item, scraped_data=None):
