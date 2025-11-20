@@ -30,30 +30,44 @@ def send_discord_alert(item):
         print("No Discord Webhook URL set. Skipping notification.")
         return
 
-    embed = {
-        "title": "Nouveau Maillot ASSE !",
-        "description": item['title'],
-        "url": item['url'],
-        "color": 3447003, # Green-ish
-        "fields": [
-            {"name": "Prix", "value": f"{item['price']} {item['currency']}", "inline": True},
-            {"name": "Taille", "value": item['size_title'], "inline": True},
-            {"name": "Marque", "value": item['brand_title'], "inline": True}
-        ],
-        "image": {"url": item['photo']['url']} if item.get('photo') else {},
-        "footer": {"text": f"ID: {item['id']}"}
-    }
-    
-    payload = {
-        "username": "Vinted Bot",
-        "embeds": [embed]
-    }
-
     try:
-        requests.post(WEBHOOK_URL, json=payload)
-        print(f"Sent alert for item {item['id']}")
+        # Safe extraction with defaults
+        price = item.get('total_item_price') or item.get('price') or "N/A"
+        currency = item.get('currency') or "EUR"
+        size = item.get('size_title', 'N/A')
+        brand = item.get('brand_title', 'N/A')
+        title = item.get('title', 'Nouvel article')
+        url = item.get('url', 'https://www.vinted.fr')
+        
+        # Photo handling
+        photo_url = None
+        if item.get('photo') and isinstance(item['photo'], dict):
+            photo_url = item['photo'].get('url')
+
+        embed = {
+            "title": title,
+            "url": url,
+            "description": f"**{price} {currency}** | Taille: **{size}**\nMarque: {brand}",
+            "color": 3447003, # Green-ish
+            "footer": {"text": "Vinted Bot"},
+            "image": {"url": photo_url} if photo_url else {}
+        }
+        
+        if photo_url:
+            embed["image"] = {"url": photo_url}
+        
+        payload = {
+            "username": "Vinted Bot",
+            "embeds": [embed]
+        }
+
+        response = requests.post(WEBHOOK_URL, json=payload)
+        response.raise_for_status()
+        print(f"Sent alert for item {item.get('id')}")
+
     except Exception as e:
-        print(f"Error sending Discord alert: {e}")
+        print(f"Error processing/sending item {item.get('id', 'unknown')}: {e}")
+        # Optional: print(json.dumps(item, indent=2))
 
 def load_last_seen_id():
     if os.path.exists(STATE_FILE):
@@ -129,3 +143,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
