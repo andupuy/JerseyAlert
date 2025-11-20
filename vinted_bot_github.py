@@ -58,44 +58,21 @@ def send_discord_alert(item):
         title = item.get('title', 'Nouvel article')
         url = item.get('url', 'https://www.vinted.fr')
         
-        # Photos
-        photos = []
-        if item.get('photos'):
-             for p in item['photos']:
-                 if isinstance(p, dict) and p.get('url'):
-                     photos.append(p['url'])
-        
-        # Fallback to single photo object if photos list is empty or missing
-        if not photos and item.get('photo') and isinstance(item['photo'], dict):
-             photos.append(item['photo'].get('url'))
+        # Photo
+        photo_url = None
+        if item.get('photo') and isinstance(item['photo'], dict):
+            photo_url = item['photo'].get('url')
 
-        photo_url_1 = photos[0] if len(photos) > 0 else None
-        photo_url_2 = photos[1] if len(photos) > 1 else None
-        
-        # Description (truncate if too long)
-        description = item.get('description', '')
-        if len(description) > 200:
-            description = description[:200] + "..."
-
-        embed1 = {
+        embed = {
             "title": title,
             "url": url,
-            "description": f"**{price} €** | Taille: **{size}**\nMarque: {brand}\n\n{description}",
+            "description": f"**{price} €** | Taille: **{size}**\nMarque: {brand}",
             "color": 3447003,
             "footer": {"text": "Vinted Bot"},
-            "image": {"url": photo_url_1} if photo_url_1 else {}
+            "image": {"url": photo_url} if photo_url else {}
         }
         
-        embeds = [embed1]
-        
-        if photo_url_2:
-            embed2 = {
-                "url": url,
-                "image": {"url": photo_url_2}
-            }
-            embeds.append(embed2)
-        
-        payload = {"username": "Vinted Bot", "embeds": embeds}
+        payload = {"username": "Vinted Bot", "embeds": [embed]}
         requests.post(WEBHOOK_URL, json=payload)
         print(f"Sent alert for item {item.get('id')}")
 
@@ -164,12 +141,7 @@ def main():
                     print(f"Found {len(new_items)} new items!")
                     # Send alerts (oldest to newest)
                     for item in reversed(new_items):
-                        # Fetch full details to get description
-                        full_item = get_item_details(session, item['id'])
-                        if full_item:
-                            send_discord_alert(full_item)
-                        else:
-                            send_discord_alert(item)  # Fallback to basic info
+                        send_discord_alert(item)
                     
                     # Update ID
                     last_seen_id = new_items[0]['id']
