@@ -79,7 +79,7 @@ def save_last_seen_id(item_id):
         f.write(str(item_id))
 
 def run_bot_loop():
-    print("Starting Vinted Bot Loop...")
+    print("Starting Vinted Bot Loop...", flush=True)
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -94,7 +94,7 @@ def run_bot_loop():
     
     while True:
         try:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking Vinted...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking Vinted...", flush=True)
             data = get_vinted_items(session)
             
             if data and 'items' in data:
@@ -102,7 +102,7 @@ def run_bot_loop():
                 if items:
                     new_items = [item for item in items if item['id'] > last_seen_id]
                     if new_items:
-                        print(f"Found {len(new_items)} new items!")
+                        print(f"Found {len(new_items)} new items!", flush=True)
                         for item in reversed(new_items):
                             send_discord_alert(item)
                         last_seen_id = new_items[0]['id']
@@ -110,7 +110,7 @@ def run_bot_loop():
             
             time.sleep(20) # Check every 20 seconds
         except Exception as e:
-            print(f"Loop error: {e}")
+            print(f"Loop error: {e}", flush=True)
             time.sleep(20)
 
 @app.route('/')
