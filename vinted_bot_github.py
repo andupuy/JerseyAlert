@@ -46,16 +46,22 @@ def get_item_details(session, item_id):
             # Clean up
             description = description.replace('\\n', '\n').replace('\\r', '').strip()
         
-        # Extract photo URLs from HTML (high quality ones)
+        # Extract photo URLs from HTML (any format)
         photos = []
-        photo_matches = re.findall(r'(https://images\d+\.vinted\.net/t/[^/]+/[^/]+/f800/[^\s"\'<>]+)', html)
+        # Try multiple patterns
+        photo_matches = re.findall(r'"(https://images\d+\.vinted\.net/t/[^"]+)"', html)
+        if not photo_matches:
+            photo_matches = re.findall(r'(https://images\d+\.vinted\.net/[^\s"\'<>]+\.jpeg)', html)
+        
         if photo_matches:
             # Deduplicate and take first 2
             seen = set()
             for url in photo_matches:
-                if url not in seen and len(photos) < 2:
-                    photos.append(url)
-                    seen.add(url)
+                # Skip thumbnails, prefer larger sizes
+                if 'f800' in url or 'f1600' in url or len(seen) == 0:
+                    if url not in seen and len(photos) < 2:
+                        photos.append(url)
+                        seen.add(url)
         
         print(f"Scraped: description={len(description)} chars, photos={len(photos)}", flush=True)
         return {'description': description, 'photos': photos}
