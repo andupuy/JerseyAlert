@@ -29,10 +29,14 @@ def get_item_details(session, item_id):
     """Fetch full details for a specific item to get description and all photos"""
     try:
         detail_url = f"https://www.vinted.fr/api/v2/items/{item_id}"
+        print(f"Fetching details from: {detail_url}")
         response = session.get(detail_url)
         response.raise_for_status()
         data = response.json()
-        return data.get('item', {})
+        item = data.get('item', {})
+        print(f"Got item with description length: {len(item.get('description', ''))}")
+        print(f"Got {len(item.get('photos', []))} photos")
+        return item
     except Exception as e:
         print(f"Error fetching item details: {e}")
         return None
