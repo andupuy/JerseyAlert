@@ -40,9 +40,12 @@ def get_item_details(session, item_id):
         description = ''
         desc_match = re.search(r'"description":"([^"]*)"', html)
         if desc_match:
-            description = desc_match.group(1)
-            # Decode unicode escapes
-            description = description.encode().decode('unicode_escape')
+            raw_desc = desc_match.group(1)
+            # Decode JSON escape sequences properly
+            try:
+                description = jsonlib.loads(f'"{raw_desc}"')
+            except:
+                description = raw_desc
             # Clean up
             description = description.replace('\\n', '\n').replace('\\r', '').strip()
         
