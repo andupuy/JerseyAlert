@@ -29,6 +29,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         # Run for 3300 seconds (55 min) with 20s interval
         # This leaves 5 min buffer before the next hourly job starts
+        # Updated: 2025-11-20 23:34 - Added full item details fetch
         run: python vinted_bot_github.py --duration 3300 --interval 20
 
       - name: Commit state (Last Seen ID)
