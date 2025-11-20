@@ -123,8 +123,8 @@ def send_discord_alert(item, scraped_data=None):
         
         embeds = [embed1]
         
-        # Add all remaining photos
-        for i in range(1, len(photos)):
+        # Add remaining photos (max 9 more, Discord limit is 10 embeds total)
+        for i in range(1, min(len(photos), 10)):
             embed_photo = {
                 "url": url,
                 "image": {"url": photos[i]}
