@@ -29,7 +29,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         # Run for 280 seconds (4m 40s) with 20s interval
         # This leaves 20s buffer before the next 5-min job starts
-        run: python vinted_bot.py --duration 280 --interval 20
+        run: python vinted_bot.py --duration 280 --interval 10
 
       - name: Commit state (Last Seen ID)
         if: always() # Always run this step even if timeout occurs
