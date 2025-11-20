@@ -32,8 +32,12 @@ def send_discord_alert(item):
 
     try:
         # Safe extraction with defaults
-        price = item.get('total_item_price') or item.get('price') or "N/A"
-        currency = item.get('currency') or "EUR"
+        raw_price = item.get('total_item_price') or item.get('price') or "N/A"
+        if isinstance(raw_price, dict):
+            price = raw_price.get('amount', 'N/A')
+        else:
+            price = raw_price
+
         size = item.get('size_title', 'N/A')
         brand = item.get('brand_title', 'N/A')
         title = item.get('title', 'Nouvel article')
@@ -47,7 +51,7 @@ def send_discord_alert(item):
         embed = {
             "title": title,
             "url": url,
-            "description": f"**{price} {currency}** | Taille: **{size}**\nMarque: {brand}",
+            "description": f"**{price} €** | Taille: **{size}**\nMarque: {brand}",
             "color": 3447003, # Green-ish
             "footer": {"text": "Vinted Bot"},
             "image": {"url": photo_url} if photo_url else {}
