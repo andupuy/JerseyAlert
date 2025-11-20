@@ -54,12 +54,12 @@ def get_item_details(session, item_id):
             photo_matches = re.findall(r'(https://images\d+\.vinted\.net/[^\s"\'<>]+\.jpeg)', html)
         
         if photo_matches:
-            # Deduplicate and take first 2
+            # Deduplicate and take all photos
             seen = set()
             for url in photo_matches:
                 # Skip thumbnails, prefer larger sizes
                 if 'f800' in url or 'f1600' in url or len(seen) == 0:
-                    if url not in seen and len(photos) < 2:
+                    if url not in seen:
                         photos.append(url)
                         seen.add(url)
         
@@ -123,13 +123,13 @@ def send_discord_alert(item, scraped_data=None):
         
         embeds = [embed1]
         
-        # Add second photo if available
-        if len(photos) > 1:
-            embed2 = {
+        # Add all remaining photos
+        for i in range(1, len(photos)):
+            embed_photo = {
                 "url": url,
-                "image": {"url": photos[1]}
+                "image": {"url": photos[i]}
             }
-            embeds.append(embed2)
+            embeds.append(embed_photo)
         
         payload = {"username": "Vinted Bot", "embeds": embeds}
         requests.post(WEBHOOK_URL, json=payload)
