@@ -117,15 +117,22 @@ def run_bot_loop():
 def home():
     return "Vinted Bot is Alive!"
 
+# Start bot in background thread immediately when file is loaded
+print("--- SYSTEM STARTUP (Global Scope) ---")
+try:
+    # Check if thread is already running to avoid duplicates with Gunicorn workers
+    if not any(t.name == 'VintedBotThread' for t in threading.enumerate()):
+        print("Launching Bot Thread...")
+        thread = threading.Thread(target=run_bot_loop, name='VintedBotThread')
+        thread.daemon = True
+        thread.start()
+        print("Bot Thread Launched!")
+    else:
+        print("Bot Thread already running.")
+except Exception as e:
+    print(f"Failed to start thread: {e}")
+
 if __name__ == "__main__":
-    print("--- SYSTEM STARTUP ---")
-    # Start bot in background thread
-    print("Launching Bot Thread...")
-    thread = threading.Thread(target=run_bot_loop)
-    thread.daemon = True
-    thread.start()
-    print("Bot Thread Launched!")
-    
     # Start web server (needed for Render/UptimeRobot)
     port = int(os.environ.get("PORT", 5000))
     print(f"Starting Flask Server on port {port}...")
