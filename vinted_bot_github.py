@@ -26,22 +26,43 @@ def get_vinted_items(session):
         return None
 
 def get_item_details(session, item_id):
-    """Fetch full details for a specific item to get description and all photos"""
+    """Scrape item page to get description and all photos"""
     try:
-        detail_url = f"https://www.vinted.fr/api/v2/items/{item_id}"
-        print(f"Fetching details from: {detail_url}")
-        response = session.get(detail_url)
+        import re
+        detail_url = f"https://www.vinted.fr/items/{item_id}"
+        print(f"Scraping: {detail_url}", flush=True)
+        response = session.get(detail_url, timeout=10)
         response.raise_for_status()
-        data = response.json()
-        item = data.get('item', {})
-        print(f"Got item with description length: {len(item.get('description', ''))}")
-        print(f"Got {len(item.get('photos', []))} photos")
-        return item
+        html = response.text
+        
+        # Extract description from HTML
+        description = ''
+        desc_match = re.search(r'<div[^>]*itemprop="description"[^>]*>(.*?)</div>', html, re.DOTALL)
+        if desc_match:
+            description = desc_match.group(1).strip()
+            # Remove HTML tags
+            description = re.sub(r'<[^>]+>', '', description)
+            description = description.replace('&nbsp;', ' ').strip()
+        
+        # Extract photo URLs from HTML
+        photos = []
+        photo_matches = re.findall(r'"url":"(https://images\d+\.vinted\.net/[^"]+)"', html)
+        if photo_matches:
+            # Deduplicate and take first 3
+            seen = set()
+            for url in photo_matches:
+                if url not in seen and len(photos) < 3:
+                    photos.append(url)
+                    seen.add(url)
+        
+        print(f"Scraped: description={len(description)} chars, photos={len(photos)}", flush=True)
+        return {'description': description, 'photos': photos}
     except Exception as e:
-        print(f"Error fetching item details: {e}")
+        print(f"Error scraping item: {e}", flush=True)
         return None
 
-def send_discord_alert(item):
+
+def send_discord_alert(item, scraped_data=None):
     if not WEBHOOK_URL:
         print("No Discord Webhook URL set. Skipping notification.")
         return
@@ -58,21 +79,50 @@ def send_discord_alert(item):
         title = item.get('title', 'Nouvel article')
         url = item.get('url', 'https://www.vinted.fr')
         
-        # Photo
-        photo_url = None
-        if item.get('photo') and isinstance(item['photo'], dict):
-            photo_url = item['photo'].get('url')
+        # Use scraped data if available
+        description = ''
+        photos = []
+        
+        if scraped_data:
+            description = scraped_data.get('description', '')
+            photos = scraped_data.get('photos', [])
+        
+        # Fallback to basic photo if no scraped photos
+        if not photos:
+            if item.get('photo') and isinstance(item['photo'], dict):
+                photo_url = item['photo'].get('url')
+                if photo_url:
+                    photos.append(photo_url)
+        
+        # Truncate description
+        if len(description) > 200:
+            description = description[:200] + "..."
+        
+        # Build description text
+        desc_text = f"**{price} €** | Taille: **{size}**\nMarque: {brand}"
+        if description:
+            desc_text += f"\n\n{description}"
 
-        embed = {
+        embed1 = {
             "title": title,
             "url": url,
-            "description": f"**{price} €** | Taille: **{size}**\nMarque: {brand}",
+            "description": desc_text,
             "color": 3447003,
             "footer": {"text": "Vinted Bot"},
-            "image": {"url": photo_url} if photo_url else {}
+            "image": {"url": photos[0]} if len(photos) > 0 else {}
         }
         
-        payload = {"username": "Vinted Bot", "embeds": [embed]}
+        embeds = [embed1]
+        
+        # Add second photo if available
+        if len(photos) > 1:
+            embed2 = {
+                "url": url,
+                "image": {"url": photos[1]}
+            }
+            embeds.append(embed2)
+        
+        payload = {"username": "Vinted Bot", "embeds": embeds}
         requests.post(WEBHOOK_URL, json=payload)
         print(f"Sent alert for item {item.get('id')}")
 
@@ -141,7 +191,9 @@ def main():
                     print(f"Found {len(new_items)} new items!")
                     # Send alerts (oldest to newest)
                     for item in reversed(new_items):
-                        send_discord_alert(item)
+                        # Try to scrape details
+                        scraped = get_item_details(session, item['id'])
+                        send_discord_alert(item, scraped)
                     
                     # Update ID
                     last_seen_id = new_items[0]['id']
