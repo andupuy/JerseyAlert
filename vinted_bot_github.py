@@ -42,20 +42,44 @@ def send_discord_alert(item):
         title = item.get('title', 'Nouvel article')
         url = item.get('url', 'https://www.vinted.fr')
         
-        photo_url = None
-        if item.get('photo') and isinstance(item['photo'], dict):
-            photo_url = item['photo'].get('url')
+        # Photos
+        photos = []
+        if item.get('photos'):
+             for p in item['photos']:
+                 if isinstance(p, dict) and p.get('url'):
+                     photos.append(p['url'])
+        
+        # Fallback to single photo object if photos list is empty or missing
+        if not photos and item.get('photo') and isinstance(item['photo'], dict):
+             photos.append(item['photo'].get('url'))
 
-        embed = {
+        photo_url_1 = photos[0] if len(photos) > 0 else None
+        photo_url_2 = photos[1] if len(photos) > 1 else None
+        
+        # Description (truncate if too long)
+        description = item.get('description', '')
+        if len(description) > 200:
+            description = description[:200] + "..."
+
+        embed1 = {
             "title": title,
             "url": url,
-            "description": f"**{price} €** | Taille: **{size}**\nMarque: {brand}",
+            "description": f"**{price} €** | Taille: **{size}**\nMarque: {brand}\n\n{description}",
             "color": 3447003,
             "footer": {"text": "Vinted Bot"},
-            "image": {"url": photo_url} if photo_url else {}
+            "image": {"url": photo_url_1} if photo_url_1 else {}
         }
         
-        payload = {"username": "Vinted Bot", "embeds": [embed]}
+        embeds = [embed1]
+        
+        if photo_url_2:
+            embed2 = {
+                "url": url,
+                "image": {"url": photo_url_2}
+            }
+            embeds.append(embed2)
+        
+        payload = {"username": "Vinted Bot", "embeds": embeds}
         requests.post(WEBHOOK_URL, json=payload)
         print(f"Sent alert for item {item.get('id')}")
 
