@@ -25,6 +25,18 @@ def get_vinted_items(session):
         print(f"Error fetching data: {e}")
         return None
 
+def get_item_details(session, item_id):
+    """Fetch full details for a specific item to get description and all photos"""
+    try:
+        detail_url = f"https://www.vinted.fr/api/v2/items/{item_id}"
+        response = session.get(detail_url)
+        response.raise_for_status()
+        data = response.json()
+        return data.get('item', {})
+    except Exception as e:
+        print(f"Error fetching item details: {e}")
+        return None
+
 def send_discord_alert(item):
     if not WEBHOOK_URL:
         print("No Discord Webhook URL set. Skipping notification.")
@@ -148,7 +160,12 @@ def main():
                     print(f"Found {len(new_items)} new items!")
                     # Send alerts (oldest to newest)
                     for item in reversed(new_items):
-                        send_discord_alert(item)
+                        # Fetch full details to get description
+                        full_item = get_item_details(session, item['id'])
+                        if full_item:
+                            send_discord_alert(full_item)
+                        else:
+                            send_discord_alert(item)  # Fallback to basic info
                     
                     # Update ID
                     last_seen_id = new_items[0]['id']
