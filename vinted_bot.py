@@ -118,11 +118,15 @@ def home():
     return "Vinted Bot is Alive!"
 
 if __name__ == "__main__":
+    print("--- SYSTEM STARTUP ---")
     # Start bot in background thread
+    print("Launching Bot Thread...")
     thread = threading.Thread(target=run_bot_loop)
     thread.daemon = True
     thread.start()
+    print("Bot Thread Launched!")
     
     # Start web server (needed for Render/UptimeRobot)
     port = int(os.environ.get("PORT", 5000))
+    print(f"Starting Flask Server on port {port}...")
     app.run(host='0.0.0.0', port=port)
