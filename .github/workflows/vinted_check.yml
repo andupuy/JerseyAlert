@@ -38,4 +38,20 @@ jobs:
           git config --global user.name 'Vinted Bot'
           git config --global user.email 'bot@noreply.github.com'
           git add last_seen_id.txt
-          git diff --quiet && git diff --staged --quiet || (git stash && git pull --rebase && git stash pop && git add last_seen_id.txt && (git diff --quiet && git diff --staged --quiet || (git commit -m "Update last seen ID" && git push)))
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git stash
+            git pull --rebase origin main || {
+              # If conflict, take the remote version (it's newer)
+              git checkout --theirs last_seen_id.txt
+              git add last_seen_id.txt
+              git rebase --continue
+            }
+            git stash pop || true
+            git add last_seen_id.txt
+            if ! git diff --quiet || ! git diff --staged --quiet; then
+              git commit -m "Update last seen ID"
+              git push
+            fi
+          fi
