@@ -3,6 +3,7 @@ import requests
 import json
 import time
 import argparse
+import random
 from datetime import datetime
 
 # Configuration
@@ -30,6 +31,8 @@ def get_item_details(session, item_id):
     try:
         import re
         import json as jsonlib
+        # Random delay before scraping (0.5 to 2 seconds)
+        time.sleep(random.uniform(0.5, 2))
         detail_url = f"https://www.vinted.fr/items/{item_id}"
         print(f"Scraping: {detail_url}", flush=True)
         response = session.get(detail_url, timeout=10)
@@ -215,8 +218,9 @@ def main():
             else:
                 print("No items returned.")
         
-        # Wait for next interval
-        time.sleep(args.interval)
+        # Wait for next interval with random variation (±5 seconds)
+        delay = args.interval + random.uniform(-5, 5)
+        time.sleep(max(5, delay))  # Minimum 5 seconds
 
 if __name__ == "__main__":
     main()
