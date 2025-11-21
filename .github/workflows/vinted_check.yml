@@ -2,13 +2,13 @@ name: Vinted Alert
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs every hour
+    - cron: '*/15 * * * *' # Runs every 15 minutes
   workflow_dispatch: # Allows manual trigger
 
 jobs:
   check-vinted:
     runs-on: ubuntu-latest
-    timeout-minutes: 60 # Safety timeout
+    timeout-minutes: 20 # Safety timeout
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -27,10 +27,10 @@ jobs:
       - name: Run Vinted Bot (Loop Mode)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        # Run for 3300 seconds (55 min) with 20s interval
-        # This leaves 5 min buffer before the next hourly job starts
-        # Updated: 2025-11-20 23:34 - Added full item details fetch
-        run: python vinted_bot_github.py --duration 3300 --interval 20
+        # Run for 720 seconds (12 min) with 20s interval
+        # This leaves 3 min buffer before the next 15-min cycle starts
+        # Shorter cycles to avoid Vinted's 20-min detection threshold
+        run: python vinted_bot_github.py --duration 720 --interval 20
 
       - name: Commit state (Last Seen ID)
         if: always() # Always run this step even if timeout occurs
