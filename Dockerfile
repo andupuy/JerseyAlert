@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Sun Dec 29 00:10:30 CET 2025 (STATUS FIX)
+# Force Update Sun Dec 29 00:14:52 CET 2025 (UNIVERSAL PARSER)
