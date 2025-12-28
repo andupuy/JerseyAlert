@@ -211,26 +211,31 @@ def extract_items_from_page(page):
                                 "neuf avec étiquette", "neuf sans étiquette", "très bon état", 
                                 "bon état", "satisfaisant", "jamais porté"
                             ];
-                            
-                            // On cherche n'importe quel texte qui contient un de ces états
                             const stateText = uniqueTexts.find(t => 
                                 statusKeywords.some(kw => t.toLowerCase().includes(kw))
                             );
-                            
                             if (stateText) {
-                                // On extrait juste la partie qui nous intéresse
                                 const found = statusKeywords.find(kw => stateText.toLowerCase().includes(kw));
-                                if (found) {
-                                    status = found.charAt(0).toUpperCase() + found.slice(1);
-                                }
+                                if (found) status = found.charAt(0).toUpperCase() + found.slice(1);
                             }
                         }
 
-                        // 5. Heuristique "Taille" de secours
-                        if (size === 'N/A') {
-                             const sizeLine = uniqueTexts.find(t => /^(XS|S|M|L|XL|XXL|[0-9]{2})$/i.test(t));
-                             if (sizeLine) size = sizeLine;
+                        // 5. Heuristique "Marque" de secours (Nettoyée)
+                        if (brand === 'N/A') {
+                             const ignored = ['vinted', 'enlevé', 'nouveau', 'neuf', '€', 'recommandé', 'boosté', 'protection'];
+                             const potentialBrand = uniqueTexts.find(t => {
+                                 const low = t.toLowerCase();
+                                 return t.length > 2 && t.length < 20 && 
+                                        !ignored.some(i => low.includes(i)) &&
+                                        !/^(XS|S|M|L|XL|XXL|[0-9]{2})$/i.test(t) &&
+                                        !t.includes('€');
+                             });
+                             if (potentialBrand) brand = potentialBrand;
                         }
+
+                        // 6. Nettoyage final du Titre
+                        title = title.replace(/enlevé\\s*!/i, '').replace(/\\s*,\\s*$/, '').trim();
+                        if (!title || title.length < 3) title = 'Maillot ASSE';
 
                         const imgEl = el.querySelector('img');
                         const photo = imgEl?.src || '';
@@ -315,7 +320,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.0 PREMIUM (ULTIMATE MATCH)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.1 PREMIUM (CLEAN TITLES)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
