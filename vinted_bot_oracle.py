@@ -214,30 +214,43 @@ def run_bot():
     log(f"📌 Dernier ID vu: {last_seen_id}")
     
     with sync_playwright() as p:
-        # Lancer le navigateur en mode headless
+        # Lancer le navigateur en mode headless optimisé
         browser = p.chromium.launch(
             headless=True,
             args=[
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled'
+                '--disable-dev-shm-usage', # Indispensable sur Docker/Railway
+                '--disable-blink-features=AutomationControlled',
+                '--disable-gpu' # Économie RAM
             ]
         )
         
         # Créer un contexte avec un user agent réaliste
         context = browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            viewport={'width': 1920, 'height': 1080},
+            viewport={'width': 1280, 'height': 720}, # Résolution plus petite = moins de RAM
             locale='fr-FR',
             timezone_id='Europe/Paris'
         )
         
+        # Bloquer les ressources inutiles pour économiser la RAM et la bande passante
+        def block_resources(route):
+            if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
+                # On laisse passer les images Vinted si on est sur une page détail, sinon on bloque
+                # Mais pour la recherche, on bloque tout
+                route.abort()
+            else:
+                route.continue_()
+
         # Initialisation intelligente (Anti-Spam au redémarrage)
         if last_seen_id == 0:
             log("🚀 Premier lancement (ou redémarrage Railway). Initialisation du dernier ID...")
             try:
                 page = context.new_page()
+                # On bloque tout pour l'init, c'est juste pour avoir l'ID
+                page.route("**/*", block_resources) 
+                
                 page.goto(VINTED_SEARCH_URL, wait_until='domcontentloaded', timeout=30000)
                 items = extract_items_from_page(page)
                 if items:
@@ -254,35 +267,32 @@ def run_bot():
             except Exception as e:
                 log(f"❌ Erreur lors de l'initialisation: {e}")
 
-        page = context.new_page()
-        
-        # Masquer le fait qu'on utilise Playwright
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        """)
-        
-        log("✅ Navigateur initialisé")
+        log("✅ Navigateur initialisé (Mode Éco)")
         
         iteration = 0
 
         
         try:
             while True:
-                # Gestion des heures de sommeil (Économie Railway)
-                # De 23h00 à 08h00, le bot s'arrête COMPLÈTEMENT pour économiser les crédits
+                # Gestion des heures de sommeil
                 current_hour = datetime.now().hour
                 if current_hour >= 23 or current_hour < 8:
                     log("🌙 Il est tard. Arrêt planifié pour économiser les crédits Railway.")
-                    log("💤 Le bot va crasher volontairement pour arrêter le conteneur.")
-                    sys.exit(1) # Quitter avec erreur pour forcer l'arrêt
-
+                    log("💤 Le bot va crasher volontairement.")
+                    sys.exit(1)
 
                 iteration += 1
                 log(f"\n{'='*50}")
                 log(f"🔄 Vérification #{iteration}")
                 
+                # NOUVEAU: On crée une page fraîche à CHAQUE vérification
+                # C'est la seule façon de garantir 0 fuite mémoire sur le long terme
+                page = context.new_page()
+                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                # On bloque les images/css pour la recherche (ça va 2x plus vite)
+                page.route("**/*", block_resources)
+
                 try:
                     # Charger la page de recherche
                     page.goto(VINTED_SEARCH_URL, wait_until='domcontentloaded', timeout=30000)
@@ -290,36 +300,33 @@ def run_bot():
                     # Extraire les articles
                     items = extract_items_from_page(page)
                     
+                    # On ferme la page tout de suite pour libérer la RAM
+                    page.close()
+                    
                     if items:
                         log(f"📦 {len(items)} articles trouvés")
                         
-                        # Filtrer les VRAIS nouveaux articles (ceux qu'on n'a jamais vus)
-                        # On utilise un set pour vérifier l'existence instantanément
+                        # Filtrer les VRAIS nouveaux articles
                         new_items = []
                         for item in items:
                             if item['id'] not in seen_ids:
                                 new_items.append(item)
                                 seen_ids.add(item['id'])
                         
-                        # Nettoyer le cache si trop gros pour garder de la RAM
-                        # On garde les 200 derniers ID seulement
+                        # Nettoyer cache
                         if len(seen_ids) > 200:
-                             # On garde les 200 plus récents (ceux qui sont aussi dans items si possible, sinon au hasard)
-                             # En fait, le plus simple est de tout reset sauf les items actuels si ça déborde trop
-                             pass 
+                             seen_ids_list = list(seen_ids)
+                             seen_ids = set(seen_ids_list[-100:])
 
                         if new_items:
                             log(f"🆕 {len(new_items)} nouveaux articles!")
-                            
-                            # Trier par ID croissant
                             new_items.sort(key=lambda x: x['id'])
                             
                             for item in new_items:
+                                # send_discord_alert crée sa propre page pour les détails
                                 send_discord_alert(context, item)
-                                # Petit délai entre les notifications
                                 time.sleep(1)
                             
-                            # Mettre à jour le dernier ID (pour le fichier de persistance)
                             if new_items:
                                 save_last_seen_id(max(item['id'] for item in new_items))
 
@@ -330,9 +337,11 @@ def run_bot():
                     
                 except Exception as e:
                     log(f"❌ Erreur lors de la vérification: {e}")
-
+                    # En cas d'erreur, on s'assure que la page est fermée
+                    try: page.close()
+                    except: pass
                 
-                # Attendre un délai aléatoire avant la prochaine vérification
+                # Attendre un délai aléatoire
                 wait_time = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
                 log(f"⏳ Prochaine vérification dans {wait_time:.1f}s")
                 time.sleep(wait_time)
