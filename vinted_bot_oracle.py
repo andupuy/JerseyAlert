@@ -44,57 +44,64 @@ def save_last_seen_id(item_id):
         f.write(str(item_id))
 
 def scrape_item_details(page, item_url):
-    """Va sur la page de l'article pour récupérer infos détaillées (Stratégie Hybride DOM + Regex)"""
+    """Va sur la page de l'article pour récupérer infos détaillées via __NEXT_DATA__ (V2.5 Ultimate)"""
     try:
         log(f"🔎 Scraping détails: {item_url}")
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
         
-        # 1. Récupération du contenu HTML brut
-        html_content = page.content()
-        page_title = page.title()
-        log(f"📄 Titre de la page: {page_title}")
-        
-        # Debug: Vérifier la présence du JSON
-        if '"brand_title":' in html_content:
-            log("✅ JSON 'brand_title' trouvé dans le source")
-        else:
-            log("❌ JSON 'brand_title' INTROUVABLE dans le source")
-            log(f"🔍 Début du source (500 chars): {html_content[:500]}")
-        
-        # 2. Stratégie Regex (Plus fiable car lit les données brutes JSON cachées)
-        import re
-        
-        brand = 'N/A'
-        brand_match = re.search(r'"brand_title":"([^"]+)"', html_content)
-        if brand_match: brand = brand_match.group(1)
-        
-        size = 'N/A'
-        size_match = re.search(r'"size_title":"([^"]+)"', html_content)
-        if size_match: size = size_match.group(1)
-        
-        status = 'N/A'
-        status_match = re.search(r'"status_title":"([^"]+)"', html_content)
-        if status_match: status = status_match.group(1)
-        
-        description = ''
-        desc_match = re.search(r'"description":"([^"]*)"', html_content)
-        if desc_match:
-            # Nettoyer un peu le JSON escape
-            description = desc_match.group(1).replace('\\n', '\n').replace('\\"', '"')
-
-        # 3. Récupération des photos (Le DOM marche bien pour ça)
+        # Récupération des photos (DOM, ça marche toujours bien)
         photos = page.evaluate("""() => {
             const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
             return imgs.map(img => img.src).filter(src => src);
         }""")
         photos = list(dict.fromkeys(photos))
 
-        # 4. Fallback DOM si le Regex a échoué (Ceinture et bretelles)
-        if brand == 'N/A':
-             # ... ancien code DOM ...
-             pass
+        # Stratégie NEXT.js : Lire le gros JSON d'état
+        import json
         
-        log(f"✅ Détails trouvés: {brand} | {size} | {status}")
+        raw_json = page.evaluate("""() => {
+            const script = document.getElementById('__NEXT_DATA__');
+            return script ? script.innerText : null;
+        }""")
+        
+        description = ""
+        brand = "N/A"
+        size = "N/A"
+        status = "N/A"
+        
+        if raw_json:
+            try:
+                data = json.loads(raw_json)
+                # Structure typique Vinted: props -> pageProps -> item
+                item_data = data.get('props', {}).get('pageProps', {}).get('item', {})
+                
+                if item_data:
+                    log("✅ JSON Next.js trouvé et parsé !")
+                    description = item_data.get('description', '')
+                    brand = item_data.get('brand', 'N/A') # Parfois c'est un objet, parfois string
+                    if isinstance(brand, dict): brand = brand.get('title', 'N/A')
+                    
+                    size = item_data.get('size', 'N/A')
+                    if isinstance(size, dict): size = size.get('title', 'N/A')
+                    
+                    status = item_data.get('status', 'N/A')
+                    if isinstance(status, dict): status = status.get('title', 'N/A')
+                    
+                else:
+                    log("⚠️ JSON trouvé mais structure 'item' manquante")
+            except Exception as e:
+                log(f"⚠️ Erreur parsing JSON Next.js: {e}")
+        else:
+             log("❌ Script __NEXT_DATA__ introuvable")
+
+        # Fallback pour la description si JSON vide
+        if not description:
+             description = page.evaluate("""() => {
+                const descEl = document.querySelector('[itemprop="description"]');
+                return descEl ? descEl.innerText : '';
+            }""")
+        
+        log(f"✅ Détails finaux: {brand} | {size} | {status}")
         
         return {
             "description": description,
@@ -228,7 +235,7 @@ def extract_items_from_page(page):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.4 PREMIUM (JSON/REGEX STRATEGY)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.5 PREMIUM (NEXT.JS DATA MINING)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     

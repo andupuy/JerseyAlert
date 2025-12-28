@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Sun Dec 28 23:36:20 CET 2025 (DEBUG MODE)
+# Force Update Sun Dec 28 23:42:20 CET 2025 (NEXT.JS FIX)
