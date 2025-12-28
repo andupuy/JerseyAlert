@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python", "main.py"]
-# Force Update Sun Dec 28 23:17:49 CET 2025 (Memory Fix)
+# Force Update Sun Dec 28 23:23:38 CET 2025 (Details Fix)

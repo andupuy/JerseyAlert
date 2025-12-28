@@ -44,7 +44,7 @@ def save_last_seen_id(item_id):
         f.write(str(item_id))
 
 def scrape_item_details(page, item_url):
-    """Va sur la page de l'article pour récupérer plus de photos et la description"""
+    """Va sur la page de l'article pour récupérer infos détaillées"""
     try:
         log(f"🔎 Scraping détails: {item_url}")
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
@@ -55,33 +55,53 @@ def scrape_item_details(page, item_url):
             return descEl ? descEl.innerText : '';
         }""")
         
-        # Récupérer les photos (haute résolution si possible)
+        # Récupérer les photos
         photos = page.evaluate("""() => {
             const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
             return imgs.map(img => img.src).filter(src => src);
         }""")
+        photos = list(dict.fromkeys(photos))
+
+        # Récupérer Marque / Taille / État depuis les attributs (Tableau)
+        details_extra = page.evaluate("""() => {
+            const result = {brand: 'N/A', size: 'N/A', status: 'N/A'};
+            
+            // Chercher dans les divs qui contiennent les labels
+            const labels = Array.from(document.querySelectorAll('.details-list__item-title'));
+            
+            labels.forEach(label => {
+                const text = label.innerText.trim().toLowerCase();
+                const valueEl = label.nextElementSibling;
+                if (!valueEl) return;
+                const value = valueEl.innerText.trim();
+                
+                if (text.includes('marque') || text.includes('brand')) result.brand = value;
+                if (text.includes('taille') || text.includes('size')) result.size = value;
+                if (text.includes('état') || text.includes('condition')) result.status = value;
+            });
+            return result;
+        }""")
         
-        # Nettoyage et déduplication
-        photos = list(dict.fromkeys(photos)) # Dedup tout en gardant l'ordre
-        
-        return {"description": description, "photos": photos}
+        return {
+            "description": description,
+            "photos": photos,
+            "brand": details_extra['brand'],
+            "size": details_extra['size'],
+            "status": details_extra['status']
+        }
     except Exception as e:
         log(f"⚠️ Erreur scraping détails: {e}")
-        return {"description": "", "photos": []}
+        return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
 def send_discord_alert(context, item):
-    """Envoie une alerte Discord pour un nouvel article avec détails complets"""
-    if not DISCORD_WEBHOOK_URL:
-        log("⚠️  Pas de webhook Discord configuré")
-        return
+    """Envoie une alerte Discord"""
+    if not DISCORD_WEBHOOK_URL: return
 
-    # On utilise une nouvelle page pour les détails pour ne pas perdre la recherche
-    details = {"description": "", "photos": []}
+    # Scraping détails
+    details = {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
     try:
         detail_page = context.new_page()
-        # Masquer Playwright sur cette page aussi
         detail_page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
         details = scrape_item_details(detail_page, item['url'])
         detail_page.close()
     except Exception as e:
@@ -90,22 +110,21 @@ def send_discord_alert(context, item):
     try:
         title = item.get('title', 'Nouvel article')
         price = item.get('price', 'N/A')
-        size = item.get('size', 'N/A')
-        brand = item.get('brand', 'N/A')
         url = item.get('url', '')
         item_id = item.get('id', 'N/A')
         
-        # Utiliser les photos détaillées sinon la photo de base
+        # On utilise les infos précises du scraping
+        brand = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
+        size = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
+        status = details['status']
+        
         photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
         description = details['description']
 
-        # Limiter la description
-        if len(description) > 300:
-            description = description[:300] + "..."
+        if len(description) > 300: description = description[:300] + "..."
 
-        description_text = f"**{price}** | Taille: **{size}**\nMarque: {brand}\n\n{description}"
+        description_text = f"**{price}** | Taille: **{size}**\nMarque: **{brand}**\nÉtat: {status}\n\n{description}"
 
-        # Premier embed (Principal)
         embed1 = {
             "title": f"🔔 {title}",
             "url": url,
@@ -117,26 +136,16 @@ def send_discord_alert(context, item):
         }
         
         embeds = [embed1]
-        
-        # Ajouter les autres photos (max 3 de plus pour ne pas spammer, Discord accepte jusqu'à 10 mais 4 total c'est bien)
         for photo_url in photos[1:4]:
-            embeds.append({
-                "url": url,
-                "image": {"url": photo_url}
-            })
+            embeds.append({"url": url, "image": {"url": photo_url}})
 
-        payload = {
-            "username": "Vinted ASSE Bot",
-            "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
-            "embeds": embeds
-        }
+        payload = {"username": "Vinted ASSE Bot", "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", "embeds": embeds}
         
-        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        response.raise_for_status()
-        log(f"✅ Alerte envoyée pour l'article #{item_id} ({len(photos)} photos)")
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        log(f"✅ Alerte envoyée #{item_id}")
 
     except Exception as e:
-        log(f"❌ Erreur lors de l'envoi Discord: {e}")
+        log(f"❌ Erreur Discord: {e}")
 
 def extract_items_from_page(page):
     """Extrait les articles de la page Vinted avec Playwright"""
@@ -205,7 +214,7 @@ def extract_items_from_page(page):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.0 PREMIUM (MULTI-PHOTOS)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.1 PREMIUM (DETAILS+PHOTOS)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
