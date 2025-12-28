@@ -205,50 +205,31 @@ def extract_items_from_page(page):
                             size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
                         }
 
-                        console.log(`[DEBUG ITEM ${itemId}] Texts found: ` + JSON.stringify(uniqueTexts));
-
-                        // 4. Heuristique "Séparateur Taille/État" (V5.7 Robust)
-                        // On cherche une ligne qui contient un séparateur (Point médian \u00B7, Tiret, Barre, Puce)
-                        const separatorRegex = /[\u00B7\-\|•]/;
-                        const separatorLine = uniqueTexts.find(t => separatorRegex.test(t) && t.length < 45);
-                        
-                        if (separatorLine) {
-                            const match = separatorLine.match(separatorRegex);
-                            const sep = match[0];
-                            const parts = separatorLine.split(sep);
+                        // 4. Heuristique "État" ULTIME (Recherche directe de mots-clés)
+                        if (status === 'Non spécifié') {
+                            const statusKeywords = [
+                                "neuf avec étiquette", "neuf sans étiquette", "très bon état", 
+                                "bon état", "satisfaisant", "jamais porté"
+                            ];
                             
-                            if (parts.length >= 2) {
-                                const left = parts[0].trim();
-                                const right = parts[1].trim();
-                                
-                                console.log(`[DEBUG SPLIT] Sep: "${sep}", Left: "${left}", Right: "${right}"`);
-
-                                if ((size === 'N/A' || size.length > 5) && left.length < 15) {
-                                     size = left;
-                                }
-                                
-                                if (status === 'Non spécifié') {
-                                    const statusKeywords = /(neuf|état|porté|satisfaisant)/i;
-                                    if (statusKeywords.test(right)) status = right;
-                                    else if (statusKeywords.test(left)) status = left;
+                            // On cherche n'importe quel texte qui contient un de ces états
+                            const stateText = uniqueTexts.find(t => 
+                                statusKeywords.some(kw => t.toLowerCase().includes(kw))
+                            );
+                            
+                            if (stateText) {
+                                // On extrait juste la partie qui nous intéresse
+                                const found = statusKeywords.find(kw => stateText.toLowerCase().includes(kw));
+                                if (found) {
+                                    status = found.charAt(0).toUpperCase() + found.slice(1);
                                 }
                             }
                         }
 
-                        // 5. Heuristique "État" (Recherche Mots Clés Large)
-                        if (status === 'Non spécifié') {
-                            // On cherche n'importe quel texte contenant un état connu
-                            // On retire le '^' pour chercher n'importe où dans la chaine
-                            const statusRegex = /(neuf avec étiquette|neuf sans étiquette|très bon état|bon état|satisfaisant|jamais porté)/i;
-                            
-                            const hiddenStatus = uniqueTexts.find(t => statusRegex.test(t));
-                            if (hiddenStatus) {
-                                // On ne prend que la partie qui matche l'état pour éviter d'avoir "L · Très bon état" complet
-                                const match = hiddenStatus.match(statusRegex);
-                                if (match) status = match[0].trim(); // On garde "Très bon état" tout court
-                                // On met la première lettre en majuscule pour faire propre
-                                status = status.charAt(0).toUpperCase() + status.slice(1);
-                            }
+                        // 5. Heuristique "Taille" de secours
+                        if (size === 'N/A') {
+                             const sizeLine = uniqueTexts.find(t => /^(XS|S|M|L|XL|XXL|[0-9]{2})$/i.test(t));
+                             if (sizeLine) size = sizeLine;
                         }
 
                         const imgEl = el.querySelector('img');
@@ -334,7 +315,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.9 PREMIUM (TOTAL SCAN)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.0 PREMIUM (ULTIMATE MATCH)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
