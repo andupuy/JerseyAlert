@@ -1,23 +1,13 @@
-FROM python:3.9-slim
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
 
-# Installation des dépendances système pour Playwright
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
 # Copie des fichiers
-WORKDIR /app
-COPY requirements.txt requirements.txt
+COPY requirements.txt .
 COPY vinted_bot_oracle.py main.py
 
-# Installation des dépendances Python
+# Installation des dépendances Python supplémentaires
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Installation des navigateurs Playwright
-RUN playwright install chromium
-RUN playwright install-deps chromium
 
 # Commande de démarrage
 CMD ["python", "main.py"]
-# Force rebuild
