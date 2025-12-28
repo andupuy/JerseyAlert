@@ -8,6 +8,7 @@ Vinted Bot optimisé pour Oracle Cloud
 """
 
 import os
+import sys
 import time
 import random
 import requests
@@ -193,6 +194,15 @@ def run_bot():
         
         try:
             while True:
+                # Gestion des heures de sommeil (Économie Railway)
+                # De 23h00 à 08h00, le bot s'arrête COMPLÈTEMENT pour économiser les crédits
+                current_hour = datetime.now().hour
+                if current_hour >= 23 or current_hour < 8:
+                    log("🌙 Il est tard. Arrêt planifié pour économiser les crédits Railway.")
+                    log("💤 Le bot va crasher volontairement pour arrêter le conteneur.")
+                    sys.exit(1) # Quitter avec erreur pour forcer l'arrêt
+
+
                 iteration += 1
                 log(f"\n{'='*50}")
                 log(f"🔄 Vérification #{iteration}")

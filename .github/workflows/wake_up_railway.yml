@@ -1,0 +1,22 @@
+name: Wake Up Railway Bot
+on:
+  schedule:
+    # 07:00 UTC = 08:00 Paris (Hiver) / 09:00 Paris (Été)
+    - cron: '0 7 * * *'
+  workflow_dispatch: # Permet de le lancer manuellement si besoin
+
+jobs:
+  wake-up:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger Railway Redeploy
+        run: |
+          git config --global user.name 'Railway Waker'
+          git config --global user.email 'bot@noreply.github.com'
+          git commit --allow-empty -m "⏰ Wake up Bot! (Daily Restart)"
+          git push
