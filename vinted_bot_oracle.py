@@ -201,15 +201,14 @@ def extract_items_from_page(page):
                             size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
                         }
 
-                        console.log(`[DEBUG ITEM ${itemId}] Texts found:`, uniqueTexts);
+                        console.log(`[DEBUG ITEM ${itemId}] Texts found: ` + JSON.stringify(uniqueTexts));
 
-                        // 4. Heuristique "Séparateur Taille/État" (V5.6 Robust Regex)
-                        // On cherche une ligne qui contient un séparateur type point, tiret ou barre
-                        const separatorRegex = /[·\\-\\|•]/;
-                        const separatorLine = uniqueTexts.find(t => separatorRegex.test(t) && t.length < 40);
+                        // 4. Heuristique "Séparateur Taille/État" (V5.7 Robust)
+                        // On cherche une ligne qui contient un séparateur (Point médian \u00B7, Tiret, Barre, Puce)
+                        const separatorRegex = /[\u00B7\-\|•]/;
+                        const separatorLine = uniqueTexts.find(t => separatorRegex.test(t) && t.length < 45);
                         
                         if (separatorLine) {
-                            // On split par le premier séparateur trouvé
                             const match = separatorLine.match(separatorRegex);
                             const sep = match[0];
                             const parts = separatorLine.split(sep);
@@ -218,7 +217,7 @@ def extract_items_from_page(page):
                                 const left = parts[0].trim();
                                 const right = parts[1].trim();
                                 
-                                console.log(`[DEBUG SPLIT] Left: "${left}", Right: "${right}"`);
+                                console.log(`[DEBUG SPLIT] Sep: "${sep}", Left: "${left}", Right: "${right}"`);
 
                                 if ((size === 'N/A' || size.length > 5) && left.length < 15) {
                                      size = left;
@@ -331,7 +330,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.6 PREMIUM (ROBUST SEP)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.8 PREMIUM (LOG FILTER)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -416,8 +415,8 @@ def run_bot():
                 page = context.new_page()
                 page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 
-                # Debug console
-                page.on("console", lambda msg: log(f"🕷️ JS Console: {msg.text}"))
+                # Debug console FILTRÉ pour éviter le rate limit Railway
+                page.on("console", lambda msg: log(f"🕷️ {msg.text}") if "[DEBUG" in msg.text else None)
                 
                 # On bloque les images/css pour la recherche (ça va 2x plus vite)
                 page.route("**/*", block_resources)
