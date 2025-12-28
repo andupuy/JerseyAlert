@@ -214,7 +214,7 @@ def extract_items_from_page(page):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.1 PREMIUM (DETAILS+PHOTOS)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.2 PREMIUM (FORCE REBUILD)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
