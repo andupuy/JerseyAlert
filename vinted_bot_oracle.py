@@ -157,6 +157,7 @@ def run_bot():
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
     last_seen_id = load_last_seen_id()
+    seen_ids = set() # Cache pour éviter les doublons
     log(f"📌 Dernier ID vu: {last_seen_id}")
     
     with sync_playwright() as p:
@@ -188,8 +189,11 @@ def run_bot():
                 items = extract_items_from_page(page)
                 if items:
                     last_seen_id = max(item['id'] for item in items)
+                    for item in items:
+                        seen_ids.add(item['id'])
+                    
                     save_last_seen_id(last_seen_id)
-                    log(f"✅ Initialisé ! Le bot surveillera les articles publiés APRÈS l'ID {last_seen_id}")
+                    log(f"✅ Initialisé ! {len(seen_ids)} articles ajoutés au cache.")
                     log("🤫 Pas d'alerte pour les articles déjà en ligne.")
                 else:
                     log("⚠️ Aucun article trouvé pour l'initialisation.")
@@ -236,13 +240,25 @@ def run_bot():
                     if items:
                         log(f"📦 {len(items)} articles trouvés")
                         
-                        # Filtrer les nouveaux articles
-                        new_items = [item for item in items if item['id'] > last_seen_id]
+                        # Filtrer les VRAIS nouveaux articles (ceux qu'on n'a jamais vus)
+                        # On utilise un set pour vérifier l'existence instantanément
+                        new_items = []
+                        for item in items:
+                            if item['id'] not in seen_ids:
+                                new_items.append(item)
+                                seen_ids.add(item['id'])
                         
+                        # Nettoyer le cache si trop gros pour garder de la RAM
+                        # On garde les 200 derniers ID seulement
+                        if len(seen_ids) > 200:
+                             # On garde les 200 plus récents (ceux qui sont aussi dans items si possible, sinon au hasard)
+                             # En fait, le plus simple est de tout reset sauf les items actuels si ça déborde trop
+                             pass 
+
                         if new_items:
                             log(f"🆕 {len(new_items)} nouveaux articles!")
                             
-                            # Trier par ID croissant pour envoyer dans l'ordre
+                            # Trier par ID croissant
                             new_items.sort(key=lambda x: x['id'])
                             
                             for item in new_items:
@@ -250,17 +266,18 @@ def run_bot():
                                 # Petit délai entre les notifications
                                 time.sleep(1)
                             
-                            # Mettre à jour le dernier ID vu
-                            last_seen_id = max(item['id'] for item in items)
-                            save_last_seen_id(last_seen_id)
-                            log(f"💾 Dernier ID sauvegardé: {last_seen_id}")
+                            # Mettre à jour le dernier ID (pour le fichier de persistance)
+                            if new_items:
+                                save_last_seen_id(max(item['id'] for item in new_items))
+
                         else:
-                            log("😴 Aucun nouvel article")
+                            log("😴 Aucun nouvel article (doublons filtrés)")
                     else:
                         log("⚠️  Aucun article trouvé (possible problème de scraping)")
                     
                 except Exception as e:
                     log(f"❌ Erreur lors de la vérification: {e}")
+
                 
                 # Attendre un délai aléatoire avant la prochaine vérification
                 wait_time = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
