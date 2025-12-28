@@ -203,34 +203,31 @@ def extract_items_from_page(page):
 
                         console.log(`[DEBUG ITEM ${itemId}] Texts found:`, uniqueTexts);
 
-                        // 4. Heuristique "Séparateur Taille/État" (Universel)
-                        // On cherche une ligne qui contient un séparateur type " · ", " - ", " | "
-                        const separatorLine = uniqueTexts.find(t => 
-                            t.includes(' · ') || t.includes(' - ') || t.includes(' | ')
-                        );
+                        // 4. Heuristique "Séparateur Taille/État" (V5.6 Robust Regex)
+                        // On cherche une ligne qui contient un séparateur type point, tiret ou barre
+                        const separatorRegex = /[·\\-\\|•]/;
+                        const separatorLine = uniqueTexts.find(t => separatorRegex.test(t) && t.length < 40);
                         
                         if (separatorLine) {
-                            // On normalise le séparateur
-                            let cleanLine = separatorLine.replace(' - ', ' · ').replace(' | ', ' · ');
-                            const parts = cleanLine.split(' · ');
+                            // On split par le premier séparateur trouvé
+                            const match = separatorLine.match(separatorRegex);
+                            const sep = match[0];
+                            const parts = separatorLine.split(sep);
                             
                             if (parts.length >= 2) {
                                 const left = parts[0].trim();
                                 const right = parts[1].trim();
                                 
-                                // Si size est vide ou trop longue, le gauche est surement la taille (S, M, 38...)
-                                if ((size === 'N/A' || size.length > 5) && left.length < 10) {
+                                console.log(`[DEBUG SPLIT] Left: "${left}", Right: "${right}"`);
+
+                                if ((size === 'N/A' || size.length > 5) && left.length < 15) {
                                      size = left;
                                 }
                                 
-                                // Le droit est souvent l'état ou la marque
-                                // On vérifie si ça ressemble à un état connu
                                 if (status === 'Non spécifié') {
-                                    if (/(neuf|état|porté)/i.test(right)) {
-                                        status = right;
-                                    } else if (/(neuf|état|porté)/i.test(left)) {
-                                        status = left; // Parfois inversé ?
-                                    }
+                                    const statusKeywords = /(neuf|état|porté|satisfaisant)/i;
+                                    if (statusKeywords.test(right)) status = right;
+                                    else if (statusKeywords.test(left)) status = left;
                                 }
                             }
                         }
@@ -334,7 +331,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.5 PREMIUM (UNIVERSAL PARSER)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.6 PREMIUM (ROBUST SEP)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
