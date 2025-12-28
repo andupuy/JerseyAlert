@@ -186,13 +186,17 @@ def extract_items_from_page(page):
                             if (statusMatch) status = statusMatch[1].trim();
                         }
                         
-                        // HEURISTIQUE DE SECOURS (Si le titre n'était pas riche)
+                        // Récupération de TOUS les textes (morceaux + bloc complet)
                         const texts = Array.from(el.querySelectorAll('p, h3, h4, span, div'))
                                            .map(e => e.innerText.trim())
                                            .filter(t => t.length > 0);
+                        
+                        // On ajoute le texte brut complet de l'élément pour voir les lignes concaténées
+                        texts.push(el.innerText.trim());
+                        
                         const uniqueTexts = [...new Set(texts)];
                         
-                        // Prix (toujours fiable dans le texte affiché)
+                        console.log(`[DEBUG ITEM ${itemId}] All texts: ` + JSON.stringify(uniqueTexts));
                         price = uniqueTexts.find(t => t.includes('€') || t.includes('$')) || 'N/A';
                         
                         // Si le parsing titre a échoué pour certains champs, on tente l'heuristique
@@ -330,7 +334,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.8 PREMIUM (LOG FILTER)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.9 PREMIUM (TOTAL SCAN)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     

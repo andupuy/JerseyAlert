@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Mon Dec 29 00:23:00 CET 2025 (LOG FILTER)
+# Force Update Mon Dec 29 00:25:00 CET 2025 (TOTAL SCAN)
