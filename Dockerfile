@@ -10,5 +10,5 @@ COPY vinted_bot_oracle.py main.py
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
-CMD ["python3", "main.py"]
-# Force Update Sun Dec 28 22:53:02 CET 2025
+CMD ["python", "main.py"]
+# Force Update Sun Dec 28 23:17:49 CET 2025 (Memory Fix)
