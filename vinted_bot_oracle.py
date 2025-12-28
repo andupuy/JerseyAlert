@@ -201,8 +201,8 @@ def extract_items_from_page(page):
                             size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
                         }
 
-                        # 4. Heuristique "Point Médian" (Taille · État)
-                        # Souvent Vinted affiche : "L · Très bon état" ou "42 · Neuf sans étiquette"
+                        // 4. Heuristique "Point Médian" (Taille · État)
+                        // Souvent Vinted affiche : "L · Très bon état" ou "42 · Neuf sans étiquette"
                         const dotText = uniqueTexts.find(t => t.includes(' · '));
                         if (dotText) {
                             const parts = dotText.split(' · ');
@@ -212,7 +212,7 @@ def extract_items_from_page(page):
                             }
                         }
 
-                        # 5. Heuristique "État" (Liste de mots clés)
+                        // 5. Heuristique "État" (Liste de mots clés)
                         if (status === 'Non spécifié') {
                             const hiddenStatus = uniqueTexts.find(t => 
                                 /^(neuf|très bon état|bon état|satisfaisant|jamais porté)/i.test(t)
@@ -303,7 +303,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.1 PREMIUM (DOT HEURISTIC)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.3 PREMIUM (NIGHT OWL MODE)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -374,7 +374,7 @@ def run_bot():
             while True:
                 # Gestion des heures de sommeil
                 current_hour = datetime.now().hour
-                if current_hour >= 23 or current_hour < 8:
+                if current_hour >= 1 and current_hour < 7:
                     log("🌙 Il est tard. Arrêt planifié pour économiser les crédits Railway.")
                     log("💤 Le bot va crasher volontairement.")
                     sys.exit(1)
