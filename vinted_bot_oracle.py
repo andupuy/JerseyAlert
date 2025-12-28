@@ -201,23 +201,40 @@ def extract_items_from_page(page):
                             size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
                         }
 
-                        // 4. Heuristique "Point Médian" (Taille · État)
-                        // Souvent Vinted affiche : "L · Très bon état" ou "42 · Neuf sans étiquette"
-                        const dotText = uniqueTexts.find(t => t.includes(' · '));
+                        // 4. Heuristique "Point Médian" (Taille · État) améliorée
+                        const dotText = uniqueTexts.find(t => t.includes('·'));
                         if (dotText) {
-                            const parts = dotText.split(' · ');
+                            const parts = dotText.split('·');
+                            // Si on a "L · Très bon état", parts[0]=L, parts[1]=Très bon état
                             if (parts.length >= 2) {
-                                if (size === 'N/A') size = parts[0].trim();
-                                if (status === 'Non spécifié') status = parts[1].trim();
+                                const left = parts[0].trim();
+                                const right = parts[1].trim();
+                                
+                                // Si size est vide, le gauche est surement la taille
+                                if (size === 'N/A' && left.length < 10) size = left;
+                                
+                                // Le droit est souvent l'état ou la marque
+                                // On vérifie si ça ressemble à un état connu
+                                if (status === 'Non spécifié' && /(neuf|état|porté)/i.test(right)) {
+                                    status = right;
+                                }
                             }
                         }
 
-                        // 5. Heuristique "État" (Liste de mots clés)
+                        // 5. Heuristique "État" (Recherche Mots Clés Large)
                         if (status === 'Non spécifié') {
-                            const hiddenStatus = uniqueTexts.find(t => 
-                                /^(neuf|très bon état|bon état|satisfaisant|jamais porté)/i.test(t)
-                            );
-                            if (hiddenStatus) status = hiddenStatus;
+                            // On cherche n'importe quel texte contenant un état connu
+                            // On retire le '^' pour chercher n'importe où dans la chaine
+                            const statusRegex = /(neuf avec étiquette|neuf sans étiquette|très bon état|bon état|satisfaisant|jamais porté)/i;
+                            
+                            const hiddenStatus = uniqueTexts.find(t => statusRegex.test(t));
+                            if (hiddenStatus) {
+                                // On ne prend que la partie qui matche l'état pour éviter d'avoir "L · Très bon état" complet
+                                const match = hiddenStatus.match(statusRegex);
+                                if (match) status = match[0].trim(); // On garde "Très bon état" tout court
+                                // On met la première lettre en majuscule pour faire propre
+                                status = status.charAt(0).toUpperCase() + status.slice(1);
+                            }
                         }
 
                         const imgEl = el.querySelector('img');
@@ -303,7 +320,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.3 PREMIUM (NIGHT OWL MODE)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.4 PREMIUM (STATUS FIX)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
