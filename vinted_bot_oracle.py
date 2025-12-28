@@ -134,16 +134,14 @@ def scrape_item_details(page, item_url):
         return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
 def extract_items_from_page(page):
-    """Extrait les articles de la page Vinted avec une heuristique robuste"""
+    """Extrait les articles avec Parsing Intelligent du Titre (V5.0)"""
     try:
-        # Attendre que les articles se chargent
         page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
         time.sleep(random.uniform(1, 2))
         
         items = page.evaluate("""
             () => {
                 const items = [];
-                // Sélecteur générique pour trouver les conteneurs d'articles
                 const itemElements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
                 
                 itemElements.forEach((el) => {
@@ -152,48 +150,56 @@ def extract_items_from_page(page):
                         if (!link) return;
                         
                         const url = link.href;
-                        // Extraction ID
                         const idMatch = url.match(/items\\/(\\d+)/);
                         if (!idMatch) return;
                         const itemId = parseInt(idMatch[1]);
                         
-                        // Récupération de TOUS les textes visibles dans la carte
-                        // On nettoie les doublons et les textes vides
-                        const texts = Array.from(el.querySelectorAll('p, h3, h4, span, div'))
-                                           .map(e => e.innerText.trim())
-                                           .filter(t => t.length > 0 && t.length < 50);
-                        const uniqueTexts = [...new Set(texts)];
+                        // RECUPERATION DU TITRE COMPLET (contient souvent marque, taille, état)
+                        let rawTitle = link.getAttribute('title') || '';
+                        if (!rawTitle) {
+                             const img = el.querySelector('img');
+                             if (img) rawTitle = img.alt;
+                        }
                         
-                        // Heuristique pour deviner les champs
+                        // Valeurs par défaut
                         let price = 'N/A';
                         let size = 'N/A';
                         let brand = 'N/A';
-                        
-                        // 1. Le prix contient toujours un symbole monétaire
-                        price = uniqueTexts.find(t => t.includes('€') || t.includes('$') || t.includes('£')) || 'N/A';
-                        
-                        // 2. La taille est souvent courte (S, M, L, XL, XXL, 38, 40, 42...)
-                        // Regex simple pour les tailles standards
-                        const sizeRegex = /^(XS|S|M|L|XL|XXL|\d{2,3}|Unique)$/i;
-                        size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
-                        
-                        // 3. La marque est souvent un texte qui n'est ni le prix ni la taille
-                        // On prend le texte qui ressemble le plus à une marque (pas 'Vinted', pas 'Nouveau')
-                        const ignored = ['vinted', 'nouveau', 'new', 'neuf', '€', 'recommandé', 'boosté'];
-                        brand = uniqueTexts.find(t => {
-                            const low = t.toLowerCase();
-                            return !sizeRegex.test(t) && 
-                                   !t.includes('€') && 
-                                   !ignored.some(i => low.includes(i));
-                        });
-                        
-                        // Titre : souvent le link title ou une image alt
-                        let title = link.getAttribute('title') || '';
-                        if (!title) {
-                             const img = el.querySelector('img');
-                             if (img) title = img.alt;
+                        let status = 'Non spécifié';
+                        let title = rawTitle; // Par défaut on prend tout
+
+                        // ANALYSE DU TITRE (Parsing V5.0)
+                        // Exemple: "Maillot, marque: Nike, taille: L, état: Très bon état, 20,00 €"
+                        if (rawTitle.includes('marque:') || rawTitle.includes('taille:')) {
+                            
+                            // Nettoyage du titre (on garde le début avant la première virgule souvent)
+                            title = rawTitle.split(',')[0].trim();
+                            
+                            // Extraction par Regex JS
+                            const brandMatch = rawTitle.match(/marque:\\s*([^,]+)/i);
+                            if (brandMatch) brand = brandMatch[1].trim();
+                            
+                            const sizeMatch = rawTitle.match(/taille:\\s*([^,]+)/i);
+                            if (sizeMatch) size = sizeMatch[1].trim();
+                            
+                            const statusMatch = rawTitle.match(/état:\\s*([^,]+)/i);
+                            if (statusMatch) status = statusMatch[1].trim();
                         }
-                        if (!title) title = 'Article Vinted';
+                        
+                        // HEURISTIQUE DE SECOURS (Si le titre n'était pas riche)
+                        const texts = Array.from(el.querySelectorAll('p, h3, h4, span, div'))
+                                           .map(e => e.innerText.trim())
+                                           .filter(t => t.length > 0);
+                        const uniqueTexts = [...new Set(texts)];
+                        
+                        // Prix (toujours fiable dans le texte affiché)
+                        price = uniqueTexts.find(t => t.includes('€') || t.includes('$')) || 'N/A';
+                        
+                        // Si le parsing titre a échoué pour certains champs, on tente l'heuristique
+                        if (size === 'N/A') {
+                            const sizeRegex = /^(XS|S|M|L|XL|XXL|\d{2,3}|Unique)$/i;
+                            size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
+                        }
 
                         const imgEl = el.querySelector('img');
                         const photo = imgEl?.src || '';
@@ -202,14 +208,15 @@ def extract_items_from_page(page):
                             id: itemId,
                             title: title,
                             price: price,
-                            size: size || 'N/A',
-                            brand: brand || 'N/A',
+                            size: size,
+                            brand: brand,
+                            status: status, // Nouveau champ !
                             url: url,
                             photo: photo
                         });
 
                     } catch (e) {
-                        // Silent error
+                         // Silent
                     }
                 });
                 return items;
@@ -277,7 +284,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V4.0 PREMIUM (HEURISTIC MODE)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.0 PREMIUM (TITLE PARSING)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
