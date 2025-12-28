@@ -195,8 +195,6 @@ def extract_items_from_page(page):
                         texts.push(el.innerText.trim());
                         
                         const uniqueTexts = [...new Set(texts)];
-                        
-                        console.log(`[DEBUG ITEM ${itemId}] All texts: ` + JSON.stringify(uniqueTexts));
                         price = uniqueTexts.find(t => t.includes('€') || t.includes('$')) || 'N/A';
                         
                         // Si le parsing titre a échoué pour certains champs, on tente l'heuristique
@@ -205,36 +203,42 @@ def extract_items_from_page(page):
                             size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
                         }
 
-                        // 4. Heuristique "État" ULTIME (Recherche directe de mots-clés)
+                        // 4. Heuristique "État" ULTIME (V6.3)
                         if (status === 'Non spécifié') {
                             const statusKeywords = [
-                                "neuf avec étiquette", "neuf sans étiquette", "très bon état", 
-                                "bon état", "satisfaisant", "jamais porté"
+                                "neuf avec étiquette", "neuf sans étiquette", "neuf",
+                                "très bon état", "très bon", "bon état", "satisfaisant", 
+                                "jamais porté", "porté"
                             ];
                             const stateText = uniqueTexts.find(t => 
                                 statusKeywords.some(kw => t.toLowerCase().includes(kw))
                             );
                             if (stateText) {
-                                const found = statusKeywords.find(kw => stateText.toLowerCase().includes(kw));
-                                if (found) status = found.charAt(0).toUpperCase() + found.slice(1);
+                                const lowState = stateText.toLowerCase();
+                                const found = statusKeywords.find(kw => lowState.includes(kw));
+                                if (found) {
+                                    status = found.charAt(0).toUpperCase() + found.slice(1);
+                                }
                             }
                         }
 
-                        // 5. Heuristique "Marque" de secours (Nettoyée)
-                        if (brand === 'N/A') {
-                             const ignored = ['vinted', 'enlevé', 'nouveau', 'neuf', '€', 'recommandé', 'boosté', 'protection'];
+                        // 5. Heuristique "Marque" de secours (V6.3 Ultra-Strict)
+                        if (brand === 'N/A' || brand.toLowerCase().includes('enlevé')) {
+                             const ignored = ['vinted', 'enlevé', 'nouveau', 'neuf', '€', 'recommandé', 'boosté', 'protection', 'avis', 'favori'];
                              const potentialBrand = uniqueTexts.find(t => {
                                  const low = t.toLowerCase();
-                                 return t.length > 2 && t.length < 20 && 
-                                        !ignored.some(i => low.includes(i)) &&
-                                        !/^(XS|S|M|L|XL|XXL|[0-9]{2})$/i.test(t) &&
-                                        !t.includes('€');
+                                 if (t.length < 2 || t.length > 25) return false;
+                                 if (ignored.some(i => low.includes(i))) return false;
+                                 if (/(neuf|état|porté|taille|size)/i.test(low)) return false;
+                                 if (/^(XS|S|M|L|XL|XXL|[0-9]{2})$/i.test(t)) return false;
+                                 if (t.includes('€')) return false;
+                                 return true;
                              });
                              if (potentialBrand) brand = potentialBrand;
                         }
 
-                        // 6. Nettoyage final du Titre
-                        title = title.replace(/enlevé\\s*!/i, '').replace(/\\s*,\\s*$/, '').trim();
+                        // 6. Nettoyage final du Titre (V6.3)
+                        title = title.replace(/enlevé/gi, '').replace(/!/g, '').replace(/\\s*,\\s*$/, '').trim();
                         if (!title || title.length < 3) title = 'Maillot ASSE';
 
                         const imgEl = el.querySelector('img');
@@ -286,7 +290,7 @@ def send_discord_alert(context, item):
         
         final_brand = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
         final_size = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
-        final_status = details['status'] if details['status'] != 'N/A' else "Non spécifié"
+        final_status = details['status'] if details['status'] not in ['N/A', 'Non spécifié'] else item.get('status', 'Non spécifié')
         final_price = item.get('price', 'N/A')
         
         # Photos
@@ -320,7 +324,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.1 PREMIUM (CLEAN TITLES)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION FINALE V6.3 (STABLE)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -391,7 +395,7 @@ def run_bot():
             while True:
                 # Gestion des heures de sommeil
                 current_hour = datetime.now().hour
-                if current_hour >= 1 and current_hour < 7:
+                if current_hour >= 23 or current_hour < 8:
                     log("🌙 Il est tard. Arrêt planifié pour économiser les crédits Railway.")
                     log("💤 Le bot va crasher volontairement.")
                     sys.exit(1)
@@ -404,9 +408,6 @@ def run_bot():
                 # C'est la seule façon de garantir 0 fuite mémoire sur le long terme
                 page = context.new_page()
                 page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                
-                # Debug console FILTRÉ pour éviter le rate limit Railway
-                page.on("console", lambda msg: log(f"🕷️ {msg.text}") if "[DEBUG" in msg.text else None)
                 
                 # On bloque les images/css pour la recherche (ça va 2x plus vite)
                 page.route("**/*", block_resources)
