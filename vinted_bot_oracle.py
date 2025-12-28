@@ -44,7 +44,7 @@ def save_last_seen_id(item_id):
         f.write(str(item_id))
 
 def scrape_item_details(page, item_url):
-    """Va sur la page de l'article pour récupérer infos détaillées"""
+    """Va sur la page de l'article pour récupérer infos détaillées (Stratégie Robuste)"""
     try:
         log(f"🔎 Scraping détails: {item_url}")
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
@@ -62,23 +62,55 @@ def scrape_item_details(page, item_url):
         }""")
         photos = list(dict.fromkeys(photos))
 
-        # Récupérer Marque / Taille / État depuis les attributs (Tableau)
+        # Récupérer DETAILS via une stratégie "Texte Visuel" (plus robuste que les classes CSS)
         details_extra = page.evaluate("""() => {
             const result = {brand: 'N/A', size: 'N/A', status: 'N/A'};
             
-            // Chercher dans les divs qui contiennent les labels
-            const labels = Array.from(document.querySelectorAll('.details-list__item-title'));
+            // Fonction utilitaire pour nettoyer le texte
+            const clean = (t) => t ? t.trim() : 'N/A';
             
-            labels.forEach(label => {
-                const text = label.innerText.trim().toLowerCase();
-                const valueEl = label.nextElementSibling;
-                if (!valueEl) return;
-                const value = valueEl.innerText.trim();
+            // Stratégie 1: Chercher par itemprop (Standard Schema.org)
+            const brandEl = document.querySelector('[itemprop="brand"]');
+            if (brandEl) result.brand = clean(brandEl.innerText);
+            
+            const sizeEl = document.querySelector('[itemprop="size"]');
+            if (sizeEl) result.size = clean(sizeEl.innerText);
+            
+            const condEl = document.querySelector('[itemprop="itemCondition"]');
+            if (condEl) result.status = clean(condEl.innerText);
+            
+            // Si on a tout trouvé, on sort
+            if (result.brand !== 'N/A' && result.size !== 'N/A' && result.status !== 'N/A') return result;
+
+            // Stratégie 2: Chercher par Texte (Le plus fiable quand le CSS change)
+            // On cherche tous les éléments qui pourraient être des labels
+            const candidates = Array.from(document.querySelectorAll('div, span, p, h3, h4'));
+            
+            candidates.forEach(el => {
+                // On ignore les éléments trop longs (ce ne sont pas des labels)
+                if (el.innerText.length > 30) return;
                 
-                if (text.includes('marque') || text.includes('brand')) result.brand = value;
-                if (text.includes('taille') || text.includes('size')) result.size = value;
-                if (text.includes('état') || text.includes('condition')) result.status = value;
+                const text = el.innerText.toLowerCase().trim();
+                
+                // On cherche la valeur associée (souvent le frère suivant, ou le frère du parent)
+                let value = 'N/A';
+                
+                // Cas 1: Le label et la valeur sont frères (ex: <div>Label</div><div>Valeur</div>)
+                if (el.nextElementSibling && el.nextElementSibling.innerText.length < 50) {
+                     value = el.nextElementSibling.innerText;
+                } 
+                // Cas 2: Structure div > div (Label) + div (Value)
+                else if (el.parentElement && el.parentElement.nextElementSibling) {
+                     value = el.parentElement.nextElementSibling.innerText;
+                }
+                
+                if (value && value !== 'N/A') {
+                    if (result.brand === 'N/A' && (text === 'marque' || text === 'brand')) result.brand = clean(value);
+                    if (result.size === 'N/A' && (text === 'taille' || text === 'size')) result.size = clean(value);
+                    if (result.status === 'N/A' && (text.startsWith('état') || text.startsWith('condition'))) result.status = clean(value);
+                }
             });
+            
             return result;
         }""")
         
@@ -214,7 +246,7 @@ def extract_items_from_page(page):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.2 PREMIUM (FORCE REBUILD)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.3 PREMIUM (ROBUST SCRAPING)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
