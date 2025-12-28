@@ -43,44 +43,97 @@ def save_last_seen_id(item_id):
     with open(STATE_FILE, "w") as f:
         f.write(str(item_id))
 
-def send_discord_alert(item):
-    """Envoie une alerte Discord pour un nouvel article"""
+def scrape_item_details(page, item_url):
+    """Va sur la page de l'article pour récupérer plus de photos et la description"""
+    try:
+        log(f"🔎 Scraping détails: {item_url}")
+        page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
+        
+        # Récupérer la description
+        description = page.evaluate("""() => {
+            const descEl = document.querySelector('[itemprop="description"]');
+            return descEl ? descEl.innerText : '';
+        }""")
+        
+        # Récupérer les photos (haute résolution si possible)
+        photos = page.evaluate("""() => {
+            const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
+            return imgs.map(img => img.src).filter(src => src);
+        }""")
+        
+        # Nettoyage et déduplication
+        photos = list(dict.fromkeys(photos)) # Dedup tout en gardant l'ordre
+        
+        return {"description": description, "photos": photos}
+    except Exception as e:
+        log(f"⚠️ Erreur scraping détails: {e}")
+        return {"description": "", "photos": []}
+
+def send_discord_alert(context, item):
+    """Envoie une alerte Discord pour un nouvel article avec détails complets"""
     if not DISCORD_WEBHOOK_URL:
         log("⚠️  Pas de webhook Discord configuré")
         return
 
+    # On utilise une nouvelle page pour les détails pour ne pas perdre la recherche
+    details = {"description": "", "photos": []}
     try:
-        # Extraction des données
+        detail_page = context.new_page()
+        # Masquer Playwright sur cette page aussi
+        detail_page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        details = scrape_item_details(detail_page, item['url'])
+        detail_page.close()
+    except Exception as e:
+        log(f"❌ Impossible de récupérer les détails: {e}")
+
+    try:
         title = item.get('title', 'Nouvel article')
         price = item.get('price', 'N/A')
         size = item.get('size', 'N/A')
         brand = item.get('brand', 'N/A')
         url = item.get('url', '')
-        photo_url = item.get('photo', '')
         item_id = item.get('id', 'N/A')
+        
+        # Utiliser les photos détaillées sinon la photo de base
+        photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
+        description = details['description']
 
-        # Construction de l'embed Discord
-        embed = {
+        # Limiter la description
+        if len(description) > 300:
+            description = description[:300] + "..."
+
+        description_text = f"**{price}** | Taille: **{size}**\nMarque: {brand}\n\n{description}"
+
+        # Premier embed (Principal)
+        embed1 = {
             "title": f"🔔 {title}",
             "url": url,
-            "description": f"**{price}** | Taille: **{size}**\nMarque: {brand}",
-            "color": 0x09B83E,  # Vert Vinted
+            "description": description_text,
+            "color": 0x09B83E,
             "footer": {"text": f"Vinted Bot • ID: {item_id}"},
             "timestamp": datetime.utcnow().isoformat(),
+            "image": {"url": photos[0]} if photos else {}
         }
         
-        if photo_url:
-            embed["thumbnail"] = {"url": photo_url}
+        embeds = [embed1]
+        
+        # Ajouter les autres photos (max 3 de plus pour ne pas spammer, Discord accepte jusqu'à 10 mais 4 total c'est bien)
+        for photo_url in photos[1:4]:
+            embeds.append({
+                "url": url,
+                "image": {"url": photo_url}
+            })
 
         payload = {
             "username": "Vinted ASSE Bot",
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
-            "embeds": [embed]
+            "embeds": embeds
         }
         
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         response.raise_for_status()
-        log(f"✅ Alerte envoyée pour l'article #{item_id}")
+        log(f"✅ Alerte envoyée pour l'article #{item_id} ({len(photos)} photos)")
 
     except Exception as e:
         log(f"❌ Erreur lors de l'envoi Discord: {e}")
@@ -262,7 +315,7 @@ def run_bot():
                             new_items.sort(key=lambda x: x['id'])
                             
                             for item in new_items:
-                                send_discord_alert(item)
+                                send_discord_alert(context, item)
                                 # Petit délai entre les notifications
                                 time.sleep(1)
                             
