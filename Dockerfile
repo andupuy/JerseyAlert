@@ -20,3 +20,4 @@ RUN playwright install-deps chromium
 
 # Commande de démarrage
 CMD ["python", "main.py"]
+# Force rebuild
