@@ -179,6 +179,24 @@ def run_bot():
             timezone_id='Europe/Paris'
         )
         
+        # Initialisation intelligente (Anti-Spam au redémarrage)
+        if last_seen_id == 0:
+            log("🚀 Premier lancement (ou redémarrage Railway). Initialisation du dernier ID...")
+            try:
+                page = context.new_page()
+                page.goto(VINTED_SEARCH_URL, wait_until='domcontentloaded', timeout=30000)
+                items = extract_items_from_page(page)
+                if items:
+                    last_seen_id = max(item['id'] for item in items)
+                    save_last_seen_id(last_seen_id)
+                    log(f"✅ Initialisé ! Le bot surveillera les articles publiés APRÈS l'ID {last_seen_id}")
+                    log("🤫 Pas d'alerte pour les articles déjà en ligne.")
+                else:
+                    log("⚠️ Aucun article trouvé pour l'initialisation.")
+                page.close()
+            except Exception as e:
+                log(f"❌ Erreur lors de l'initialisation: {e}")
+
         page = context.new_page()
         
         # Masquer le fait qu'on utilise Playwright
@@ -191,6 +209,7 @@ def run_bot():
         log("✅ Navigateur initialisé")
         
         iteration = 0
+
         
         try:
             while True:
