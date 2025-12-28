@@ -11,3 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python", "main.py"]
+# Force Update Sun Dec 28 22:53:02 CET 2025
