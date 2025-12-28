@@ -133,11 +133,101 @@ def scrape_item_details(page, item_url):
         log(f"⚠️ Erreur scraping détails (API Mode): {e}")
         return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
+def extract_items_from_page(page):
+    """Extrait les articles de la page Vinted avec une heuristique robuste"""
+    try:
+        # Attendre que les articles se chargent
+        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+        time.sleep(random.uniform(1, 2))
+        
+        items = page.evaluate("""
+            () => {
+                const items = [];
+                // Sélecteur générique pour trouver les conteneurs d'articles
+                const itemElements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
+                
+                itemElements.forEach((el) => {
+                    try {
+                        const link = el.querySelector('a');
+                        if (!link) return;
+                        
+                        const url = link.href;
+                        // Extraction ID
+                        const idMatch = url.match(/items\\/(\\d+)/);
+                        if (!idMatch) return;
+                        const itemId = parseInt(idMatch[1]);
+                        
+                        // Récupération de TOUS les textes visibles dans la carte
+                        // On nettoie les doublons et les textes vides
+                        const texts = Array.from(el.querySelectorAll('p, h3, h4, span, div'))
+                                           .map(e => e.innerText.trim())
+                                           .filter(t => t.length > 0 && t.length < 50);
+                        const uniqueTexts = [...new Set(texts)];
+                        
+                        // Heuristique pour deviner les champs
+                        let price = 'N/A';
+                        let size = 'N/A';
+                        let brand = 'N/A';
+                        
+                        // 1. Le prix contient toujours un symbole monétaire
+                        price = uniqueTexts.find(t => t.includes('€') || t.includes('$') || t.includes('£')) || 'N/A';
+                        
+                        // 2. La taille est souvent courte (S, M, L, XL, XXL, 38, 40, 42...)
+                        // Regex simple pour les tailles standards
+                        const sizeRegex = /^(XS|S|M|L|XL|XXL|\d{2,3}|Unique)$/i;
+                        size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
+                        
+                        // 3. La marque est souvent un texte qui n'est ni le prix ni la taille
+                        // On prend le texte qui ressemble le plus à une marque (pas 'Vinted', pas 'Nouveau')
+                        const ignored = ['vinted', 'nouveau', 'new', 'neuf', '€', 'recommandé', 'boosté'];
+                        brand = uniqueTexts.find(t => {
+                            const low = t.toLowerCase();
+                            return !sizeRegex.test(t) && 
+                                   !t.includes('€') && 
+                                   !ignored.some(i => low.includes(i));
+                        });
+                        
+                        // Titre : souvent le link title ou une image alt
+                        let title = link.getAttribute('title') || '';
+                        if (!title) {
+                             const img = el.querySelector('img');
+                             if (img) title = img.alt;
+                        }
+                        if (!title) title = 'Article Vinted';
+
+                        const imgEl = el.querySelector('img');
+                        const photo = imgEl?.src || '';
+                        
+                        items.push({
+                            id: itemId,
+                            title: title,
+                            price: price,
+                            size: size || 'N/A',
+                            brand: brand || 'N/A',
+                            url: url,
+                            photo: photo
+                        });
+
+                    } catch (e) {
+                        // Silent error
+                    }
+                });
+                return items;
+            }
+        """)
+        return items
+    except Exception as e:
+        log(f"❌ Erreur extraction liste: {e}")
+        return []
+
 def send_discord_alert(context, item):
-    """Envoie une alerte Discord"""
+    """Envoie une alerte Discord intelligente (fallback liste)"""
     if not DISCORD_WEBHOOK_URL: return
 
-    # Scraping détails
+    # 1. On essaie d'avoir les détails riches (Photos + Desc)
+    # Mais on ne fait plus confiance au brand/size du scraping détail s'il échoue
+    # On garde les infos "liste" (item) comme base solide
+    
     details = {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
     try:
         detail_page = context.new_page()
@@ -145,116 +235,49 @@ def send_discord_alert(context, item):
         details = scrape_item_details(detail_page, item['url'])
         detail_page.close()
     except Exception as e:
-        log(f"❌ Impossible de récupérer les détails: {e}")
+        log(f"⚠️ Mode Simple (Détails échoués): {e}")
 
     try:
-        title = item.get('title', 'Nouvel article')
-        price = item.get('price', 'N/A')
-        url = item.get('url', '')
-        item_id = item.get('id', 'N/A')
+        # FUSION INTELLIGENTE DES DONNÉES
+        # On ne prend la valeur 'details' QUE si elle n'est pas N/A, sinon on garde celle de la liste 'item'
         
-        # On utilise les infos précises du scraping
-        brand = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
-        size = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
-        status = details['status']
+        final_brand = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
+        final_size = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
+        final_status = details['status'] if details['status'] != 'N/A' else "Non spécifié"
+        final_price = item.get('price', 'N/A')
         
+        # Photos
         photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
+        
         description = details['description']
-
         if len(description) > 300: description = description[:300] + "..."
 
-        description_text = f"**{price}** | Taille: **{size}**\nMarque: **{brand}**\nÉtat: {status}\n\n{description}"
+        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{description}"
 
         embed1 = {
-            "title": f"🔔 {title}",
-            "url": url,
+            "title": f"🔔 {item.get('title')}",
+            "url": item.get('url'),
             "description": description_text,
             "color": 0x09B83E,
-            "footer": {"text": f"Vinted Bot • ID: {item_id}"},
+            "footer": {"text": f"Vinted Bot • ID: {item.get('id')}"},
             "timestamp": datetime.utcnow().isoformat(),
             "image": {"url": photos[0]} if photos else {}
         }
         
         embeds = [embed1]
         for photo_url in photos[1:4]:
-            embeds.append({"url": url, "image": {"url": photo_url}})
+            embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
 
         payload = {"username": "Vinted ASSE Bot", "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", "embeds": embeds}
-        
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        log(f"✅ Alerte envoyée #{item_id}")
+        log(f"✅ Alerte envoyée #{item.get('id')}")
 
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
 
-def extract_items_from_page(page):
-    """Extrait les articles de la page Vinted avec Playwright"""
-    try:
-        # Attendre que les articles se chargent
-        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-        
-        # Petit délai aléatoire pour paraître humain
-        time.sleep(random.uniform(1, 2))
-        
-        # Extraire les données des articles via JavaScript
-        items = page.evaluate("""
-            () => {
-                const items = [];
-                const itemElements = document.querySelectorAll('div[data-testid*="item"]');
-                
-                itemElements.forEach((el, index) => {
-                    try {
-                        const link = el.querySelector('a[href*="/items/"]');
-                        if (!link) return;
-                        
-                        const url = link.href;
-                        const itemId = parseInt(url.match(/items\\/(\\d+)/)?.[1] || '0');
-                        
-                        const title = el.querySelector('h3, [class*="title"]')?.textContent?.trim() || '';
-                        const priceEl = el.querySelector('[class*="price"]');
-                        const price = priceEl?.textContent?.trim() || 'N/A';
-                        
-                        const sizeEl = el.querySelector('[class*="size"]');
-                        const size = sizeEl?.textContent?.trim() || 'N/A';
-                        
-                        const brandEl = el.querySelector('[class*="brand"]');
-                        const brand = brandEl?.textContent?.trim() || 'N/A';
-                        
-                        const imgEl = el.querySelector('img');
-                        const photo = imgEl?.src || '';
-                        
-                        if (itemId > 0) {
-                            items.push({
-                                id: itemId,
-                                title: title,
-                                price: price,
-                                size: size,
-                                brand: brand,
-                                url: url,
-                                photo: photo
-                            });
-                        }
-                    } catch (e) {
-                        console.error('Error parsing item:', e);
-                    }
-                });
-                
-                return items;
-            }
-        """)
-        
-        return items
-        
-    except PlaywrightTimeout:
-        log("⚠️  Timeout lors du chargement de la page")
-        return []
-    except Exception as e:
-        log(f"❌ Erreur lors de l'extraction: {e}")
-        return []
-
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V3.0 PREMIUM (INTERNAL API CALL)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V4.0 PREMIUM (HEURISTIC MODE)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
