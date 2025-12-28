@@ -201,6 +201,25 @@ def extract_items_from_page(page):
                             size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
                         }
 
+                        # 4. Heuristique "Point Médian" (Taille · État)
+                        # Souvent Vinted affiche : "L · Très bon état" ou "42 · Neuf sans étiquette"
+                        const dotText = uniqueTexts.find(t => t.includes(' · '));
+                        if (dotText) {
+                            const parts = dotText.split(' · ');
+                            if (parts.length >= 2) {
+                                if (size === 'N/A') size = parts[0].trim();
+                                if (status === 'Non spécifié') status = parts[1].trim();
+                            }
+                        }
+
+                        # 5. Heuristique "État" (Liste de mots clés)
+                        if (status === 'Non spécifié') {
+                            const hiddenStatus = uniqueTexts.find(t => 
+                                /^(neuf|très bon état|bon état|satisfaisant|jamais porté)/i.test(t)
+                            );
+                            if (hiddenStatus) status = hiddenStatus;
+                        }
+
                         const imgEl = el.querySelector('img');
                         const photo = imgEl?.src || '';
                         
@@ -210,7 +229,7 @@ def extract_items_from_page(page):
                             price: price,
                             size: size,
                             brand: brand,
-                            status: status, // Nouveau champ !
+                            status: status,
                             url: url,
                             photo: photo
                         });
@@ -284,7 +303,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.0 PREMIUM (TITLE PARSING)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V5.1 PREMIUM (DOT HEURISTIC)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
