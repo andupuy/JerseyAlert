@@ -51,6 +51,15 @@ def scrape_item_details(page, item_url):
         
         # 1. Récupération du contenu HTML brut
         html_content = page.content()
+        page_title = page.title()
+        log(f"📄 Titre de la page: {page_title}")
+        
+        # Debug: Vérifier la présence du JSON
+        if '"brand_title":' in html_content:
+            log("✅ JSON 'brand_title' trouvé dans le source")
+        else:
+            log("❌ JSON 'brand_title' INTROUVABLE dans le source")
+            log(f"🔍 Début du source (500 chars): {html_content[:500]}")
         
         # 2. Stratégie Regex (Plus fiable car lit les données brutes JSON cachées)
         import re
