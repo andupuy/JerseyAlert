@@ -44,59 +44,78 @@ def save_last_seen_id(item_id):
         f.write(str(item_id))
 
 def scrape_item_details(page, item_url):
-    """Va sur la page de l'article pour récupérer infos détaillées via __NEXT_DATA__ (V2.5 Ultimate)"""
+    """Va sur la page de l'article pour récupérer infos détaillées via API interne (V3.0 API Call)"""
     try:
         log(f"🔎 Scraping détails: {item_url}")
-        page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
         
-        # Récupération des photos (DOM, ça marche toujours bien)
+        # Extraire l'ID de l'item depuis l'URL
+        import re
+        id_match = re.search(r'/items/(\d+)', item_url)
+        item_id = id_match.group(1) if id_match else None
+        
+        if not item_id:
+            log("❌ Impossible d'extraire l'ID de l'URL")
+            return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
+
+        # On va sur une page "neutre" (la page d'accueil ou la recherche) pour avoir le contexte de session
+        # Pas besoin d'aller sur la page détail lourde, on peut juste fetch l'API
+        # Mais pour être sûr d'avoir les cookies, restons sur la page actuelle ou allons sur la home
+        # Si on est déjà dans un contexte ouvert, on peut juste faire fetch
+        # Le contexte appelant ouvre déjà une page vide, allons sur Vinted Home pour initialiser la session si besoin
+        # page.goto("https://www.vinted.fr", wait_until='domcontentloaded') 
+        # (Optimisation: on suppose qu'on a déjà les cookies de la recherche précédente)
+        
+        # Pour être sûr, on va quand même sur la page de l'item (ça génère les cookies spécifiques item)
+        page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
+
+        # Récupération des photos (DOM, ça marche toujours bien et c'est joli)
         photos = page.evaluate("""() => {
             const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
             return imgs.map(img => img.src).filter(src => src);
         }""")
         photos = list(dict.fromkeys(photos))
 
-        # Stratégie NEXT.js : Lire le gros JSON d'état
-        import json
-        
-        raw_json = page.evaluate("""() => {
-            const script = document.getElementById('__NEXT_DATA__');
-            return script ? script.innerText : null;
-        }""")
+        # APPEL API DIRECT via le navigateur
+        log(f"📡 Appel API interne pour l'item {item_id}...")
+        api_data = page.evaluate(f"""async () => {{
+            try {{
+                const response = await fetch('/api/v2/items/{item_id}?localize=false', {{
+                    headers: {{
+                        'Accept': 'application/json, text/plain, */*'
+                    }}
+                }});
+                if (response.ok) {{
+                    return await response.json();
+                }}
+                return null;
+            }} catch (e) {{
+                return null;
+            }}
+        }}""")
         
         description = ""
         brand = "N/A"
         size = "N/A"
         status = "N/A"
         
-        if raw_json:
-            try:
-                data = json.loads(raw_json)
-                # Structure typique Vinted: props -> pageProps -> item
-                item_data = data.get('props', {}).get('pageProps', {}).get('item', {})
-                
-                if item_data:
-                    log("✅ JSON Next.js trouvé et parsé !")
-                    description = item_data.get('description', '')
-                    brand = item_data.get('brand', 'N/A') # Parfois c'est un objet, parfois string
-                    if isinstance(brand, dict): brand = brand.get('title', 'N/A')
-                    
-                    size = item_data.get('size', 'N/A')
-                    if isinstance(size, dict): size = size.get('title', 'N/A')
-                    
-                    status = item_data.get('status', 'N/A')
-                    if isinstance(status, dict): status = status.get('title', 'N/A')
-                    
-                else:
-                    log("⚠️ JSON trouvé mais structure 'item' manquante")
-            except Exception as e:
-                log(f"⚠️ Erreur parsing JSON Next.js: {e}")
+        if api_data and 'item' in api_data:
+            item = api_data['item']
+            log("✅ Réponse API reçue !")
+            
+            description = item.get('description', '')
+            brand = item.get('brand_title', 'N/A')
+            size = item.get('size_title', 'N/A')
+            status = item.get('status', 'N/A') # Parfois c'est status_id, il faut mapper, mais essayons title
+            
+            # Si status est vide, parfois c'est pas envoyé
+            if status == 'N/A' and 'status' in item:
+                 # Vinted API change parfois
+                 pass
+            
         else:
-             log("❌ Script __NEXT_DATA__ introuvable")
-
-        # Fallback pour la description si JSON vide
-        if not description:
-             description = page.evaluate("""() => {
+            log("⚠️ API Vinted muette ou erreur")
+            # Fallback DOM
+            description = page.evaluate("""() => {
                 const descEl = document.querySelector('[itemprop="description"]');
                 return descEl ? descEl.innerText : '';
             }""")
@@ -111,7 +130,7 @@ def scrape_item_details(page, item_url):
             "status": status
         }
     except Exception as e:
-        log(f"⚠️ Erreur scraping détails: {e}")
+        log(f"⚠️ Erreur scraping détails (API Mode): {e}")
         return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
 def send_discord_alert(context, item):
@@ -235,7 +254,7 @@ def extract_items_from_page(page):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V2.5 PREMIUM (NEXT.JS DATA MINING)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V3.0 PREMIUM (INTERNAL API CALL)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
