@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="description" content="Suivez tous les matchs de foot auxquels vous avez assisté">
+
+    <title>⚽ Groundhopping Tracker</title>
+
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="header-left">
+                <h1 class="logo">⚽ Groundhopping</h1>
+            </div>
+            <div class="header-right">
+                <button class="btn-icon" id="importBtn" title="Importer via API" onclick="openImportApiModal()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                </button>
+                <button class="btn-icon" id="statsBtn" title="Statistiques">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18" />
+                        <path d="M18 17V9" />
+                        <path d="M13 17V5" />
+                        <path d="M8 17v-3" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Stats Summary -->
+        <section class="stats-summary" id="statsSummary">
+            <div class="stat-card">
+                <div class="stat-icon">🎫</div>
+                <div class="stat-info">
+                    <div class="stat-value" id="totalMatches">0</div>
+                    <div class="stat-label">Matchs</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">🏟️</div>
+                <div class="stat-info">
+                    <div class="stat-value" id="totalStadiums">0</div>
+                    <div class="stat-label">Stades</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">🌍</div>
+                <div class="stat-info">
+                    <div class="stat-value" id="totalCountries">0</div>
+                    <div class="stat-label">Pays</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">⚽</div>
+                <div class="stat-info">
+                    <div class="stat-value" id="totalGoals">0</div>
+                    <div class="stat-label">Buts vus</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Filters -->
+        <section class="filters">
+            <div class="filter-group">
+                <input type="text" id="searchInput" class="search-input" placeholder="🔍 Rechercher un match...">
+            </div>
+            <div class="filter-buttons">
+                <button class="filter-btn active" data-filter="all">Tous</button>
+                <button class="filter-btn" data-filter="ligue1">Ligue 1</button>
+                <button class="filter-btn" data-filter="coupe">Coupe</button>
+                <button class="filter-btn" data-filter="europe">Europe</button>
+            </div>
+        </section>
+
+        <!-- Matches List -->
+        <section class="matches-section">
+            <div class="section-header">
+                <h2>Mes Matchs</h2>
+                <span class="match-count" id="matchCount">0 match</span>
+            </div>
+            <div class="matches-list" id="matchesList">
+                <!-- Les matchs seront ajoutés ici dynamiquement -->
+            </div>
+
+            <!-- Empty State -->
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">🎫</div>
+                <h3>Aucun match enregistré</h3>
+                <p>Commencez à ajouter les matchs auxquels vous avez assisté !</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- Floating Action Button -->
+    <button class="fab" id="addMatchBtn" title="Ajouter un match">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+    </button>
+
+    <!-- Modal: Add Match -->
+    <div class="modal" id="addMatchModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>➕ Ajouter un match</h2>
+                <button class="btn-close" id="closeAddModal">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <form class="modal-body" id="addMatchForm">
+                <div class="form-group">
+                    <label for="homeTeam">Équipe domicile *</label>
+                    <input type="text" id="homeTeam" required placeholder="Ex: AS Saint-Étienne">
+                </div>
+
+                <div class="form-group">
+                    <label for="awayTeam">Équipe extérieur *</label>
+                    <input type="text" id="awayTeam" required placeholder="Ex: Olympique de Marseille">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="homeScore">Score domicile *</label>
+                        <input type="number" id="homeScore" required min="0" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="awayScore">Score extérieur *</label>
+                        <input type="number" id="awayScore" required min="0" placeholder="0">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="matchDate">Date du match *</label>
+                    <input type="date" id="matchDate" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="competition">Compétition *</label>
+                    <select id="competition" required>
+                        <option value="">Sélectionner...</option>
+                        <option value="ligue1">Ligue 1</option>
+                        <option value="ligue2">Ligue 2</option>
+                        <option value="coupe-france">Coupe de France</option>
+                        <option value="coupe-ligue">Coupe de la Ligue</option>
+                        <option value="champions-league">Champions League</option>
+                        <option value="europa-league">Europa League</option>
+                        <option value="autre">Autre</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="stadium">Stade *</label>
+                    <input type="text" id="stadium" required placeholder="Ex: Stade Geoffroy-Guichard">
+                </div>
+
+                <div class="form-group">
+                    <label for="city">Ville *</label>
+                    <input type="text" id="city" required placeholder="Ex: Saint-Étienne">
+                </div>
+
+                <div class="form-group">
+                    <label for="country">Pays *</label>
+                    <input type="text" id="country" required placeholder="Ex: France" value="France">
+                </div>
+
+                <div class="form-group">
+                    <label for="attendance">Affluence</label>
+                    <input type="number" id="attendance" min="0" placeholder="Ex: 25000">
+                </div>
+
+                <div class="form-group">
+                    <label for="notes">Notes personnelles</label>
+                    <textarea id="notes" rows="3" placeholder="Vos impressions, ambiance, anecdotes..."></textarea>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelAddBtn">Annuler</button>
+                    <button type="submit" class="btn btn-primary">Enregistrer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Match Details -->
+    <div class="modal" id="matchDetailsModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>📋 Détails du match</h2>
+                <button class="btn-close" id="closeDetailsModal">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" id="matchDetailsContent">
+                <!-- Le contenu sera ajouté dynamiquement -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Statistics -->
+    <div class="modal" id="statsModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>📊 Statistiques</h2>
+                <button class="btn-close" id="closeStatsModal">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" id="statsContent">
+                <!-- Le contenu sera ajouté dynamiquement -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <div class="toast-content">
+            <span class="toast-icon">✓</span>
+            <span class="toast-message" id="toastMessage"></span>
+        </div>
+    </div>
+
+    <!-- Modal: Import API -->
+    <div class="modal" id="importApiModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔄 Importer des matchs via API</h2>
+                <button class="btn-close" onclick="closeImportApiModal()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <form class="modal-body" id="importApiForm" onsubmit="handleImportApi(event)">
+                <div
+                    style="background: rgba(0, 212, 170, 0.1); border: 1px solid rgba(0, 212, 170, 0.3); border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem;">
+                    <h4 style="font-size: 0.875rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--primary);">
+                        ℹ️ API Football-Data.org (GRATUITE)
+                    </h4>
+                    <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                        Importez automatiquement tous les matchs d'une équipe pour une saison !
+                    </p>
+                    <p style="font-size: 0.75rem; color: var(--text-muted);">
+                        • 10 requêtes/minute<br>
+                        • Données depuis 2015<br>
+                        • Inscription gratuite sur <a href="https://www.football-data.org/client/register"
+                            target="_blank" style="color: var(--primary);">football-data.org</a>
+                    </p>
+                </div>
+
+                <div class="form-group">
+                    <label for="apiKey">Clé API Football-Data.org *</label>
+                    <input type="text" id="apiKey" required placeholder="Votre clé API (sauvegardée localement)">
+                    <small style="color: var(--text-muted); font-size: 0.75rem;">
+                        Obtenez votre clé gratuite sur <a href="https://www.football-data.org/client/register"
+                            target="_blank" style="color: var(--primary);">football-data.org</a>
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label for="importTeamName">Nom de l'équipe *</label>
+                    <input type="text" id="importTeamName" required placeholder="Ex: PSG, OM, ASSE, Lyon..."
+                        list="teamSuggestions">
+                    <datalist id="teamSuggestions">
+                        <option value="PSG">
+                        <option value="OM">
+                        <option value="OL">
+                        <option value="ASSE">
+                        <option value="Lille">
+                        <option value="Monaco">
+                        <option value="Rennes">
+                        <option value="Nice">
+                        <option value="Lens">
+                        <option value="Nantes">
+                        <option value="Manchester United">
+                        <option value="Liverpool">
+                        <option value="Arsenal">
+                        <option value="Real Madrid">
+                        <option value="Barcelona">
+                        <option value="Bayern Munich">
+                    </datalist>
+                    <small style="color: var(--text-muted); font-size: 0.75rem;">
+                        <a href="#" onclick="showAvailableTeams(); return false;" style="color: var(--primary);">Voir la
+                            liste complète des équipes</a>
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label for="importSeason">Saison *</label>
+                    <select id="importSeason" required>
+                        <option value="">Sélectionner...</option>
+                        <option value="2024">2024-2025</option>
+                        <option value="2023">2023-2024</option>
+                        <option value="2022">2022-2023</option>
+                        <option value="2021">2021-2022</option>
+                        <option value="2020">2020-2021</option>
+                        <option value="2019">2019-2020</option>
+                        <option value="2018">2018-2019</option>
+                        <option value="2017">2017-2018</option>
+                        <option value="2016">2016-2017</option>
+                        <option value="2015">2015-2016</option>
+                    </select>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeImportApiModal()">Annuler</button>
+                    <button type="submit" class="btn btn-primary">🔍 Rechercher les matchs</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal: Selection des matchs à importer -->
+    <div class="modal" id="importMatchesModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>✅ Sélectionner les matchs à importer</h2>
+                <button class="btn-close" onclick="closeImportMatchesModal()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" id="importMatchesContent">
+                <!-- Le contenu sera ajouté dynamiquement -->
+            </div>
+        </div>
+    </div>
+
+    <script src="api-integration.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

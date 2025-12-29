@@ -1,0 +1,77 @@
+{
+  "area": {
+    "id": 2081,
+    "name": "France",
+    "code": "FRA",
+    "flag": "https://crests.football-data.org/FRA.svg"
+  },
+  "competition": {
+    "id": 2015,
+    "name": "Ligue 1",
+    "code": "FL1",
+    "type": "LEAGUE",
+    "emblem": "https://crests.football-data.org/FL1.png"
+  },
+  "season": {
+    "id": 2024,
+    "startDate": "2024-08-16",
+    "endDate": "2025-05-18",
+    "currentMatchday": 16
+  },
+  "id": 123456,
+  "utcDate": "2024-12-08T20:00:00Z",
+  "status": "FINISHED",
+  "matchday": 14,
+  "stage": "REGULAR_SEASON",
+  "group": null,
+  "lastUpdated": "2024-12-08T22:05:00Z",
+  "homeTeam": {
+    "id": 1063,
+    "name": "AS Saint-Étienne",
+    "shortName": "ASSE",
+    "tla": "STE",
+    "crest": "https://crests.football-data.org/1063.png"
+  },
+  "awayTeam": {
+    "id": 516,
+    "name": "Olympique de Marseille",
+    "shortName": "Marseille",
+    "tla": "OLM",
+    "crest": "https://crests.football-data.org/516.png"
+  },
+  "score": {
+    "winner": "AWAY_TEAM",
+    "duration": "REGULAR",
+    "fullTime": {
+      "home": 0,
+      "away": 2
+    },
+    "halfTime": {
+      "home": 0,
+      "away": 0
+    }
+  },
+  "odds": {
+    "msg": "Activate Odds-Package in User-Panel to retrieve odds."
+  },
+  "referees": [
+    {
+      "id": 57001,
+      "name": "François Letexier",
+      "type": "REFEREE",
+      "nationality": "France"
+    },
+    {
+      "id": 57002,
+      "name": "Cyril Gringore",
+      "type": "ASSISTANT_REFEREE_N1",
+      "nationality": "France"
+    },
+    {
+      "id": 57003,
+      "name": "Mehdi Rahmouni",
+      "type": "ASSISTANT_REFEREE_N2",
+      "nationality": "France"
+    }
+  ]
+}

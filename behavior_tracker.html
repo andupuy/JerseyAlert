@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suivi Quotidien</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: white;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .calendar {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            margin-bottom: 30px;
+        }
+
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .calendar-header button {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: all 0.3s;
+        }
+
+        .calendar-header button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+
+        .calendar-header h2 {
+            font-size: 1.8em;
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 10px;
+        }
+
+        .day-header {
+            text-align: center;
+            font-weight: bold;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+        }
+
+        .day-cell {
+            aspect-ratio: 1;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .day-cell:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: scale(1.05);
+        }
+
+        .day-cell.has-note {
+            background: rgba(139, 92, 246, 0.4);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .day-cell.other-month {
+            opacity: 0.3;
+        }
+
+        .day-number {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .day-indicator {
+            width: 8px;
+            height: 8px;
+            background: #fbbf24;
+            border-radius: 50%;
+            margin-top: 5px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px;
+            border-radius: 20px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .modal-header h2 {
+            font-size: 1.8em;
+        }
+
+        .close-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            font-size: 1.5em;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .close-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: rotate(90deg);
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border-radius: 10px;
+            border: none;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            font-size: 1em;
+            font-family: inherit;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-save {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-save:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+
+        .btn-delete {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
+        }
+
+        .note-display {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+
+        .note-display h3 {
+            margin-bottom: 10px;
+            color: #fbbf24;
+        }
+
+        .note-display p {
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>📅 Suivi Quotidien</h1>
+
+        <div class="calendar">
+            <div class="calendar-header">
+                <button onclick="previousMonth()">◀ Précédent</button>
+                <h2 id="currentMonth"></h2>
+                <button onclick="nextMonth()">Suivant ▶</button>
+            </div>
+
+            <div class="calendar-grid" id="calendarGrid"></div>
+        </div>
+    </div>
+
+    <div class="modal" id="noteModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalDate"></h2>
+                <button class="close-btn" onclick="closeModal()">×</button>
+            </div>
+
+            <div id="noteForm">
+                <div class="form-group">
+                    <label>Comporté</label>
+                    <select id="comporte">
+                        <option value="">-- Sélectionner --</option>
+                        <option value="excellent">😊 Excellent</option>
+                        <option value="bien">🙂 Bien</option>
+                        <option value="moyen">😐 Moyen</option>
+                        <option value="mauvais">😞 Mauvais</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Plus pour plus (Points positifs)</label>
+                    <textarea id="plusPlus" placeholder="Notez les points positifs de la journée..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Plus pour moins (Points à améliorer)</label>
+                    <textarea id="plusMoins" placeholder="Notez les points à améliorer..."></textarea>
+                </div>
+
+                <div class="btn-group">
+                    <button class="btn btn-save" onclick="saveNote()">💾 Enregistrer</button>
+                    <button class="btn btn-delete" onclick="deleteNote()">🗑️ Supprimer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentDate = new Date();
+        let selectedDate = null;
+        let notes = JSON.parse(localStorage.getItem('behaviorNotes') || '{}');
+
+        const dayNames = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+        const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+            'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+        function renderCalendar() {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+
+            document.getElementById('currentMonth').textContent =
+                `${monthNames[month]} ${year}`;
+
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const prevLastDay = new Date(year, month, 0);
+
+            const firstDayOfWeek = firstDay.getDay();
+            const lastDate = lastDay.getDate();
+            const prevLastDate = prevLastDay.getDate();
+
+            let html = '';
+
+            // Day headers
+            dayNames.forEach(day => {
+                html += `<div class="day-header">${day}</div>`;
+            });
+
+            // Previous month days
+            for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+                html += `<div class="day-cell other-month">
+                    <div class="day-number">${prevLastDate - i}</div>
+                </div>`;
+            }
+
+            // Current month days
+            for (let day = 1; day <= lastDate; day++) {
+                const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const hasNote = notes[dateKey] ? 'has-note' : '';
+
+                html += `<div class="day-cell ${hasNote}" onclick="openNote('${dateKey}')">
+                    <div class="day-number">${day}</div>
+                    ${notes[dateKey] ? '<div class="day-indicator"></div>' : ''}
+                </div>`;
+            }
+
+            // Next month days
+            const remainingCells = 42 - (firstDayOfWeek + lastDate);
+            for (let day = 1; day <= remainingCells; day++) {
+                html += `<div class="day-cell other-month">
+                    <div class="day-number">${day}</div>
+                </div>`;
+            }
+
+            document.getElementById('calendarGrid').innerHTML = html;
+        }
+
+        function previousMonth() {
+            currentDate.setMonth(currentDate.getMonth() - 1);
+            renderCalendar();
+        }
+
+        function nextMonth() {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+            renderCalendar();
+        }
+
+        function openNote(dateKey) {
+            selectedDate = dateKey;
+            const [year, month, day] = dateKey.split('-');
+            const date = new Date(year, month - 1, day);
+
+            document.getElementById('modalDate').textContent =
+                `${day} ${monthNames[parseInt(month) - 1]} ${year}`;
+
+            const note = notes[dateKey] || {};
+            document.getElementById('comporte').value = note.comporte || '';
+            document.getElementById('plusPlus').value = note.plusPlus || '';
+            document.getElementById('plusMoins').value = note.plusMoins || '';
+
+            document.getElementById('noteModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('noteModal').classList.remove('active');
+        }
+
+        function saveNote() {
+            const comporte = document.getElementById('comporte').value;
+            const plusPlus = document.getElementById('plusPlus').value;
+            const plusMoins = document.getElementById('plusMoins').value;
+
+            if (comporte || plusPlus || plusMoins) {
+                notes[selectedDate] = { comporte, plusPlus, plusMoins };
+                localStorage.setItem('behaviorNotes', JSON.stringify(notes));
+                renderCalendar();
+                closeModal();
+            }
+        }
+
+        function deleteNote() {
+            if (confirm('Supprimer cette note ?')) {
+                delete notes[selectedDate];
+                localStorage.setItem('behaviorNotes', JSON.stringify(notes));
+                renderCalendar();
+                closeModal();
+            }
+        }
+
+        // Close modal on outside click
+        document.getElementById('noteModal').addEventListener('click', (e) => {
+            if (e.target.id === 'noteModal') {
+                closeModal();
+            }
+        });
+
+        // Initial render
+        renderCalendar();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,150 @@
+{
+  "saison": "2003-2004",
+  "equipe": "AS Saint-Étienne",
+  "competition": "Ligue 1",
+  "matchs": [
+    {
+      "matchday": 1,
+      "date": "2003-08-02T20:00:00Z",
+      "homeTeam": "AS Saint-Étienne",
+      "awayTeam": "FC Sochaux-Montbéliard",
+      "score": {
+        "home": 1,
+        "away": 1
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED"
+    },
+    {
+      "matchday": 2,
+      "date": "2003-08-09T20:00:00Z",
+      "homeTeam": "Olympique Lyonnais",
+      "awayTeam": "AS Saint-Étienne",
+      "score": {
+        "home": 2,
+        "away": 0
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED"
+    },
+    {
+      "matchday": 5,
+      "date": "2003-08-30T20:00:00Z",
+      "homeTeam": "AS Saint-Étienne",
+      "awayTeam": "Paris Saint-Germain",
+      "score": {
+        "home": 2,
+        "away": 1
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED",
+      "highlight": "Victoire contre le PSG !"
+    },
+    {
+      "matchday": 10,
+      "date": "2003-10-18T20:00:00Z",
+      "homeTeam": "AS Saint-Étienne",
+      "awayTeam": "Olympique de Marseille",
+      "score": {
+        "home": 1,
+        "away": 0
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED",
+      "highlight": "Victoire contre l'OM !"
+    },
+    {
+      "matchday": 15,
+      "date": "2003-11-29T20:00:00Z",
+      "homeTeam": "AS Monaco",
+      "awayTeam": "AS Saint-Étienne",
+      "score": {
+        "home": 3,
+        "away": 0
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED"
+    },
+    {
+      "matchday": 20,
+      "date": "2004-01-17T20:00:00Z",
+      "homeTeam": "AS Saint-Étienne",
+      "awayTeam": "FC Nantes",
+      "score": {
+        "home": 2,
+        "away": 2
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED"
+    },
+    {
+      "matchday": 25,
+      "date": "2004-02-21T20:00:00Z",
+      "homeTeam": "Lille OSC",
+      "awayTeam": "AS Saint-Étienne",
+      "score": {
+        "home": 1,
+        "away": 1
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED"
+    },
+    {
+      "matchday": 30,
+      "date": "2004-03-27T20:00:00Z",
+      "homeTeam": "AS Saint-Étienne",
+      "awayTeam": "AJ Auxerre",
+      "score": {
+        "home": 3,
+        "away": 1
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED",
+      "highlight": "Belle victoire !"
+    },
+    {
+      "matchday": 35,
+      "date": "2004-05-01T20:00:00Z",
+      "homeTeam": "RC Lens",
+      "awayTeam": "AS Saint-Étienne",
+      "score": {
+        "home": 2,
+        "away": 1
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED"
+    },
+    {
+      "matchday": 38,
+      "date": "2004-05-15T20:00:00Z",
+      "homeTeam": "AS Saint-Étienne",
+      "awayTeam": "Girondins de Bordeaux",
+      "score": {
+        "home": 1,
+        "away": 2
+      },
+      "competition": "Ligue 1",
+      "status": "FINISHED",
+      "highlight": "Dernier match de la saison"
+    }
+  ],
+  "statistiques": {
+    "victoires": 3,
+    "nuls": 3,
+    "defaites": 4,
+    "buts_marques": 12,
+    "buts_encaisses": 15,
+    "domicile": {
+      "V": 3,
+      "N": 2,
+      "D": 1
+    },
+    "exterieur": {
+      "V": 0,
+      "N": 1,
+      "D": 3
+    },
+    "points": 12,
+    "difference": -3
+  }
+}

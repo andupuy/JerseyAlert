@@ -1,0 +1,27 @@
+{
+  "name": "Groundhopping Tracker",
+  "short_name": "Groundhopping",
+  "description": "Suivez tous les matchs de foot auxquels vous avez assisté",
+  "start_url": "/groundhopping/index.html",
+  "display": "standalone",
+  "background_color": "#0f0f1e",
+  "theme_color": "#1a1a2e",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["sports", "lifestyle"],
+  "lang": "fr",
+  "dir": "ltr"
+}

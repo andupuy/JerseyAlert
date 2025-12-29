@@ -22,37 +22,25 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
+          pip install requests playwright
+          playwright install chromium
+          playwright install-deps chromium
 
-      - name: Run Vinted Bot (Loop Mode)
+      - name: Run Vinted Bot
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        # Single check (no loop) - runs every 10 minutes
-        # This keeps us within GitHub's 2000 min/month free quota
-        # 144 checks/day × 15s = 36 min/day = 1080 min/month
-        # Average detection delay: ~5 minutes
-        run: python vinted_bot_github.py --duration 15 --interval 15
+        run: python vinted_bot_oracle.py
 
       - name: Commit state (Last Seen ID)
-        if: always() # Always run this step even if timeout occurs
+        if: always()
         run: |
           git config --global user.name 'Vinted Bot'
           git config --global user.email 'bot@noreply.github.com'
           git add last_seen_id.txt
+          git add last_seen_ids.txt || true # Au cas où on utilise l'autre fichier
           if git diff --quiet && git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git stash
-            git pull --rebase origin main || {
-              # If conflict, take the remote version (it's newer)
-              git checkout --theirs last_seen_id.txt
-              git add last_seen_id.txt
-              git rebase --continue
-            }
-            git stash pop || true
-            git add last_seen_id.txt
-            if ! git diff --quiet || ! git diff --staged --quiet; then
-              git commit -m "Update last seen ID"
-              git push
-            fi
+            git commit -m "🤖 Update last seen ID (GHA Mode)"
+            git push
           fi
