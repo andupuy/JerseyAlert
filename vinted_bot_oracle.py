@@ -326,7 +326,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.7 ULTRASSUR (CLEAN QUERIES)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.8 SNIPER (ANTI-SPAM)")
     log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -365,33 +365,28 @@ def run_bot():
                 route.continue_()
 
         # Initialisation intelligente (Anti-Spam au redémarrage)
-        if last_seen_id == 0:
-            log("🚀 Premier lancement (ou redémarrage Railway). Initialisation du dernier ID...")
-            try:
-                page = context.new_page()
-                # On bloque tout pour l'init, c'est juste pour avoir l'ID
-                page.route("**/*", block_resources) 
-                
-                page.goto(get_search_url(SEARCH_QUERIES[0]), wait_until='domcontentloaded', timeout=30000)
+        log("🚀 Phase d'initialisation (remplissage du cache sans alertes)...")
+        try:
+            page = context.new_page()
+            page.route("**/*", block_resources) 
+            
+            for query in SEARCH_QUERIES:
+                log(f"📥 Pré-chargement : '{query}'...")
+                page.goto(get_search_url(query), wait_until='domcontentloaded', timeout=30000)
                 items = extract_items_from_page(page)
                 if items:
-                    last_seen_id = max(item['id'] for item in items)
                     for item in items:
                         seen_ids.add(item['id'])
-                    
-                    save_last_seen_id(last_seen_id)
-                    log(f"✅ Initialisé ! {len(seen_ids)} articles ajoutés au cache.")
-                    log("🤫 Pas d'alerte pour les articles déjà en ligne.")
-                else:
-                    log("⚠️ Aucun article trouvé pour l'initialisation.")
-                page.close()
-            except Exception as e:
-                log(f"❌ Erreur lors de l'initialisation: {e}")
+                        if item['id'] > last_seen_id:
+                            last_seen_id = item['id']
+            
+            save_last_seen_id(last_seen_id)
+            log(f"✅ Initialisé ! {len(seen_ids)} articles en mémoire. Dernier ID : {last_seen_id}")
+            page.close()
+        except Exception as e:
+            log(f"❌ Erreur lors de l'initialisation: {e}")
 
-        log("✅ Navigateur initialisé (Mode Éco)")
-        
-        iteration = 0
-
+        log("✅ Navigateur prêt. Lancement du mode Sniper...")
         
         try:
             while True:
@@ -402,11 +397,10 @@ def run_bot():
                     sys.exit(1)
 
                 log(f"\n" + "🚀" + "="*50)
-                log(f"⚡ Nouveau Cycle de recherche (X{len(SEARCH_QUERIES)})")
+                log(f"⚡ Cycle de scan (X{len(SEARCH_QUERIES)})")
                 
                 for current_query in SEARCH_QUERIES:
                     try:
-                        # On crée une page fraîche pour chaque recherche pour une isolation maximale
                         page = context.new_page()
                         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                         page.route("**/*", block_resources)
@@ -415,21 +409,21 @@ def run_bot():
                         page.goto(get_search_url(current_query), wait_until='domcontentloaded', timeout=20000)
                         
                         items = extract_items_from_page(page)
-                        page.close() # On ferme tout de suite pour la RAM
+                        page.close()
 
                         if items:
-                            new_items = []
+                            new_found = []
                             for item in items:
-                                if item['id'] not in seen_ids:
-                                    new_items.append(item)
+                                # LE DOUBLE VERROU (Anti-Spam)
+                                if item['id'] not in seen_ids and item['id'] > last_seen_id:
+                                    new_found.append(item)
                                     seen_ids.add(item['id'])
                             
-                            if new_items:
-                                log(f"🆕 {len(new_items)} nouveaux articles sur cette recherche.")
-                                new_items.sort(key=lambda x: x['id'])
+                            if new_found:
+                                log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
+                                new_found.sort(key=lambda x: x['id'])
                                 
-                                for item in new_items:
-                                    # FILTRE DE MOTS-CLÉS STRICT (V6.4)
+                                for item in new_found:
                                     title_low = item.get('title', '').lower()
                                     has_maillot = "maillot" in title_low
                                     has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne"])
@@ -440,7 +434,11 @@ def run_bot():
                                     else:
                                         log(f"⏭️  Ignoré : '{item.get('title')}'")
                                 
-                                save_last_seen_id(max(item['id'] for item in new_items))
+                                # Mise à jour du dernier ID vu
+                                current_max = max(item['id'] for item in new_found)
+                                if current_max > last_seen_id:
+                                    last_seen_id = current_max
+                                    save_last_seen_id(last_seen_id)
                         
                         # Petite pause entre deux recherches du même cycle pour respirer
                         time.sleep(1)
