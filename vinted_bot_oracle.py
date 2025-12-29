@@ -326,7 +326,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.5 PREMIUM (MULTI-SEARCH)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.6 ULTRASSUR (FAST CYCLE)")
     log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -393,90 +393,71 @@ def run_bot():
         iteration = 0
 
         
-        query_index = 0
-        
         try:
             while True:
-                # Rotation du mot-clé
-                current_query = SEARCH_QUERIES[query_index]
-                query_index = (query_index + 1) % len(SEARCH_QUERIES)
-
                 # Gestion des heures de sommeil
                 current_hour = datetime.now().hour
                 if current_hour >= 23 or current_hour < 8:
                     log("🌙 Il est tard. Arrêt planifié...")
                     sys.exit(1)
 
-                log(f"\n" + "="*50)
-                log(f"🔎 Check Vinted: '{current_query}'")
+                log(f"\n" + "🚀" + "="*50)
+                log(f"⚡ Nouveau Cycle de recherche (X{len(SEARCH_QUERIES)})")
                 
-                # NOUVEAU: On crée une page fraîche à CHAQUE vérification
-                page = context.new_page()
-                page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                page.route("**/*", block_resources)
-
-                try:
-                    # Charger la page de recherche dynamique
-                    page.goto(get_search_url(current_query), wait_until='domcontentloaded', timeout=30000)
-                    
-                    # Extraire les articles
-                    items = extract_items_from_page(page)
-                    
-                    # On ferme la page tout de suite pour libérer la RAM
-                    page.close()
-                    
-                    if items:
-                        log(f"📦 {len(items)} articles trouvés")
+                for current_query in SEARCH_QUERIES:
+                    try:
+                        # On crée une page fraîche pour chaque recherche pour une isolation maximale
+                        page = context.new_page()
+                        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                        page.route("**/*", block_resources)
                         
-                        # Filtrer les VRAIS nouveaux articles
-                        new_items = []
-                        for item in items:
-                            if item['id'] not in seen_ids:
-                                new_items.append(item)
-                                seen_ids.add(item['id'])
+                        log(f"🔎 Check: '{current_query}'")
+                        page.goto(get_search_url(current_query), wait_until='domcontentloaded', timeout=20000)
                         
-                        # Nettoyer cache
-                        if len(seen_ids) > 200:
-                             seen_ids_list = list(seen_ids)
-                             seen_ids = set(seen_ids_list[-100:])
+                        items = extract_items_from_page(page)
+                        page.close() # On ferme tout de suite pour la RAM
 
-                        if new_items:
-                            log(f"🆕 {len(new_items)} nouveaux articles trouvés au total.")
-                            new_items.sort(key=lambda x: x['id'])
-                            
-                            for item in new_items:
-                                # FILTRE DE MOTS-CLÉS STRICT (V6.4)
-                                title_low = item.get('title', '').lower()
-                                
-                                has_maillot = "maillot" in title_low
-                                has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne"])
-                                
-                                if has_maillot and has_team:
-                                    log(f"🎯 Article matché : '{item.get('title')}'")
-                                    # send_discord_alert crée sa propre page pour les détails
-                                    send_discord_alert(context, item)
-                                    time.sleep(1)
-                                else:
-                                    log(f"⏭️  Article ignoré (filtre strict) : '{item.get('title')}'")
+                        if items:
+                            new_items = []
+                            for item in items:
+                                if item['id'] not in seen_ids:
+                                    new_items.append(item)
+                                    seen_ids.add(item['id'])
                             
                             if new_items:
+                                log(f"🆕 {len(new_items)} nouveaux articles sur cette recherche.")
+                                new_items.sort(key=lambda x: x['id'])
+                                
+                                for item in new_items:
+                                    # FILTRE DE MOTS-CLÉS STRICT (V6.4)
+                                    title_low = item.get('title', '').lower()
+                                    has_maillot = "maillot" in title_low
+                                    has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne"])
+                                    
+                                    if has_maillot and has_team:
+                                        log(f"🎯 MATCH : '{item.get('title')}'")
+                                        send_discord_alert(context, item)
+                                    else:
+                                        log(f"⏭️  Ignoré : '{item.get('title')}'")
+                                
                                 save_last_seen_id(max(item['id'] for item in new_items))
+                        
+                        # Petite pause entre deux recherches du même cycle pour respirer
+                        time.sleep(1)
 
-                        else:
-                            log("😴 Aucun nouvel article (doublons filtrés)")
-                    else:
-                        log("⚠️  Aucun article trouvé (possible problème de scraping)")
-                    
-                except Exception as e:
-                    log(f"❌ Erreur lors de la vérification: {e}")
-                    # En cas d'erreur, on s'assure que la page est fermée
-                    try: page.close()
-                    except: pass
+                    except Exception as e:
+                        log(f"⚠️ Erreur sur '{current_query}': {e}")
+                        try: page.close()
+                        except: pass
                 
-                # Attendre un délai aléatoire
-                wait_time = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
-                log(f"⏳ Prochaine vérification dans {wait_time:.1f}s")
-                time.sleep(wait_time)
+                # Cache maintenance
+                if len(seen_ids) > 200:
+                    seen_ids_list = list(seen_ids)
+                    seen_ids = set(seen_ids_list[-100:])
+
+                # Pause de 10s avant le prochain cycle complet
+                log(f"⏳ Cycle terminé. Pause de 10s...")
+                time.sleep(10)
                 
         except KeyboardInterrupt:
             log("\n⛔ Arrêt du bot demandé")
