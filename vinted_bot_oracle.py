@@ -324,7 +324,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION FINALE V6.3 (STABLE)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.4 PREMIUM (STRICT FILTER)")
     log(f"🔍 Recherche: '{SEARCH_TEXT}'")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -438,13 +438,23 @@ def run_bot():
                              seen_ids = set(seen_ids_list[-100:])
 
                         if new_items:
-                            log(f"🆕 {len(new_items)} nouveaux articles!")
+                            log(f"🆕 {len(new_items)} nouveaux articles trouvés au total.")
                             new_items.sort(key=lambda x: x['id'])
                             
                             for item in new_items:
-                                # send_discord_alert crée sa propre page pour les détails
-                                send_discord_alert(context, item)
-                                time.sleep(1)
+                                # FILTRE DE MOTS-CLÉS STRICT (V6.4)
+                                title_low = item.get('title', '').lower()
+                                
+                                has_maillot = "maillot" in title_low
+                                has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne"])
+                                
+                                if has_maillot and has_team:
+                                    log(f"🎯 Article matché : '{item.get('title')}'")
+                                    # send_discord_alert crée sa propre page pour les détails
+                                    send_discord_alert(context, item)
+                                    time.sleep(1)
+                                else:
+                                    log(f"⏭️  Article ignoré (filtre strict) : '{item.get('title')}'")
                             
                             if new_items:
                                 save_last_seen_id(max(item['id'] for item in new_items))
