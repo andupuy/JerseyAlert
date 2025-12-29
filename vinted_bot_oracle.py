@@ -16,12 +16,14 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # Configuration
-SEARCH_TEXT = "Maillot Asse"
-VINTED_SEARCH_URL = f"https://www.vinted.fr/catalog?search_text={SEARCH_TEXT.replace(' ', '+')}&order=newest_first"
+SEARCH_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne", "Maillot Saint-Étienne"]
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 CHECK_INTERVAL_MIN = 10  # secondes minimum entre checks
 CHECK_INTERVAL_MAX = 20  # secondes maximum entre checks
+
+def get_search_url(query):
+    return f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
 
 def log(message):
     """Log avec timestamp"""
@@ -324,8 +326,8 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.4 PREMIUM (STRICT FILTER)")
-    log(f"🔍 Recherche: '{SEARCH_TEXT}'")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.5 PREMIUM (MULTI-SEARCH)")
+    log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
     last_seen_id = load_last_seen_id()
@@ -370,7 +372,7 @@ def run_bot():
                 # On bloque tout pour l'init, c'est juste pour avoir l'ID
                 page.route("**/*", block_resources) 
                 
-                page.goto(VINTED_SEARCH_URL, wait_until='domcontentloaded', timeout=30000)
+                page.goto(get_search_url(SEARCH_QUERIES[0]), wait_until='domcontentloaded', timeout=30000)
                 items = extract_items_from_page(page)
                 if items:
                     last_seen_id = max(item['id'] for item in items)
@@ -391,30 +393,31 @@ def run_bot():
         iteration = 0
 
         
+        query_index = 0
+        
         try:
             while True:
+                # Rotation du mot-clé
+                current_query = SEARCH_QUERIES[query_index]
+                query_index = (query_index + 1) % len(SEARCH_QUERIES)
+
                 # Gestion des heures de sommeil
                 current_hour = datetime.now().hour
                 if current_hour >= 23 or current_hour < 8:
-                    log("🌙 Il est tard. Arrêt planifié pour économiser les crédits Railway.")
-                    log("💤 Le bot va crasher volontairement.")
+                    log("🌙 Il est tard. Arrêt planifié...")
                     sys.exit(1)
 
-                iteration += 1
-                log(f"\n{'='*50}")
-                log(f"🔄 Vérification #{iteration}")
+                log(f"\n" + "="*50)
+                log(f"🔎 Check Vinted: '{current_query}'")
                 
                 # NOUVEAU: On crée une page fraîche à CHAQUE vérification
-                # C'est la seule façon de garantir 0 fuite mémoire sur le long terme
                 page = context.new_page()
                 page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                
-                # On bloque les images/css pour la recherche (ça va 2x plus vite)
                 page.route("**/*", block_resources)
 
                 try:
-                    # Charger la page de recherche
-                    page.goto(VINTED_SEARCH_URL, wait_until='domcontentloaded', timeout=30000)
+                    # Charger la page de recherche dynamique
+                    page.goto(get_search_url(current_query), wait_until='domcontentloaded', timeout=30000)
                     
                     # Extraire les articles
                     items = extract_items_from_page(page)
