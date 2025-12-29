@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Mon Dec 29 11:51:00 CET 2025 (V6.8 ANTI-SPAM)
+# Force Update Mon Dec 29 23:01:00 CET 2025 (V6.9 ELITE)

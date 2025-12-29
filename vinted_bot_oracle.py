@@ -16,7 +16,11 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # Configuration
-SEARCH_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne"]
+SEARCH_QUERIES = [
+    "Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne",
+    "Jersey Asse", "Jersey Saint-Etienne",
+    "Maglia Asse", "Tshirt Asse", "Camiseta Asse", "Shirt Asse"
+]
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 CHECK_INTERVAL_MIN = 10  # secondes minimum entre checks
@@ -326,7 +330,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.8 SNIPER (ANTI-SPAM)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.9 ELITE (Extended Hours & Keywords)")
     log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -392,7 +396,7 @@ def run_bot():
             while True:
                 # Gestion des heures de sommeil
                 current_hour = datetime.now().hour
-                if current_hour >= 23 or current_hour < 8:
+                if current_hour >= 0 and current_hour < 8:
                     log("🌙 Il est tard. Arrêt planifié...")
                     sys.exit(1)
 
@@ -425,7 +429,10 @@ def run_bot():
                                 
                                 for item in new_found:
                                     title_low = item.get('title', '').lower()
-                                    has_maillot = "maillot" in title_low
+                                    # FILTRE DE MOTS-CLÉS ÉLARGI (V6.9)
+                                    # On accepte maillot, jersey, maglia, shirt, camiseta, tshirt
+                                    synonyms = ["maillot", "jersey", "maglia", "shirt", "camiseta", "tshirt", "t-shirt", "chemise"]
+                                    has_maillot = any(s in title_low for s in synonyms)
                                     has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne"])
                                     
                                     if has_maillot and has_team:
