@@ -16,7 +16,7 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # Configuration
-SEARCH_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne", "Maillot Saint-Étienne"]
+SEARCH_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne"]
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 CHECK_INTERVAL_MIN = 10  # secondes minimum entre checks
@@ -326,7 +326,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.6 ULTRASSUR (FAST CYCLE)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.7 ULTRASSUR (CLEAN QUERIES)")
     log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
