@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Tue Dec 30 00:35:00 CET 2025 (V7.2 FIX TZ)
+# Force Update Tue Dec 30 00:46:00 CET 2025 (V7.5 NIGHT OWL)

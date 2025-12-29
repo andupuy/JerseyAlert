@@ -332,7 +332,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V7.4 ULTIMATE SNIPER (SILENT NIGHT)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V7.5 ULTIMATE SNIPER (NIGHT OWL)")
     log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -406,7 +406,7 @@ def run_bot():
                 import datetime as dt
                 # Railway est souvent en UTC, on ajoute 1h pour Paris
                 current_hour = (dt.datetime.utcnow().hour + 1) % 24
-                if current_hour >= 0 and current_hour < 8:
+                if current_hour >= 1 and current_hour < 7:
                     if 'is_sleeping' not in locals() or not is_sleeping:
                         log(f"🌙 Mode Veille Silencieuse activé ({current_hour}h). Plus d'emails de crash !")
                         is_sleeping = True
