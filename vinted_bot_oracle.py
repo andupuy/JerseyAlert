@@ -243,8 +243,9 @@ def extract_items_from_page(page):
                              if (potentialBrand) brand = potentialBrand;
                         }
 
-                        // 6. Nettoyage final du Titre (V6.3)
-                        title = title.replace(/enlevé/gi, '').replace(/!/g, '').replace(/\\s*,\\s*$/, '').trim();
+                        // 6. Nettoyage final du Titre (V7.0 AGRESSIF)
+                        title = title.replace(/enlevé/gi, '').replace(/nouveau/gi, '').replace(/!/g, '').replace(/\\s*,\\s*$/, '').trim();
+                        title = title.replace(/\\s{2,}/g, ' '); // Enlever double espaces
                         if (!title || title.length < 3) title = 'Maillot ASSE';
 
                         const imgEl = el.querySelector('img');
@@ -302,10 +303,11 @@ def send_discord_alert(context, item):
         # Photos
         photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
         
-        description = details['description']
+        description = details['description'].replace("Enlevé", "").replace("enlevé", "").replace("!", "").strip()
         if len(description) > 300: description = description[:300] + "..."
 
         description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{description}"
+        description_text = description_text.replace("Enlevé", "").replace("enlevé", "").replace("!", "")
 
         embed1 = {
             "title": f"🔔 {item.get('title')}",
@@ -330,7 +332,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V6.9 ELITE (Extended Hours & Keywords)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V7.0 ULTIMATE SNIPER (Anti-Enlevé & 1000 Cache)")
     log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
@@ -375,14 +377,20 @@ def run_bot():
             page.route("**/*", block_resources) 
             
             for query in SEARCH_QUERIES:
-                log(f"📥 Pré-chargement : '{query}'...")
-                page.goto(get_search_url(query), wait_until='domcontentloaded', timeout=30000)
-                items = extract_items_from_page(page)
-                if items:
-                    for item in items:
-                        seen_ids.add(item['id'])
-                        if item['id'] > last_seen_id:
-                            last_seen_id = item['id']
+                for attempt in range(2): # 2 tentatives en cas de lag
+                    try:
+                        log(f"📥 Pré-chargement ({attempt+1}/2) : '{query}'...")
+                        page.goto(get_search_url(query), wait_until='domcontentloaded', timeout=30000)
+                        items = extract_items_from_page(page)
+                        if items:
+                            for item in items:
+                                seen_ids.add(item['id'])
+                                if item['id'] > last_seen_id:
+                                    last_seen_id = item['id']
+                            break # Succès, on passe au suivant
+                        time.sleep(2)
+                    except:
+                        continue
             
             save_last_seen_id(last_seen_id)
             log(f"✅ Initialisé ! {len(seen_ids)} articles en mémoire. Dernier ID : {last_seen_id}")
@@ -455,10 +463,10 @@ def run_bot():
                         try: page.close()
                         except: pass
                 
-                # Cache maintenance
-                if len(seen_ids) > 200:
-                    seen_ids_list = list(seen_ids)
-                    seen_ids = set(seen_ids_list[-100:])
+                # Cache maintenance (V7.0 : 1000 items pour gérer les 9 recherches)
+                if len(seen_ids) > 1000:
+                    seen_ids_list = sorted(list(seen_ids), reverse=True)
+                    seen_ids = set(seen_ids_list[:800]) # On garde les 800 plus récents
 
                 # Pause de 10s avant le prochain cycle complet
                 log(f"⏳ Cycle terminé. Pause de 10s...")
