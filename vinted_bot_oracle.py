@@ -402,10 +402,12 @@ def run_bot():
         
         try:
             while True:
-                # Gestion des heures de sommeil
-                current_hour = datetime.now().hour
+                # Gestion des heures de sommeil (Heure de Paris UTC+1)
+                import datetime as dt
+                # Railway est souvent en UTC, on ajoute 1h pour Paris
+                current_hour = (dt.datetime.utcnow().hour + 1) % 24
                 if current_hour >= 0 and current_hour < 8:
-                    log("🌙 Il est tard. Arrêt planifié...")
+                    log(f"🌙 Il est {current_hour}h (Paris). Arrêt planifié...")
                     sys.exit(1)
 
                 log(f"\n" + "🚀" + "="*50)

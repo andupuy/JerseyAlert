@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Mon Dec 29 23:02:00 CET 2025 (V7.0 ULTIMATE SNIPER)
+# Force Update Tue Dec 30 00:35:00 CET 2025 (V7.2 FIX TZ)
