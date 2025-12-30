@@ -351,7 +351,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.4 TOTAL CLEAN.🍿🧼🟢⚖️")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.5 ACCENT PROOF")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
@@ -480,7 +480,7 @@ def run_bot():
                                     # FILTRE STRICT (V8.3)
                                     synonyms = ["maillot", "jersey", "maglia", "camiseta"]
                                     has_item_kw = any(s in title_low for s in synonyms)
-                                    has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne"])
+                                    has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
                                     
                                     if has_item_kw and has_team:
                                         log(f"🎯 MATCH : '{item.get('title')}'")
