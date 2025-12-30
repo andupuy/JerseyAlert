@@ -351,171 +351,120 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.5 ACCENT PROOF")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.6 ANTI-CRASH")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
-    last_seen_id = load_last_seen_id()
-    seen_ids = set() # Cache pour éviter les doublons
-    last_secondary_check = 0 # Timestamp pour le cycle de 20 min
-    log(f"📌 Dernier ID vu: {last_seen_id}")
+    # Initialisation silencieuse (On ne charge pas tout pour éviter de saturer Railway)
+    seen_ids = set()
+    last_secondary_check = 0
     
-    with sync_playwright() as p:
-        # Lancer le navigateur en mode headless optimisé
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', # Indispensable sur Docker/Railway
-                '--disable-blink-features=AutomationControlled',
-                '--disable-gpu' # Économie RAM
-            ]
-        )
-        
-        # Créer un contexte avec un user agent réaliste
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            viewport={'width': 1280, 'height': 720}, # Résolution plus petite = moins de RAM
-            locale='fr-FR',
-            timezone_id='Europe/Paris'
-        )
-        
-        # Bloquer les ressources inutiles pour économiser la RAM et la bande passante
-        def block_resources(route):
-            if route.request.resource_type in ["image", "media", "font", "stylesheet"]:
-                # On laisse passer les images Vinted si on est sur une page détail, sinon on bloque
-                # Mais pour la recherche, on bloque tout
-                route.abort()
-            else:
-                route.continue_()
+    log("🚀 Phase d'initialisation rapide...")
+    # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
+    is_initial_cycle = True
+    last_seen_id = load_last_seen_id() # Load last_seen_id here
 
-        # Initialisation intelligente (Anti-Spam au redémarrage)
-        log("🚀 Phase d'initialisation (remplissage du cache sans alertes)...")
-        try:
-            page = context.new_page()
-            page.route("**/*", block_resources) 
-            
-            for query in SEARCH_QUERIES:
-                for attempt in range(2): # 2 tentatives en cas de lag
-                    try:
-                        log(f"📥 Pré-chargement ({attempt+1}/2) : '{query}'...")
-                        page.goto(get_search_url(query), wait_until='domcontentloaded', timeout=30000)
-                        items = extract_items_from_page(page)
-                        if items:
-                            for item in items:
-                                seen_ids.add(item['id'])
-                                if item['id'] > last_seen_id:
-                                    last_seen_id = item['id']
-                            break # Succès, on passe au suivant
-                        time.sleep(2)
-                    except:
-                        continue
-            
-            save_last_seen_id(last_seen_id)
-            log(f"✅ Initialisé ! {len(seen_ids)} articles en mémoire. Dernier ID : {last_seen_id}")
-            page.close()
-        except Exception as e:
-            log(f"❌ Erreur lors de l'initialisation: {e}")
+    try:
+        while True:
+            # 1. Gestion des heures (Paris UTC+1)
+            import datetime as dt
+            current_hour = (dt.datetime.utcnow().hour + 1) % 24
+            if current_hour >= 1 and current_hour < 7:
+                log(f"🌙 Mode Veille Silencieuse activé ({current_hour}h).")
+                time.sleep(600)
+                continue
 
-        log("✅ Navigateur prêt. Lancement du mode Sniper...")
-        
-        try:
-            while True:
-                # Gestion des heures de sommeil (Heure de Paris UTC+1)
-                import datetime as dt
-                # Railway est souvent en UTC, on ajoute 1h pour Paris
-                current_hour = (dt.datetime.utcnow().hour + 1) % 24
-                if current_hour >= 1 and current_hour < 7:
-                    if 'is_sleeping' not in locals() or not is_sleeping:
-                        log(f"🌙 Mode Veille Silencieuse activé ({current_hour}h). Plus d'emails de crash !")
-                        is_sleeping = True
-                    
-                    time.sleep(600) # Dort 10 minutes
-                    continue 
-                
-                is_sleeping = False # Réveil !
+            # 2. DÉMARRAGE MOTEUR NEUF (Anti-Crashes & RAM)
+            try:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                    )
+                    context = browser.new_context(
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        viewport={'width': 1280, 'height': 720},
+                        locale='fr-FR',
+                        timezone_id='Europe/Paris'
+                    )
 
-                # Détermination des recherches à effectuer pour ce cycle
-                current_cycle_queries = list(PRIORITY_QUERIES)
-                
-                # On ajoute les recherches secondaires toutes les 20 minutes (1200 secondes)
-                now = time.time()
-                is_full_cycle = (now - last_secondary_check) > 1200
-                if is_full_cycle:
-                    log("🌍 Mode Cycle Complet : Inclusion des recherches internationales")
-                    current_cycle_queries += SECONDARY_QUERIES
-                    last_secondary_check = now
+                    # Détermination des recherches
+                    current_cycle_queries = list(PRIORITY_QUERIES)
+                    now = time.time()
+                    if (now - last_secondary_check) > 1200:
+                        log("🌍 Mode Cycle Complet (International)")
+                        current_cycle_queries += SECONDARY_QUERIES
+                        last_secondary_check = now
 
-                log(f"\n" + "🚀" + "="*50)
-                log(f"⚡ Cycle de scan (X{len(current_cycle_queries)})")
-                
-                for current_query in current_cycle_queries:
-                    try:
-                        page = context.new_page()
-                        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                        page.route("**/*", block_resources)
-                        
-                        log(f"🔎 Check: '{current_query}'")
-                        page.goto(get_search_url(current_query), wait_until='domcontentloaded', timeout=20000)
-                        
-                        items = extract_items_from_page(page)
-                        page.close()
+                    log(f"\n" + "🚀" + "="*50)
+                    log(f"⚡ Scan V8.6 : {len(current_cycle_queries)} requêtes")
 
-                        if items:
-                            new_found = []
-                            for item in items:
-                                # LE DOUBLE VERROU SOUPLE (Anti-Oublis V8.2)
-                                # On accepte les IDs jusqu'à 100k en arrière (marge de sécurité)
-                                if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-                                    new_found.append(item)
-                                    seen_ids.add(item['id'])
+                    for query in current_cycle_queries:
+                        try:
+                            # Limitation du nombre de pages ouvertes simultanément
+                            page = context.new_page()
+                            # Blocage ressources pour économiser CPU/RAM
+                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
                             
-                            if new_found:
-                                log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
-                                new_found.sort(key=lambda x: x['id'])
+                            log(f"🔎 Check: '{query}'")
+                            page.goto(get_search_url(query), wait_until='domcontentloaded', timeout=30000)
+                            
+                            items = extract_items_from_page(page)
+                            page.close()
+
+                            if items:
+                                new_found = []
+                                for item in items:
+                                    # Buffer de sécurité de 100k IDs pour éviter de rater des annonces décalées
+                                    if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
+                                        new_found.append(item)
+                                        seen_ids.add(item['id'])
                                 
-                                for item in new_found:
-                                    title_low = item.get('title', '').lower()
-                                    # FILTRE STRICT (V8.3)
-                                    synonyms = ["maillot", "jersey", "maglia", "camiseta"]
-                                    has_item_kw = any(s in title_low for s in synonyms)
-                                    has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
+                                # Si c'est le tout premier cycle, on ne fait qu'initialiser seen_ids
+                                if is_initial_cycle:
+                                    if new_found:
+                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
+                                    continue
+
+                                if new_found:
+                                    log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
+                                    new_found.sort(key=lambda x: x['id'])
+                                    for item in new_found:
+                                        title_low = item.get('title', '').lower()
+                                        synonyms = ["maillot", "jersey", "maglia", "camiseta"]
+                                        has_item_kw = any(s in title_low for s in synonyms)
+                                        has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
+                                        
+                                        if has_item_kw and has_team:
+                                            log(f"🎯 MATCH : '{item.get('title')}'")
+                                            send_discord_alert(context, item)
                                     
-                                    if has_item_kw and has_team:
-                                        log(f"🎯 MATCH : '{item.get('title')}'")
-                                        send_discord_alert(context, item)
-                                    else:
-                                        log(f"⏭️  Ignoré : '{item.get('title')}'")
-                                
-                                # Mise à jour du dernier ID vu
-                                current_max = max(item['id'] for item in new_found)
-                                if current_max > last_seen_id:
-                                    last_seen_id = current_max
+                                    # Mise à jour de l'ID global
+                                    last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
                                     save_last_seen_id(last_seen_id)
-                        
-                        # Petite pause
-                        time.sleep(1)
 
-                    except Exception as e:
-                        log(f"⚠️ Erreur sur '{current_query}': {e}")
-                        try: page.close()
-                        except: pass
-                
-                # Cache maintenance (V8.2 : 2000 items pour éviter tout doublon)
-                if len(seen_ids) > 2000:
-                    seen_ids_list = sorted(list(seen_ids), reverse=True)
-                    seen_ids = set(seen_ids_list[:1500]) # On garde les 1500 plus récents
+                            time.sleep(1) # Petit repos entre recherches
+                        except Exception as e:
+                            log(f"⚠️ Erreur locale sur '{query}': {e}")
+                    
+                    browser.close()
+            except Exception as e:
+                log(f"🚨 Bug moteur Playwright : {e}. Redémarrage au prochain cycle.")
 
-                # Pause de 10s avant le prochain cycle complet
-                log(f"⏳ Cycle terminé. Pause de 10s...")
-                time.sleep(10)
-                
-        except KeyboardInterrupt:
-            log("\n⛔ Arrêt du bot demandé")
-        finally:
-            browser.close()
-            log("👋 Bot arrêté proprement")
+            # 3. Entretien du Cache
+            is_initial_cycle = False
+            if len(seen_ids) > 2000:
+                seen_ids_list = sorted(list(seen_ids), reverse=True)
+                seen_ids = set(seen_ids_list[:1500])
+
+            # 4. Sommeil
+            log(f"⏳ Cycle {datetime.now().strftime('%H:%M:%S')} terminé. Repos 10s...")
+            time.sleep(10)
+
+    except KeyboardInterrupt:
+        log("\n⛔ Arrêt du bot demandé")
+    finally:
+        log("👋 Bot éteint proprement")
 
 if __name__ == "__main__":
     run_bot()
