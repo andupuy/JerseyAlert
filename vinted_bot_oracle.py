@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 SEARCH_QUERIES = [
     "Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne",
     "Jersey Asse", "Jersey Saint-Etienne",
-    "Maglia Asse", "Tshirt Asse", "Camiseta Asse", "Shirt Asse"
+    "Maglia Asse", "Camiseta Asse"
 ]
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
@@ -332,7 +332,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V7.5 ULTIMATE SNIPER (NIGHT OWL)")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.0 ULTIMATE (7 Queries - Silent Night)")
     log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
     log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
     
