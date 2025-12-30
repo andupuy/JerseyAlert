@@ -303,24 +303,30 @@ def send_discord_alert(context, item):
         log(f"⚠️ Mode Simple (Détails échoués): {e}")
 
     try:
-        # FUSION INTELLIGENTE DES DONNÉES
-        # On ne prend la valeur 'details' QUE si elle n'est pas N/A, sinon on garde celle de la liste 'item'
-        
-        final_brand = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
-        final_size = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
-        final_status = details['status'] if details['status'] not in ['N/A', 'Non spécifié'] else item.get('status', 'Non spécifié')
-        final_price = item.get('price', 'N/A')
+        # FUSION ET NETTOYAGE (V8.4 TOTAL CLEAN)
+        price_raw = item.get('price', 'N/A')
+        brand_raw = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
+        size_raw = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
+        status_raw = details['status'] if details['status'] not in ['N/A', 'Non spécifié'] else item.get('status', 'Non spécifié')
+        desc_raw = details['description']
         
         # Photos
         photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
         
-        # Nettoyage final avant envoi (V8.2)
+        # Nettoyage radical
         final_title = clean_text(item.get('title'))
-        final_brand = clean_text(final_brand)
-        final_desc = clean_text(details['description'])
+        final_brand = clean_text(brand_raw)
+        final_price = clean_text(price_raw)
+        final_size = clean_text(size_raw)
+        final_status = clean_text(status_raw)
+        final_desc = clean_text(desc_raw)
+        
         if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
 
         description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
+        
+        # Un dernier coup de balai sur l'ensemble du bloc au cas où
+        description_text = description_text.replace("  ", " ").strip()
 
         embed1 = {
             "title": f"🔔 {final_title}",
@@ -345,7 +351,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.3 FINAL")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.4 TOTAL CLEAN.🍿🧼🟢⚖️")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     

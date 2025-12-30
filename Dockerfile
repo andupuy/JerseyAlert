@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Tue Dec 30 12:15:00 CET 2025 (V8.2 SUPER SNIPER)
+# Force Update Tue Dec 30 12:35:00 CET 2025 (V8.4 TOTAL CLEAN)
