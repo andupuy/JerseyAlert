@@ -24,8 +24,18 @@ SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
-CHECK_INTERVAL_MIN = 10  # secondes minimum entre checks
-CHECK_INTERVAL_MAX = 20  # secondes maximum entre checks
+CHECK_INTERVAL_MIN = 10
+CHECK_INTERVAL_MAX = 20
+
+def clean_text(text):
+    """Nettoyage radical des parasites Vinted (Enlevé, Nouveau, etc)"""
+    if not text: return ""
+    import re
+    # Supprime les badges publicitaires et parasites
+    text = re.sub(r'(?i)enlevé\s*!?', '', text)
+    text = re.sub(r'(?i)nouveau\s*!?', '', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 def get_search_url(query):
     return f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
@@ -244,9 +254,9 @@ def extract_items_from_page(page):
                              if (potentialBrand) brand = potentialBrand;
                         }
 
-                        // 6. Nettoyage final du Titre (V7.0 AGRESSIF)
+                        // 6. Nettoyage final du Titre (V8.2 AGRESSIF)
                         title = title.replace(/enlevé/gi, '').replace(/nouveau/gi, '').replace(/!/g, '').replace(/\\s*,\\s*$/, '').trim();
-                        title = title.replace(/\\s{2,}/g, ' '); // Enlever double espaces
+                        title = title.replace(/\\s{2,}/g, ' ');
                         if (!title || title.length < 3) title = 'Maillot ASSE';
 
                         const imgEl = el.querySelector('img');
@@ -304,14 +314,16 @@ def send_discord_alert(context, item):
         # Photos
         photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
         
-        description = details['description'].replace("Enlevé", "").replace("enlevé", "").replace("!", "").strip()
-        if len(description) > 300: description = description[:300] + "..."
+        # Nettoyage final avant envoi (V8.2)
+        final_title = clean_text(item.get('title'))
+        final_brand = clean_text(final_brand)
+        final_desc = clean_text(details['description'])
+        if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
 
-        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{description}"
-        description_text = description_text.replace("Enlevé", "").replace("enlevé", "").replace("!", "")
+        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
 
         embed1 = {
-            "title": f"🔔 {item.get('title')}",
+            "title": f"🔔 {final_title}",
             "url": item.get('url'),
             "description": description_text,
             "color": 0x09B83E,
@@ -333,7 +345,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.1 PRIORITY SNIPER")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.2 SUPER SNIPER")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
@@ -447,8 +459,9 @@ def run_bot():
                         if items:
                             new_found = []
                             for item in items:
-                                # LE DOUBLE VERROU (Anti-Spam)
-                                if item['id'] not in seen_ids and item['id'] > last_seen_id:
+                                # LE DOUBLE VERROU SOUPLE (Anti-Oublis V8.2)
+                                # On accepte les IDs jusqu'à 100k en arrière (marge de sécurité)
+                                if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
                                     new_found.append(item)
                                     seen_ids.add(item['id'])
                             
@@ -484,10 +497,10 @@ def run_bot():
                         try: page.close()
                         except: pass
                 
-                # Cache maintenance (V7.0 : 1000 items pour gérer les 9 recherches)
-                if len(seen_ids) > 1000:
+                # Cache maintenance (V8.2 : 2000 items pour éviter tout doublon)
+                if len(seen_ids) > 2000:
                     seen_ids_list = sorted(list(seen_ids), reverse=True)
-                    seen_ids = set(seen_ids_list[:800]) # On garde les 800 plus récents
+                    seen_ids = set(seen_ids_list[:1500]) # On garde les 1500 plus récents
 
                 # Pause de 10s avant le prochain cycle complet
                 log(f"⏳ Cycle terminé. Pause de 10s...")
