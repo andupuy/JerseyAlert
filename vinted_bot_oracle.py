@@ -16,11 +16,12 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # Configuration
-SEARCH_QUERIES = [
-    "Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne",
-    "Jersey Asse", "Jersey Saint-Etienne",
-    "Maglia Asse", "Camiseta Asse"
-]
+# Configuration des recherches
+PRIORITY_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne"]
+SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Camiseta Asse"]
+# Liste combinée pour l'initialisation
+SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
+
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 CHECK_INTERVAL_MIN = 10  # secondes minimum entre checks
@@ -332,12 +333,13 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.0 ULTIMATE (7 Queries - Silent Night)")
-    log(f"🔍 Multi-recherches actives: {len(SEARCH_QUERIES)} variantes")
-    log(f"⏱️  Intervalle: {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.1 PRIORITY SNIPER")
+    log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
+    log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
     last_seen_id = load_last_seen_id()
     seen_ids = set() # Cache pour éviter les doublons
+    last_secondary_check = 0 # Timestamp pour le cycle de 20 min
     log(f"📌 Dernier ID vu: {last_seen_id}")
     
     with sync_playwright() as p:
@@ -416,10 +418,21 @@ def run_bot():
                 
                 is_sleeping = False # Réveil !
 
-                log(f"\n" + "🚀" + "="*50)
-                log(f"⚡ Cycle de scan (X{len(SEARCH_QUERIES)})")
+                # Détermination des recherches à effectuer pour ce cycle
+                current_cycle_queries = list(PRIORITY_QUERIES)
                 
-                for current_query in SEARCH_QUERIES:
+                # On ajoute les recherches secondaires toutes les 20 minutes (1200 secondes)
+                now = time.time()
+                is_full_cycle = (now - last_secondary_check) > 1200
+                if is_full_cycle:
+                    log("🌍 Mode Cycle Complet : Inclusion des recherches internationales")
+                    current_cycle_queries += SECONDARY_QUERIES
+                    last_secondary_check = now
+
+                log(f"\n" + "🚀" + "="*50)
+                log(f"⚡ Cycle de scan (X{len(current_cycle_queries)})")
+                
+                for current_query in current_cycle_queries:
                     try:
                         page = context.new_page()
                         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
@@ -463,7 +476,7 @@ def run_bot():
                                     last_seen_id = current_max
                                     save_last_seen_id(last_seen_id)
                         
-                        # Petite pause entre deux recherches du même cycle pour respirer
+                        # Petite pause
                         time.sleep(1)
 
                     except Exception as e:
