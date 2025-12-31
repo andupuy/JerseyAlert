@@ -351,7 +351,7 @@ def send_discord_alert(context, item):
 
 def run_bot():
     """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.6 ANTI-CRASH")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.7 RECOVERY")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
@@ -397,53 +397,55 @@ def run_bot():
                         last_secondary_check = now
 
                     log(f"\n" + "🚀" + "="*50)
-                    log(f"⚡ Scan V8.6 : {len(current_cycle_queries)} requêtes")
+                    log(f"⚡ Scan V8.7 : {len(current_cycle_queries)} requêtes")
 
                     for query in current_cycle_queries:
                         try:
-                            # Limitation du nombre de pages ouvertes simultanément
+                            # 1. Ouverture page NEUVE
                             page = context.new_page()
-                            # Blocage ressources pour économiser CPU/RAM
+                            page.set_default_timeout(20000)
+                            
+                            # 2. Blocage ressources (RAM optimisée)
                             page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
                             
+                            # 3. Navigation Ultra-Rapide (Commit mode)
                             log(f"🔎 Check: '{query}'")
-                            page.goto(get_search_url(query), wait_until='domcontentloaded', timeout=30000)
-                            
-                            items = extract_items_from_page(page)
-                            page.close()
-
-                            if items:
-                                new_found = []
-                                for item in items:
-                                    # Buffer de sécurité de 100k IDs pour éviter de rater des annonces décalées
-                                    if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-                                        new_found.append(item)
-                                        seen_ids.add(item['id'])
+                            try:
+                                page.goto(get_search_url(query), wait_until='commit', timeout=20000)
+                                # On attend explicitement un élément pour confirmer le chargement
+                                page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
                                 
-                                # Si c'est le tout premier cycle, on ne fait qu'initialiser seen_ids
-                                if is_initial_cycle:
-                                    if new_found:
-                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                    continue
-
-                                if new_found:
-                                    log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
-                                    new_found.sort(key=lambda x: x['id'])
-                                    for item in new_found:
-                                        title_low = item.get('title', '').lower()
-                                        synonyms = ["maillot", "jersey", "maglia", "camiseta"]
-                                        has_item_kw = any(s in title_low for s in synonyms)
-                                        has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
-                                        
-                                        if has_item_kw and has_team:
-                                            log(f"🎯 MATCH : '{item.get('title')}'")
-                                            send_discord_alert(context, item)
+                                items = extract_items_from_page(page)
+                                
+                                if items:
+                                    new_found = []
+                                    for item in items:
+                                        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
+                                            new_found.append(item)
+                                            seen_ids.add(item['id'])
                                     
-                                    # Mise à jour de l'ID global
-                                    last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                    save_last_seen_id(last_seen_id)
+                                    if is_initial_cycle:
+                                        if new_found:
+                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
+                                    elif new_found:
+                                        log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
+                                        new_found.sort(key=lambda x: x['id'])
+                                        for item in new_found:
+                                            title_low = item.get('title', '').lower()
+                                            synonyms = ["maillot", "jersey", "maglia", "camiseta"]
+                                            has_item_kw = any(s in title_low for s in synonyms)
+                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
+                                            
+                                            if has_item_kw and has_team:
+                                                log(f"🎯 MATCH : '{item.get('title')}'")
+                                                send_discord_alert(context, item)
+                                        
+                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
+                                        save_last_seen_id(last_seen_id)
+                            finally:
+                                page.close()
 
-                            time.sleep(1) # Petit repos entre recherches
+                            time.sleep(random.uniform(1, 2))
                         except Exception as e:
                             log(f"⚠️ Erreur locale sur '{query}': {e}")
                     

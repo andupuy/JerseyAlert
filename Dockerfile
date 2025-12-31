@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Tue Dec 31 00:45:00 CET 2025 (V8.6 ANTI-CRASH)
+# Force Update Wed Dec 31 11:35:00 CET 2025 (V8.7 RECOVERY)
