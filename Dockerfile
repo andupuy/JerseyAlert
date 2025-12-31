@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Wed Dec 31 11:35:00 CET 2025 (V8.7 RECOVERY)
+# Force Update Wed Dec 31 14:00:00 CET 2025 (V9.0 NUCLÉAIRE)

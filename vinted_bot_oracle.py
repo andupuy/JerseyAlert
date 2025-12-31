@@ -12,6 +12,7 @@ import sys
 import time
 import random
 import requests
+import signal
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
@@ -349,9 +350,15 @@ def send_discord_alert(context, item):
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
 
+def watchdog_handler(signum, frame):
+    """Tue le bot si un cycle prend trop de temps (Freeze detection)"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[{timestamp}] 🚨 WATCHDOG: Bot figé depuis trop longtemps ! Redémarrage forcé...", flush=True)
+    os._exit(1) # Sortie brutale pour forcer Railway à relancer
+
 def run_bot():
-    """Boucle principale du bot"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V8.7 RECOVERY")
+    """Boucle principale du bot V9.0"""
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V9.0 NUCLÉAIRE")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
@@ -374,8 +381,12 @@ def run_bot():
                 time.sleep(600)
                 continue
 
-            # 2. DÉMARRAGE MOTEUR NEUF (Anti-Crashes & RAM)
+            # 2. DÉMARRAGE MOTEUR (Watchdog activé)
             try:
+                # On arme le Watchdog pour 3 minutes (180s)
+                signal.signal(signal.SIGALRM, watchdog_handler)
+                signal.alarm(180) 
+
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
                         headless=True,
@@ -450,8 +461,12 @@ def run_bot():
                             log(f"⚠️ Erreur locale sur '{query}': {e}")
                     
                     browser.close()
+                
+                # Désactivation du Watchdog après succès du cycle
+                signal.alarm(0)
             except Exception as e:
                 log(f"🚨 Bug moteur Playwright : {e}. Redémarrage au prochain cycle.")
+                signal.alarm(0)
 
             # 3. Entretien du Cache
             is_initial_cycle = False
