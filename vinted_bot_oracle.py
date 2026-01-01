@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 # Configuration
 # Configuration des recherches
 PRIORITY_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne"]
-SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Camiseta Asse"]
+SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Camiseta Asse", "Ensemble Asse", "Trikot Asse"]
 # Liste combinée pour l'initialisation
 SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
@@ -358,7 +358,7 @@ def watchdog_handler(signum, frame):
 
 def run_bot():
     """Boucle principale du bot V9.0"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V9.0 NUCLÉAIRE")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V9.1 ENSEMBLE/TRIKOT")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
@@ -443,7 +443,7 @@ def run_bot():
                                         new_found.sort(key=lambda x: x['id'])
                                         for item in new_found:
                                             title_low = item.get('title', '').lower()
-                                            synonyms = ["maillot", "jersey", "maglia", "camiseta"]
+                                            synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
                                             has_item_kw = any(s in title_low for s in synonyms)
                                             has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
                                             
