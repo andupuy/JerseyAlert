@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Fri Jan 02 19:26:00 CET 2026 (V9.6 PING MASTER) 🍿🔔🚀
+# Force Update Fri Jan 02 19:40:00 CET 2026 (V9.8 BALANCED) 🚀💚⚽

@@ -468,7 +468,7 @@ def run_bot():
                                             title_low = item.get('title', '').lower()
                                             synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
                                             has_item_kw = any(s in title_low for s in synonyms)
-                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
+                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne", "sainté"])
                                             
                                             # Match si (Maillot + Club) OU (Scan Vert + Club)
                                             if (has_item_kw and has_team) or (color == 10 and has_team):
