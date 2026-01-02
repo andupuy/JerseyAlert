@@ -351,7 +351,7 @@ def send_discord_alert(context, item):
             embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
 
         # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
-        notif_text = f"@here | 🔔 {final_title} | 💰 {final_price} | 📏 {final_size}"
+        notif_text = f"@everyone | 🔔 {final_title} | 💰 {final_price} | 📏 {final_size}"
 
         payload = {
             "content": notif_text,
