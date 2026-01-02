@@ -38,8 +38,11 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-def get_search_url(query):
-    return f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
+def get_search_url(query, color_id=None):
+    url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
+    if color_id:
+        url += f"&color_ids[]={color_id}"
+    return url
 
 def log(message):
     """Log avec timestamp"""
@@ -343,7 +346,12 @@ def send_discord_alert(context, item):
         for photo_url in photos[1:4]:
             embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
 
-        payload = {"username": "Vinted ASSE Bot", "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", "embeds": embeds}
+        payload = {
+            "content": "@here",
+            "username": "Vinted ASSE Bot", 
+            "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
+            "embeds": embeds
+        }
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         log(f"✅ Alerte envoyée #{item.get('id')}")
 
@@ -358,13 +366,14 @@ def watchdog_handler(signum, frame):
 
 def run_bot():
     """Boucle principale du bot V9.0"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V9.1 ENSEMBLE/TRIKOT")
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V9.6 PING MASTER")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
     # Initialisation silencieuse (On ne charge pas tout pour éviter de saturer Railway)
     seen_ids = set()
     last_secondary_check = 0
+    last_green_check = 0
     
     log("🚀 Phase d'initialisation rapide...")
     # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
@@ -400,17 +409,31 @@ def run_bot():
                     )
 
                     # Détermination des recherches
-                    current_cycle_queries = list(PRIORITY_QUERIES)
+                    current_cycle_queries = [] # On va remplir dynamiquement
                     now = time.time()
+                    
+                    # 1. Requêtes Prioritaires (Toujours)
+                    queries_to_run = [(q, None) for q in PRIORITY_QUERIES]
+                    
+                    # 2. Triple Scan Vert (Toutes les 5 min) sur les 3 prioritaires
+                    if (now - last_green_check) > 300:
+                        log("☘️ Mode Triple Scan Vert (Priority + Filter 10)")
+                        for q in PRIORITY_QUERIES:
+                            queries_to_run.append((q, 10))
+                        last_green_check = now
+                        
+                    # 3. Requêtes Secondaires (Toutes les 20 min)
                     if (now - last_secondary_check) > 1200:
                         log("🌍 Mode Cycle Complet (International)")
-                        current_cycle_queries += SECONDARY_QUERIES
+                        for q in SECONDARY_QUERIES:
+                            queries_to_run.append((q, None))
                         last_secondary_check = now
 
                     log(f"\n" + "🚀" + "="*50)
-                    log(f"⚡ Scan V8.7 : {len(current_cycle_queries)} requêtes")
+                    log(f"⚡ Scan V9.3 : {len(queries_to_run)} requêtes")
 
-                    for query in current_cycle_queries:
+                    for query_data in queries_to_run:
+                        query, color = query_data
                         try:
                             # 1. Ouverture page NEUVE
                             page = context.new_page()
@@ -420,9 +443,9 @@ def run_bot():
                             page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
                             
                             # 3. Navigation Ultra-Rapide (Commit mode)
-                            log(f"🔎 Check: '{query}'")
+                            log(f"🔎 Check: '{query}'{' [VERTE]' if color else ''}")
                             try:
-                                page.goto(get_search_url(query), wait_until='commit', timeout=20000)
+                                page.goto(get_search_url(query, color), wait_until='commit', timeout=20000)
                                 # On attend explicitement un élément pour confirmer le chargement
                                 page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
                                 
@@ -447,7 +470,8 @@ def run_bot():
                                             has_item_kw = any(s in title_low for s in synonyms)
                                             has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne"])
                                             
-                                            if has_item_kw and has_team:
+                                            # Match si (Maillot + Club) OU (Scan Vert + Club)
+                                            if (has_item_kw and has_team) or (color == 10 and has_team):
                                                 log(f"🎯 MATCH : '{item.get('title')}'")
                                                 send_discord_alert(context, item)
                                         

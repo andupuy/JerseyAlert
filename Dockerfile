@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Thu Jan 01 19:25:00 CET 2026 (V9.1 ENSEMBLE/TRIKOT)
+# Force Update Fri Jan 02 19:26:00 CET 2026 (V9.6 PING MASTER) 🍿🔔🚀
