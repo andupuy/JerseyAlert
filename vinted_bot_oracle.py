@@ -350,8 +350,11 @@ def send_discord_alert(context, item):
         for photo_url in photos[1:4]:
             embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
 
+        # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
+        notif_text = f"@here | 🔔 {final_title} | 💰 {final_price} | 📏 {final_size}"
+
         payload = {
-            "content": "@here",
+            "content": notif_text,
             "username": "Vinted ASSE Bot", 
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
             "embeds": embeds
