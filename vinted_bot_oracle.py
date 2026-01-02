@@ -332,16 +332,20 @@ def send_discord_alert(context, item):
         # Un dernier coup de balai sur l'ensemble du bloc au cas où
         description_text = description_text.replace("  ", " ").strip()
 
+        if not final_title: final_title = "Nouvel article ASSE"
+
         embed1 = {
             "title": f"🔔 {final_title}",
             "url": item.get('url'),
             "description": description_text,
             "color": 0x09B83E,
             "footer": {"text": f"Vinted Bot • ID: {item.get('id')}"},
-            "timestamp": datetime.utcnow().isoformat(),
-            "image": {"url": photos[0]} if photos else {}
+            "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
         
+        if photos:
+            embed1["image"] = {"url": photos[0]}
+
         embeds = [embed1]
         for photo_url in photos[1:4]:
             embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
