@@ -358,9 +358,9 @@ def send_discord_alert(context, item):
         if not clean_title:
             clean_title = "Maillot ASSE"
 
-        # EXTRAIT DE DESCRIPTION (150 premiers caractères)
-        desc_preview = final_desc[:150] if final_desc else "Pas de description"
-        if len(final_desc) > 150:
+        # EXTRAIT DE DESCRIPTION (COMPLÈTE jusqu'à 1000 caractères)
+        desc_preview = final_desc[:1000] if final_desc else "Pas de description"
+        if len(final_desc) > 1000:
             desc_preview += "..."
 
         # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
