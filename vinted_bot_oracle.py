@@ -350,8 +350,23 @@ def send_discord_alert(context, item):
         for photo_url in photos[1:4]:
             embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
 
+        # NETTOYAGE DU TITRE (enlever les infos redondantes de Vinted)
+        import re
+        clean_title = re.sub(r'\s*·.*$', '', final_title)  # Enlève tout après le "·"
+        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)  # Enlève les prix
+        clean_title = clean_title.strip()
+        if not clean_title:
+            clean_title = "Maillot ASSE"
+
+        # EXTRAIT DE DESCRIPTION (150 premiers caractères)
+        desc_preview = final_desc[:150] if final_desc else "Pas de description"
+        if len(final_desc) > 150:
+            desc_preview += "..."
+
         # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
-        notif_text = f"@everyone | 🔔 {final_title} | 💰 {final_price} | 📏 {final_size}"
+        notif_text = f"""@everyone | {clean_title}
+💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}
+📝 {desc_preview}"""
 
         payload = {
             "content": notif_text,
