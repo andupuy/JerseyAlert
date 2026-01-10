@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.5 - HYPER-OPTIMIZED SNIPER
-- Single Page Sniper (réutilisation du même onglet)
-- Restauration du contenu détaillé des annonces
-- Optimisation Persistent & Green Energy
+Vinted Bot V11.6 - FULL CONTENT SNIPER
+- Restauration de l'analyse intelligente des titres (Brand, Size, Status)
+- Sécurité anti N/A (Fallback systématique)
+- Single Page Sniper & Green Energy (Optimisation budget conservée)
 """
 
 import os
@@ -96,15 +96,32 @@ def extract_items_from_page(page):
                 if (!idMatch) return;
                 const id = parseInt(idMatch[1]);
                 
+                const rawTitle = a.getAttribute('title') || '';
                 const img = el.querySelector('img');
                 const priceMatch = el.innerText.match(/\\d+[.,]\\d+\\s*[$€]/);
                 
+                // PARSING INTELLIGENT DU TITRE (V6.0)
+                let brand = 'N/A';
+                let size = 'N/A';
+                let status = 'N/A';
+                if (rawTitle.includes('marque:') || rawTitle.includes('taille:')) {
+                    const bM = rawTitle.match(/marque:\\s*([^,]+)/i);
+                    if (bM) brand = bM[1].trim();
+                    const sM = rawTitle.match(/taille:\\s*([^,]+)/i);
+                    if (sM) size = sM[1].trim();
+                    const stM = rawTitle.match(/état:\\s*([^,]+)/i);
+                    if (stM) status = stM[1].trim();
+                }
+
                 items.push({
                     id: id,
                     url: url,
-                    title: a.getAttribute('title') || img?.alt || 'Maillot ASSE',
+                    raw_title: rawTitle,
                     photo: img?.src || '',
-                    price: priceMatch ? priceMatch[0] : 'N/A'
+                    price: priceMatch ? priceMatch[0] : 'N/A',
+                    brand: brand,
+                    size: size,
+                    status: status
                 });
             });
             return items;
@@ -118,25 +135,30 @@ def send_discord_alert(context, item):
         d = scrape_item_details(p, item['url'])
         p.close()
         
+        # FALLBACK : On utilise les infos du titre si les détails API ont échoué
+        f_brand = d['brand'] if d['brand'] != 'N/A' else item['brand']
+        f_size = d['size'] if d['size'] != 'N/A' else item['size']
+        f_status = d['status'] if d['status'] != 'N/A' else item['status']
         final_desc = clean_text(d['description'])
-        desc_preview = final_desc[:1000] + "..." if len(final_desc) > 1000 else final_desc
         
-        # Nettoyage titre
+        # Nettoyage Titre (Version Ultra-Propre)
         import re
-        clean_title = re.sub(r'\s*·.*$', '', item['title'])
-        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)
-        clean_title = clean_title.strip()
-        if not clean_title: clean_title = "Maillot ASSE"
+        t = item['raw_title']
+        clean_title = t.split(',')[0].split('·')[0].strip()
+        clean_title = re.sub(r'\\d+[.,]\\d+\\s*€.*$', '', clean_title).strip()
+        if not clean_title or len(clean_title) < 3: clean_title = "Maillot ASSE"
 
+        desc_preview = final_desc[:1000] + "..." if len(final_desc) > 1000 else (final_desc if final_desc else "Pas de description")
+        
         payload = {
-            "content": f"@everyone | {clean_title}\n💰 {item['price']} | 📏 {d['size']} | 🏷️ {d['brand']}\n📝 {desc_preview}",
+            "content": f"@everyone | {clean_title}\n💰 {item['price']} | 📏 {f_size} | 🏷️ {f_brand}\n📝 {desc_preview}",
             "username": "Vinted ASSE Bot",
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
             "embeds": [{
-                "title": f"🔔 {item['title']}",
+                "title": f"🔔 {clean_title}",
                 "url": item['url'],
                 "color": 0x09B83E,
-                "description": f"**{item['price']}** | Taille: **{d['size']}**\nMarque: **{d['brand']}**\nÉtat: {d['status']}\n\n{final_desc[:300]}...",
+                "description": f"**{item['price']}** | Taille: **{f_size}**\nMarque: **{f_brand}**\nÉtat: {f_status}\n\n{final_desc[:300]}...",
                 "image": {"url": d['photos'][0] if d['photos'] else item['photo']},
                 "timestamp": datetime.utcnow().isoformat() + "Z",
                 "footer": {"text": f"Vinted Bot • ID: {item['id']}"}
@@ -152,7 +174,7 @@ def watchdog_handler(signum, frame):
     os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage HYPER-OPTIMIZED SNIPER V11.5")
+    log("🚀 Démarrage SNIPER V11.6 - FULL CONTENT")
     seen_ids = set()
     last_green_check = 0
     last_secondary_check = 0
@@ -173,7 +195,6 @@ def run_bot():
                     else: route.continue_()
                 context.route("**/*", block)
 
-                # SINGLE PAGE SNIPER: On garde un seul onglet pour toutes les recherches du cycle
                 search_page = context.new_page()
 
                 while cycle_count < 20:
@@ -204,7 +225,7 @@ def run_bot():
                                 if it['id'] not in seen_ids:
                                     seen_ids.add(it['id'])
                                     if not is_initial and it['id'] > last_seen_id:
-                                        t = it['title'].lower()
+                                        t = it['raw_title'].lower()
                                         if any(k in t for k in ["asse", "saint", "st-", "sainté"]) and \
                                            (any(k in t for k in ["maillot", "jersey", "camiseta", "trikot"]) or c == 10):
                                             send_discord_alert(context, it)
