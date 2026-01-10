@@ -387,14 +387,14 @@ def watchdog_handler(signum, frame):
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
 def run_bot():
-    """Boucle principale du bot V10.4 ECONOMY"""
-    log("🚀 Démarrage du bot V10.4 ECONOMY")
+    """Boucle principale du bot V10.5 SNIPER"""
+    log("🚀 Démarrage du bot V10.5 SNIPER")
     
-    log(f"⚡ Mode Économie : Requêtes prioritaires uniquement toutes les ~60s")
-    # On désactive le switch car le compte 2 est limité par Railway
+    log(f"⚡ Mode Sniper : Réactivité maximale + International toutes les 20 min")
     
-    # Initialisation silencieuse
+    # Initialisation
     seen_ids = set()
+    last_secondary_check = 0
     last_green_check = 0
     
     log("🚀 Phase d'initialisation rapide...")
