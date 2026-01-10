@@ -36,6 +36,7 @@ jobs:
           RAILWAY_TOKEN: ${{ steps.account.outputs.active == '1' && secrets.RAILWAY_TOKEN_1 || secrets.RAILWAY_TOKEN_2 }}
           PROJECT_ID: ${{ steps.account.outputs.active == '1' && secrets.RAILWAY_PROJECT_1 || secrets.RAILWAY_PROJECT_2 }}
           SERVICE_ID: ${{ steps.account.outputs.active == '1' && secrets.RAILWAY_SERVICE_1 || secrets.RAILWAY_SERVICE_2 }}
+          ENVIRONMENT_ID: ${{ steps.account.outputs.active == '1' && '86a2c45f-9ec5-4dfd-b1b8-4dc3f86a168e' || 'd4d25c9e-0f57-4377-b86b-9a2a653ca5b4' }}
         run: |
-          railway up --project "$PROJECT_ID" --service "$SERVICE_ID" --detach
+          railway up --project "$PROJECT_ID" --service "$SERVICE_ID" --environment "$ENVIRONMENT_ID" --detach
 
