@@ -387,35 +387,14 @@ def watchdog_handler(signum, frame):
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
 def run_bot():
-    """Boucle principale du bot V10.3 AUTO-SWITCH"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V10.3 AUTO-SWITCH")
+    """Boucle principale du bot V10.4 ECONOMY"""
+    log("🚀 Démarrage du bot V10.4 ECONOMY")
     
-    # VÉRIFICATION DU COMPTE ACTIF (Auto-switch Railway)
-    import datetime as dt
-    railway_account = os.environ.get('RAILWAY_ACCOUNT_ID', '1')
-    current_day = dt.datetime.utcnow().day
+    log(f"⚡ Mode Économie : Requêtes prioritaires uniquement toutes les ~60s")
+    # On désactive le switch car le compte 2 est limité par Railway
     
-    # SEUIL DE SWITCH (Passé à 9 pour tester le compte 2 immédiatement)
-    if current_day <= 9:
-        active_account = '1'
-    else:
-        active_account = '2'
-    
-    if railway_account != active_account:
-        log(f"⏸️ Ce compte (Account {railway_account}) n'est pas actif aujourd'hui (jour {current_day}).")
-        log(f"✅ Le compte actif est Account {active_account}. Arrêt du bot pour économiser les ressources.")
-        log("💤 Arrêt complet du service. Railway ne facturera rien pour ce compte.")
-        # Arrêt propre du processus (Railway ne facture pas un container arrêté)
-        import sys
-        sys.exit(0)
-    
-    log(f"✅ Ce compte (Account {railway_account}) est ACTIF pour la période du {1 if active_account == '1' else 15} au {14 if active_account == '1' else 28}.")
-    log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
-    log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
-    
-    # Initialisation silencieuse (On ne charge pas tout pour éviter de saturer Railway)
+    # Initialisation silencieuse
     seen_ids = set()
-    last_secondary_check = 0
     last_green_check = 0
     
     log("🚀 Phase d'initialisation rapide...")
