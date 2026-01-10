@@ -387,8 +387,29 @@ def watchdog_handler(signum, frame):
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
 def run_bot():
-    """Boucle principale du bot V9.0"""
-    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V9.6 PING MASTER")
+    """Boucle principale du bot V10.3 AUTO-SWITCH"""
+    log("🚀 Démarrage du bot Vinted Oracle Cloud - VERSION V10.3 AUTO-SWITCH")
+    
+    # VÉRIFICATION DU COMPTE ACTIF (Auto-switch Railway)
+    import datetime as dt
+    railway_account = os.environ.get('RAILWAY_ACCOUNT_ID', '1')
+    current_day = dt.datetime.utcnow().day
+    
+    if current_day <= 14:
+        active_account = '1'
+    else:
+        active_account = '2'
+    
+    if railway_account != active_account:
+        log(f"⏸️ Ce compte (Account {railway_account}) n'est pas actif aujourd'hui (jour {current_day}).")
+        log(f"✅ Le compte actif est Account {active_account}. Arrêt du bot pour économiser les ressources.")
+        log("💤 Le bot restera en veille jusqu'au prochain cycle d'activation.")
+        # On dort indéfiniment au lieu de tourner
+        while True:
+            time.sleep(3600)  # Sleep 1h en boucle
+        return
+    
+    log(f"✅ Ce compte (Account {railway_account}) est ACTIF pour la période du {1 if active_account == '1' else 15} au {14 if active_account == '1' else 28}.")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
     log(f"🌍 Secondaire : {len(SECONDARY_QUERIES)} requêtes internationales toutes les 20 min")
     
