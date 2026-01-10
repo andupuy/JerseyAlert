@@ -18,14 +18,9 @@ jobs:
       - name: Determine Railway account based on date
         id: account
         run: |
-          DAY=$(date +%d)
-          if [ $DAY -le 14 ]; then
-            echo "account=1" >> $GITHUB_OUTPUT
-            echo "🟢 Déploiement sur Railway Account 1 (jours 1-14)"
-          else
-            echo "account=2" >> $GITHUB_OUTPUT
-            echo "🔵 Déploiement sur Railway Account 2 (jours 15-28)"
-          fi
+          # FORCE ACCOUNT 2 FOR TESTING
+          echo "account=2" >> $GITHUB_OUTPUT
+          echo "🔵 TEST: Déploiement forcé sur Railway Account 2"
 
       - name: Install Railway CLI
         run: |
