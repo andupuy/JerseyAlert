@@ -1,0 +1,53 @@
+name: Railway Auto Switch
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    # Tous les jours à 2h du matin (Paris time)
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Determine Railway account based on date
+        id: account
+        run: |
+          DAY=$(date +%d)
+          if [ $DAY -le 14 ]; then
+            echo "account=1" >> $GITHUB_OUTPUT
+            echo "🟢 Déploiement sur Railway Account 1 (jours 1-14)"
+          else
+            echo "account=2" >> $GITHUB_OUTPUT
+            echo "🔵 Déploiement sur Railway Account 2 (jours 15-28)"
+          fi
+
+      - name: Install Railway CLI
+        run: |
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
+
+      - name: Deploy to Railway Account 1
+        if: steps.account.outputs.account == '1'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_1 }}
+        run: |
+          railway link ${{ secrets.RAILWAY_PROJECT_1 }}
+          railway up --service ${{ secrets.RAILWAY_SERVICE_1 }} --detach
+
+      - name: Deploy to Railway Account 2
+        if: steps.account.outputs.account == '2'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_2 }}
+        run: |
+          railway link ${{ secrets.RAILWAY_PROJECT_2 }}
+          railway up --service ${{ secrets.RAILWAY_SERVICE_2 }} --detach
+
+      - name: Deployment success
+        run: |
+          echo "✅ Déploiement réussi sur Railway Account ${{ steps.account.outputs.account }}"
