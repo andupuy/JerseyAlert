@@ -396,11 +396,11 @@ def run_bot():
     seen_ids = set()
     last_secondary_check = 0
     last_green_check = 0
+    cycle_count = 0  # Compteur pour redémarrage préventif
     
     log("🚀 Phase d'initialisation rapide...")
-    # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
     is_initial_cycle = True
-    last_seen_id = load_last_seen_id() # Load last_seen_id here
+    last_seen_id = load_last_seen_id()
 
     try:
         while True:
@@ -412,98 +412,74 @@ def run_bot():
                 time.sleep(600)
                 continue
 
-            # 2. DÉMARRAGE MOTEUR (Watchdog activé)
-            try:
-                # On arme le Watchdog pour 3 minutes (180s)
-                signal.signal(signal.SIGALRM, watchdog_handler)
-                signal.alarm(180) 
+            # 2. DÉMARRAGE MOTEUR PERSISTANT
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                )
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 720},
+                    locale='fr-FR',
+                    timezone_id='Europe/Paris'
+                )
 
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(
-                        headless=True,
-                        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-                    )
-                    context = browser.new_context(
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        viewport={'width': 1280, 'height': 720},
-                        locale='fr-FR',
-                        timezone_id='Europe/Paris'
-                    )
+                # OPTIMISATION GREEN ENERGY
+                def block_aggressively(route):
+                    if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
+                        route.abort()
+                    else:
+                        route.continue_()
+                context.route("**/*", block_aggressively)
 
-                    # OPTIMISATION (ÉCONOMIE D'ÉNERGIE) : Bloquer images/CSS/Polices
-                    def block_aggressively(route):
-                        if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
-                            route.abort()
-                        else:
-                            route.continue_()
-                    
-                    context.route("**/*", block_aggressively)
+                # BOUCLE DE CYCLES PERSISTANTS (Redémarrage toutes les 30 itérations)
+                while cycle_count < 30:
+                    try:
+                        # On arme le Watchdog pour chaque cycle
+                        signal.signal(signal.SIGALRM, watchdog_handler)
+                        signal.alarm(240) # 4 minutes max par cycle complet
 
-                    # Détermination des recherches
-                    current_cycle_queries = [] # On va remplir dynamiquement
-                    now = time.time()
-                    
-                    # 1. Requêtes Prioritaires (Toujours)
-                    queries_to_run = [(q, None) for q in PRIORITY_QUERIES]
-                    
-                    # 2. Triple Scan Vert (Toutes les 5 min) sur les 3 prioritaires
-                    if (now - last_green_check) > 300:
-                        log("☘️ Mode Triple Scan Vert (Priority + Filter 10)")
-                        for q in PRIORITY_QUERIES:
-                            queries_to_run.append((q, 10))
-                        last_green_check = now
+                        now = time.time()
+                        queries_to_run = [(q, None) for q in PRIORITY_QUERIES]
                         
-                    # 3. Requêtes Secondaires (Toutes les 20 min)
-                    if (now - last_secondary_check) > 1200:
-                        log("🌍 Mode Cycle Complet (International)")
-                        for q in SECONDARY_QUERIES:
-                            queries_to_run.append((q, None))
-                        last_secondary_check = now
-
-                    log(f"\n" + "🚀" + "="*50)
-                    log(f"⚡ Scan V9.3 : {len(queries_to_run)} requêtes")
-
-                    for query_data in queries_to_run:
-                        query, color = query_data
-                        try:
-                            # 1. Ouverture page NEUVE
-                            page = context.new_page()
-                            page.set_default_timeout(20000)
+                        if (now - last_green_check) > 300:
+                            log("☘️ Mode Triple Scan Vert")
+                            for q in PRIORITY_QUERIES:
+                                queries_to_run.append((q, 10))
+                            last_green_check = now
                             
-                            # 2. Blocage ressources (RAM optimisée)
-                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
-                            
-                            # 3. Navigation Ultra-Rapide (Commit mode)
-                            log(f"🔎 Check: '{query}'{' [VERTE]' if color else ''}")
+                        if (now - last_secondary_check) > 1200:
+                            log("🌍 Mode Cycle Complet (International)")
+                            for q in SECONDARY_QUERIES:
+                                queries_to_run.append((q, None))
+                            last_secondary_check = now
+
+                        log(f"\n🚀 Cycle {cycle_count+1}/30 | {len(queries_to_run)} requêtes")
+
+                        for query_data in queries_to_run:
+                            query, color = query_data
+                            page = None # Initialize page to None
                             try:
-                                page.goto(get_search_url(query, color), wait_until='commit', timeout=20000)
-                                # On attend explicitement un élément pour confirmer le chargement
+                                page = context.new_page()
+                                url = get_search_url(query, color) # Using existing get_search_url
+                                
+                                page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                                # The original code used page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+                                # The new instruction implies getting content and parsing it.
+                                # Let's stick to the original extraction method for consistency with the existing function.
+                                # If parse_vinted_data is meant to replace extract_items_from_page, it needs to be defined.
+                                # For now, I'll assume the user wants to keep the existing extraction logic.
                                 page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+                                items = extract_items_from_page(page) # Using existing extract_items_from_page
                                 
-                                items = extract_items_from_page(page)
+                                new_found = []
                                 
-                                if items:
-                                    new_found = []
-                                    for item in items:
-                                        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
+                                for item in items:
+                                    if item['id'] not in seen_ids:
+                                        seen_ids.add(item['id'])
+                                        if not is_initial_cycle and item['id'] > last_seen_id:
                                             new_found.append(item)
-                                            seen_ids.add(item['id'])
-                                    
-                                    if is_initial_cycle:
-                                        if new_found:
-                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                    elif new_found:
-                                        log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
-                                        new_found.sort(key=lambda x: x['id'])
-                                        for item in new_found:
-                                            title_low = item.get('title', '').lower()
-                                            synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
-                                            has_item_kw = any(s in title_low for s in synonyms)
-                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne", "sainté"])
-                                            
-                                            # Match si (Maillot + Club) OU (Scan Vert + Club)
-                                            if (has_item_kw and has_team) or (color == 10 and has_team):
-                                                log(f"🎯 MATCH : '{item.get('title')}'")
                                                 send_discord_alert(context, item)
                                         
                                         last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
