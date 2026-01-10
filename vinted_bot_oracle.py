@@ -191,8 +191,18 @@ def run_bot():
                                 if it['id'] not in seen_ids:
                                     seen_ids.add(it['id'])
                                     if not is_initial and it['id'] > last_seen_id:
-                                        send_discord_alert(context, it)
-                                        last_seen_id = it['id']; save_last_seen_id(it['id'])
+                                        # FILTRE DE SÉCURITÉ (Match Club & Article)
+                                        title_low = it['title'].lower()
+                                        kw_item = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
+                                        kw_team = ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "sainté"]
+                                        
+                                        has_item = any(k in title_low for k in kw_item)
+                                        has_team = any(k in title_low for k in kw_team)
+                                        
+                                        # Match si (Maillot + Club) OU (Scan Vert + Club)
+                                        if (has_item and has_team) or (c == 10 and has_team):
+                                            send_discord_alert(context, it)
+                                            last_seen_id = it['id']; save_last_seen_id(it['id'])
                             page.close()
                             time.sleep(random.uniform(1, 3))
                         except Exception as e:
