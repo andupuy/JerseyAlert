@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Fri Jan 10 02:10:00 CET 2026 (V10.3 AUTO-SWITCH) 🔄⚡🚀
+# Force Update Sat Jan 10 02:18:00 CET 2026 (V10.3) 🚀🤝⚽
