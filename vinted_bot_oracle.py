@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.3 - FLASH SNIPER
-- Restauration des logs détaillés
-- Vitesse maximale (Sniper mode)
+Vinted Bot V11.5 - HYPER-OPTIMIZED SNIPER
+- Single Page Sniper (réutilisation du même onglet)
+- Restauration du contenu détaillé des annonces
 - Optimisation Persistent & Green Energy
 """
 
@@ -91,12 +91,17 @@ def extract_items_from_page(page):
             els.forEach(el => {
                 const a = el.querySelector('a');
                 if (!a) return;
-                const id = parseInt(a.href.match(/items\\/(\\d+)/)[1]);
+                const url = a.href;
+                const idMatch = url.match(/items\\/(\\d+)/);
+                if (!idMatch) return;
+                const id = parseInt(idMatch[1]);
+                
                 const img = el.querySelector('img');
                 const priceMatch = el.innerText.match(/\\d+[.,]\\d+\\s*[$€]/);
+                
                 items.push({
                     id: id,
-                    url: a.href,
+                    url: url,
                     title: a.getAttribute('title') || img?.alt || 'Maillot ASSE',
                     photo: img?.src || '',
                     price: priceMatch ? priceMatch[0] : 'N/A'
@@ -116,15 +121,25 @@ def send_discord_alert(context, item):
         final_desc = clean_text(d['description'])
         desc_preview = final_desc[:1000] + "..." if len(final_desc) > 1000 else final_desc
         
+        # Nettoyage titre
+        import re
+        clean_title = re.sub(r'\s*·.*$', '', item['title'])
+        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)
+        clean_title = clean_title.strip()
+        if not clean_title: clean_title = "Maillot ASSE"
+
         payload = {
-            "content": f"@everyone | {item['title']}\n💰 {item['price']} | 📏 {d['size']} | 🏷️ {d['brand']}\n📝 {desc_preview}",
+            "content": f"@everyone | {clean_title}\n💰 {item['price']} | 📏 {d['size']} | 🏷️ {d['brand']}\n📝 {desc_preview}",
+            "username": "Vinted ASSE Bot",
+            "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
             "embeds": [{
                 "title": f"🔔 {item['title']}",
                 "url": item['url'],
                 "color": 0x09B83E,
                 "description": f"**{item['price']}** | Taille: **{d['size']}**\nMarque: **{d['brand']}**\nÉtat: {d['status']}\n\n{final_desc[:300]}...",
                 "image": {"url": d['photos'][0] if d['photos'] else item['photo']},
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "footer": {"text": f"Vinted Bot • ID: {item['id']}"}
             }]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
@@ -137,7 +152,7 @@ def watchdog_handler(signum, frame):
     os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage FLASH SNIPER V11.4")
+    log("🚀 Démarrage HYPER-OPTIMIZED SNIPER V11.5")
     seen_ids = set()
     last_green_check = 0
     last_secondary_check = 0
@@ -158,6 +173,9 @@ def run_bot():
                     else: route.continue_()
                 context.route("**/*", block)
 
+                # SINGLE PAGE SNIPER: On garde un seul onglet pour toutes les recherches du cycle
+                search_page = context.new_page()
+
                 while cycle_count < 20:
                     now = time.time()
                     hour = (datetime.utcnow().hour + 1) % 24
@@ -177,12 +195,11 @@ def run_bot():
                     for q, c in queries:
                         try:
                             log(f"🔎 Check: '{q}'{' [VERTE]' if c else ''}")
-                            page = context.new_page()
-                            page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=30000)
-                            time.sleep(1) # Petite pause pour laisser le JS s'initialiser
-                            page.wait_for_selector('div[data-testid*="item"]', timeout=15000)
+                            search_page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=30000)
+                            time.sleep(1)
+                            search_page.wait_for_selector('div[data-testid*="item"]', timeout=15000)
                             
-                            items = extract_items_from_page(page)
+                            items = extract_items_from_page(search_page)
                             for it in items:
                                 if it['id'] not in seen_ids:
                                     seen_ids.add(it['id'])
@@ -192,11 +209,9 @@ def run_bot():
                                            (any(k in t for k in ["maillot", "jersey", "camiseta", "trikot"]) or c == 10):
                                             send_discord_alert(context, it)
                                             last_seen_id = max(last_seen_id, it['id']); save_last_seen_id(last_seen_id)
-                            page.close()
                             time.sleep(random.uniform(0.5, 1))
                         except Exception as e:
                             log(f"⚠️ Erreur {q}: {str(e)[:40]}")
-                            if page: page.close()
                     
                     is_initial = False
                     cycle_count += 1
