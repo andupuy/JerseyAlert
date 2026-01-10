@@ -403,11 +403,10 @@ def run_bot():
     if railway_account != active_account:
         log(f"⏸️ Ce compte (Account {railway_account}) n'est pas actif aujourd'hui (jour {current_day}).")
         log(f"✅ Le compte actif est Account {active_account}. Arrêt du bot pour économiser les ressources.")
-        log("💤 Le bot restera en veille jusqu'au prochain cycle d'activation.")
-        # On dort indéfiniment au lieu de tourner
-        while True:
-            time.sleep(3600)  # Sleep 1h en boucle
-        return
+        log("💤 Arrêt complet du service. Railway ne facturera rien pour ce compte.")
+        # Arrêt propre du processus (Railway ne facture pas un container arrêté)
+        import sys
+        sys.exit(0)
     
     log(f"✅ Ce compte (Account {railway_account}) est ACTIF pour la période du {1 if active_account == '1' else 15} au {14 if active_account == '1' else 28}.")
     log(f"⚡ Priorité : {len(PRIORITY_QUERIES)} requêtes rapides toutes les ~30s")
