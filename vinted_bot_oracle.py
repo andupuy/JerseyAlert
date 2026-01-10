@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.10 - NICKEL VERSION (REVERT)
-- Retour à l'architecture V10.x (Browser refresh à chaque cycle)
-- Sniping instantané (Zéro latence cache)
-- Alertes Premium V10.2
+Vinted Bot V11.11 - ANTI-OLD SNIPER
+- Initialisation intelligente par requête (évite les remontées d'articles vieux de 2j)
+- Filtrage des articles "Boostés" ou "Sponsorisés" hors timing
+- Architecture V10.x stable
 """
 
 import os
@@ -56,7 +56,6 @@ def scrape_item_details(page, item_url):
         page.goto(item_url, wait_until='domcontentloaded', timeout=20000)
         time.sleep(1)
         
-        # Extraction Photos
         photos = page.evaluate("""() => {
             const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
             return imgs.map(img => img.src).filter(src => src && src.includes('images.vinted'));
@@ -83,7 +82,6 @@ def scrape_item_details(page, item_url):
                 "status": it.get('status', 'N/A')
             }
         
-        # Fallback DOM
         desc = page.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
         return {"description": desc, "photos": photos, "brand": "N/A", "size": "N/A", "status": "N/A"}
     except:
@@ -93,22 +91,29 @@ def extract_items_from_page(page):
     try:
         return page.evaluate("""() => {
             const items = [];
-            document.querySelectorAll('div[data-testid*="item"]').forEach(el => {
+            // On cherche uniquement dans le grid principal pour éviter les suggestions "Pour vous" en bas
+            const grid = document.querySelector('.feed-grid, [class*="feed-grid"]');
+            const elements = grid ? grid.querySelectorAll('div[data-testid*="item"]') : document.querySelectorAll('div[data-testid*="item"]');
+            
+            elements.forEach((el, index) => {
                 const a = el.querySelector('a');
                 if (!a) return;
-                const id = parseInt(a.href.match(/items\\/(\\d+)/)[1]);
+                const url = a.href;
+                const idMatch = url.match(/items\\/(\\d+)/);
+                if (!idMatch) return;
+                const id = parseInt(idMatch[1]);
                 const rawTitle = a.getAttribute('title') || "";
                 const img = el.querySelector('img');
                 const priceMatch = el.innerText.match(/\\d+[.,]\\d+\\s*[$€]/);
                 
-                let brand = 'N/A', size = 'N/A';
-                if (rawTitle.includes('marque:')) brand = rawTitle.match(/marque:\\s*([^,]+)/i)?.[1] || 'N/A';
-                if (rawTitle.includes('taille:')) size = rawTitle.match(/taille:\\s*([^,]+)/i)?.[1] || 'N/A';
+                // Détection d'article "Boosté" (souvent une classe spécifique ou badge)
+                const isBoosted = !!el.querySelector('[class*="boost"], [class*="promoted"]');
 
                 items.push({
-                    id: id, url: a.href, title: rawTitle,
+                    id: id, url: url, title: rawTitle,
                     photo: img?.src || '', price: priceMatch ? priceMatch[0] : 'N/A',
-                    brand: brand, size: size
+                    is_boosted: isBoosted,
+                    index: index // Pour savoir s'il est au début du grid
                 });
             });
             return items;
@@ -122,8 +127,8 @@ def send_discord_alert(context, item):
         d = scrape_item_details(p, item['url'])
         p.close()
         
-        f_brand = d['brand'] if d['brand'] != 'N/A' else item['brand']
-        f_size = d['size'] if d['size'] != 'N/A' else item['size']
+        f_brand = d['brand'] if d['brand'] != 'N/A' else 'N/A'
+        f_size = d['size'] if d['size'] != 'N/A' else 'N/A'
         f_desc = clean_text(d['description'])
         f_photo = d['photos'][0] if d['photos'] else item['photo']
         
@@ -156,16 +161,15 @@ def watchdog_handler(signum, frame):
     log("🚨 WATCHDOG !"); os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage NICKEL VERSION V11.10 (Architecture V10.x)")
+    log("🚀 Démarrage ANTI-OLD SNIPER V11.11")
     seen_ids = set()
+    initialized_queries = set() # Pour ne pas alerter sur la première fois d'une requête
     last_green_check = 0
     last_secondary_check = 0
     last_seen_id = load_last_seen_id()
-    is_initial = True
 
     while True:
         try:
-            # ON OUVRE LE NAVIGATEUR POUR CE CYCLE SEULEMENT
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
                 context = browser.new_context(
@@ -173,7 +177,6 @@ def run_bot():
                     locale="fr-FR"
                 )
                 
-                # OPTIMISATION (On garde le CSS pour la stabilité)
                 def block(route):
                     if route.request.resource_type in ["image", "font", "media"]: route.abort()
                     else: route.continue_()
@@ -184,16 +187,16 @@ def run_bot():
                 if 1 <= hour < 7:
                     log("🌙 Sommeil..."); browser.close(); time.sleep(600); continue
 
-                # Détermination des requêtes
                 queries = [(q, None) for q in PRIORITY_QUERIES]
                 if now - last_green_check > 300:
                     queries += [(q, 10) for q in PRIORITY_QUERIES]; last_green_check = now
                 if now - last_secondary_check > 1200:
                     queries += [(q, None) for q in SECONDARY_QUERIES]; last_secondary_check = now
 
-                signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(400)
+                signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(450)
 
                 for q, c in queries:
+                    q_key = f"{q}_{c}"
                     try:
                         log(f"🔎 Check: '{q}'{' [VERTE]' if c else ''}")
                         page = context.new_page()
@@ -202,28 +205,42 @@ def run_bot():
                         page.wait_for_selector('div[data-testid*="item"]', timeout=15000)
                         
                         items = extract_items_from_page(page)
+                        
+                        # Si c'est la première fois qu'on voit cette requête, on ne fait qu'initialiser
+                        is_new_query = q_key not in initialized_queries
+                        
                         for it in items:
                             if it['id'] not in seen_ids:
                                 seen_ids.add(it['id'])
-                                if not is_initial and it['id'] > last_seen_id:
+                                
+                                # CRITÈRE D'ALERTE :
+                                # 1. Recherche déjà initialisée au tour précédent
+                                # 2. L'ID est strictement supérieur au dernier ID vu (sécurité temps)
+                                # 3. Pas un article "Boosté" perdu au milieu (sauf si tout début de grid)
+                                if not is_new_query and it['id'] > last_seen_id:
+                                    if it['is_boosted'] and it['index'] > 2:
+                                        # On ignore les vieux trucs boostés qui remontent
+                                        continue
+                                        
                                     t = it['title'].lower()
                                     if any(k in t for k in ["asse", "saint", "st-", "sainté"]) and \
                                        (any(k in t for k in ["maillot", "jersey", "camiseta", "trikot", "ensemble"]) or c == 10):
                                         send_discord_alert(context, it)
                                         last_seen_id = max(last_seen_id, it['id']); save_last_seen_id(last_seen_id)
+                        
+                        initialized_queries.add(q_key)
                         page.close()
                         time.sleep(random.uniform(0.5, 1))
                     except Exception as e:
                         log(f"⚠️ Erreur {q}: {e}")
 
-                browser.close() # ON FERME TOUT À LA FIN DU CYCLE
+                browser.close()
                 signal.alarm(0)
-                is_initial = False
                 log("⏳ Cycle terminé. Repos 10s...")
                 time.sleep(10)
 
         except Exception as e:
-            log(f"🚨 Bug global : {e}"); time.sleep(20)
+            log(f"🚨 Bug global : {e}"); time.sleep(30)
 
 if __name__ == "__main__":
     run_bot()
