@@ -430,6 +430,15 @@ def run_bot():
                         timezone_id='Europe/Paris'
                     )
 
+                    # OPTIMISATION (ÉCONOMIE D'ÉNERGIE) : Bloquer images/CSS/Polices
+                    def block_aggressively(route):
+                        if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
+                            route.abort()
+                        else:
+                            route.continue_()
+                    
+                    context.route("**/*", block_aggressively)
+
                     # Détermination des recherches
                     current_cycle_queries = [] # On va remplir dynamiquement
                     now = time.time()
