@@ -395,7 +395,8 @@ def run_bot():
     railway_account = os.environ.get('RAILWAY_ACCOUNT_ID', '1')
     current_day = dt.datetime.utcnow().day
     
-    if current_day <= 14:
+    # SEUIL DE SWITCH (Passé à 9 pour tester le compte 2 immédiatement)
+    if current_day <= 9:
         active_account = '1'
     else:
         active_account = '2'
