@@ -77,14 +77,6 @@ def scrape_item_details(page, item_url):
         if not item_id:
             log("❌ Impossible d'extraire l'ID de l'URL")
             return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
-
-        # On va sur une page "neutre" (la page d'accueil ou la recherche) pour avoir le contexte de session
-        # Pas besoin d'aller sur la page détail lourde, on peut juste fetch l'API
-        # Mais pour être sûr d'avoir les cookies, restons sur la page actuelle ou allons sur la home
-        # Si on est déjà dans un contexte ouvert, on peut juste faire fetch
-        # Le contexte appelant ouvre déjà une page vide, allons sur Vinted Home pour initialiser la session si besoin
-        # page.goto("https://www.vinted.fr", wait_until='domcontentloaded') 
-        # (Optimisation: on suppose qu'on a déjà les cookies de la recherche précédente)
         
         # Pour être sûr, on va quand même sur la page de l'item (ça génère les cookies spécifiques item)
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
@@ -126,12 +118,7 @@ def scrape_item_details(page, item_url):
             description = item.get('description', '')
             brand = item.get('brand_title', 'N/A')
             size = item.get('size_title', 'N/A')
-            status = item.get('status', 'N/A') # Parfois c'est status_id, il faut mapper, mais essayons title
-            
-            # Si status est vide, parfois c'est pas envoyé
-            if status == 'N/A' and 'status' in item:
-                 # Vinted API change parfois
-                 pass
+            status = item.get('status', 'N/A')
             
         else:
             log("⚠️ API Vinted muette ou erreur")
@@ -157,9 +144,7 @@ def scrape_item_details(page, item_url):
 def extract_items_from_page(page):
     """Extrait les articles avec Parsing Intelligent du Titre (V5.0)"""
     try:
-        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-        time.sleep(random.uniform(1, 2))
-        
+        # Note: on ne remet pas de wait_for_selector ici car il est fait avant l'appel
         items = page.evaluate("""
             () => {
                 const items = [];
@@ -175,56 +160,41 @@ def extract_items_from_page(page):
                         if (!idMatch) return;
                         const itemId = parseInt(idMatch[1]);
                         
-                        // RECUPERATION DU TITRE COMPLET (contient souvent marque, taille, état)
                         let rawTitle = link.getAttribute('title') || '';
                         if (!rawTitle) {
                              const img = el.querySelector('img');
                              if (img) rawTitle = img.alt;
                         }
                         
-                        // Valeurs par défaut
                         let price = 'N/A';
                         let size = 'N/A';
                         let brand = 'N/A';
                         let status = 'Non spécifié';
-                        let title = rawTitle; // Par défaut on prend tout
+                        let title = rawTitle;
 
-                        // ANALYSE DU TITRE (Parsing V5.0)
-                        // Exemple: "Maillot, marque: Nike, taille: L, état: Très bon état, 20,00 €"
                         if (rawTitle.includes('marque:') || rawTitle.includes('taille:')) {
-                            
-                            // Nettoyage du titre (on garde le début avant la première virgule souvent)
                             title = rawTitle.split(',')[0].trim();
-                            
-                            // Extraction par Regex JS
                             const brandMatch = rawTitle.match(/marque:\\s*([^,]+)/i);
                             if (brandMatch) brand = brandMatch[1].trim();
-                            
                             const sizeMatch = rawTitle.match(/taille:\\s*([^,]+)/i);
                             if (sizeMatch) size = sizeMatch[1].trim();
-                            
                             const statusMatch = rawTitle.match(/état:\\s*([^,]+)/i);
                             if (statusMatch) status = statusMatch[1].trim();
                         }
                         
-                        // Récupération de TOUS les textes (morceaux + bloc complet)
                         const texts = Array.from(el.querySelectorAll('p, h3, h4, span, div'))
                                            .map(e => e.innerText.trim())
                                            .filter(t => t.length > 0);
-                        
-                        // On ajoute le texte brut complet de l'élément pour voir les lignes concaténées
                         texts.push(el.innerText.trim());
                         
                         const uniqueTexts = [...new Set(texts)];
                         price = uniqueTexts.find(t => t.includes('€') || t.includes('$')) || 'N/A';
                         
-                        // Si le parsing titre a échoué pour certains champs, on tente l'heuristique
                         if (size === 'N/A') {
-                            const sizeRegex = /^(XS|S|M|L|XL|XXL|\d{2,3}|Unique)$/i;
+                            const sizeRegex = /^(XS|S|M|L|XL|XXL|\\d{2,3}|Unique)$/i;
                             size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
                         }
 
-                        // 4. Heuristique "État" ULTIME (V6.3)
                         if (status === 'Non spécifié') {
                             const statusKeywords = [
                                 "neuf avec étiquette", "neuf sans étiquette", "neuf",
@@ -243,7 +213,6 @@ def extract_items_from_page(page):
                             }
                         }
 
-                        // 5. Heuristique "Marque" de secours (V6.3 Ultra-Strict)
                         if (brand === 'N/A' || brand.toLowerCase().includes('enlevé')) {
                              const ignored = ['vinted', 'enlevé', 'nouveau', 'neuf', '€', 'recommandé', 'boosté', 'protection', 'avis', 'favori'];
                              const potentialBrand = uniqueTexts.find(t => {
@@ -258,7 +227,6 @@ def extract_items_from_page(page):
                              if (potentialBrand) brand = potentialBrand;
                         }
 
-                        // 6. Nettoyage final du Titre (V8.2 AGRESSIF)
                         title = title.replace(/enlevé/gi, '').replace(/nouveau/gi, '').replace(/!/g, '').replace(/\\s*,\\s*$/, '').trim();
                         title = title.replace(/\\s{2,}/g, ' ');
                         if (!title || title.length < 3) title = 'Maillot ASSE';
@@ -293,10 +261,6 @@ def send_discord_alert(context, item):
     """Envoie une alerte Discord intelligente (fallback liste)"""
     if not DISCORD_WEBHOOK_URL: return
 
-    # 1. On essaie d'avoir les détails riches (Photos + Desc)
-    # Mais on ne fait plus confiance au brand/size du scraping détail s'il échoue
-    # On garde les infos "liste" (item) comme base solide
-    
     details = {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
     try:
         detail_page = context.new_page()
@@ -307,17 +271,15 @@ def send_discord_alert(context, item):
         log(f"⚠️ Mode Simple (Détails échoués): {e}")
 
     try:
-        # FUSION ET NETTOYAGE (V8.4 TOTAL CLEAN)
+        # FUSION ET NETTOYAGE
         price_raw = item.get('price', 'N/A')
         brand_raw = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
         size_raw = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
         status_raw = details['status'] if details['status'] not in ['N/A', 'Non spécifié'] else item.get('status', 'Non spécifié')
         desc_raw = details['description']
         
-        # Photos
         photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
         
-        # Nettoyage radical
         final_title = clean_text(item.get('title'))
         final_brand = clean_text(brand_raw)
         final_price = clean_text(price_raw)
@@ -328,8 +290,6 @@ def send_discord_alert(context, item):
         if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
 
         description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
-        
-        # Un dernier coup de balai sur l'ensemble du bloc au cas où
         description_text = description_text.replace("  ", " ").strip()
 
         if not final_title: final_title = "Nouvel article ASSE"
@@ -350,20 +310,15 @@ def send_discord_alert(context, item):
         for photo_url in photos[1:4]:
             embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
 
-        # NETTOYAGE DU TITRE (enlever les infos redondantes de Vinted)
         import re
-        clean_title = re.sub(r'\s*·.*$', '', final_title)  # Enlève tout après le "·"
-        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)  # Enlève les prix
+        clean_title = re.sub(r'\s*·.*$', '', final_title)
+        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)
         clean_title = clean_title.strip()
-        if not clean_title:
-            clean_title = "Maillot ASSE"
+        if not clean_title: clean_title = "Maillot ASSE"
 
-        # EXTRAIT DE DESCRIPTION (COMPLÈTE jusqu'à 1000 caractères)
         desc_preview = final_desc[:1000] if final_desc else "Pas de description"
-        if len(final_desc) > 1000:
-            desc_preview += "..."
+        if len(final_desc) > 1000: desc_preview += "..."
 
-        # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
         notif_text = f"""@everyone | {clean_title}
 💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}
 📝 {desc_preview}"""
@@ -384,11 +339,11 @@ def watchdog_handler(signum, frame):
     """Tue le bot si un cycle prend trop de temps (Freeze detection)"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{timestamp}] 🚨 WATCHDOG: Bot figé depuis trop longtemps ! Redémarrage forcé...", flush=True)
-    os._exit(1) # Sortie brutale pour forcer Railway à relancer
+    os._exit(1)
 
 def run_bot():
-    """Boucle principale du bot V10.5 SNIPER"""
-    log("🚀 Démarrage du bot V10.5 SNIPER")
+    """Boucle principale du bot V11.0 PERSISTENT SNIPER"""
+    log("🚀 Démarrage du bot V11.0 PERSISTENT SNIPER")
     
     log(f"⚡ Mode Sniper : Réactivité maximale + International toutes les 20 min")
     
@@ -459,22 +414,16 @@ def run_bot():
 
                         for query_data in queries_to_run:
                             query, color = query_data
-                            page = None # Initialize page to None
+                            page = None
                             try:
                                 page = context.new_page()
-                                url = get_search_url(query, color) # Using existing get_search_url
+                                url = get_search_url(query, color)
                                 
                                 page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                                # The original code used page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-                                # The new instruction implies getting content and parsing it.
-                                # Let's stick to the original extraction method for consistency with the existing function.
-                                # If parse_vinted_data is meant to replace extract_items_from_page, it needs to be defined.
-                                # For now, I'll assume the user wants to keep the existing extraction logic.
                                 page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-                                items = extract_items_from_page(page) # Using existing extract_items_from_page
+                                items = extract_items_from_page(page)
                                 
                                 new_found = []
-                                
                                 for item in items:
                                     if item['id'] not in seen_ids:
                                         seen_ids.add(item['id'])
@@ -485,33 +434,40 @@ def run_bot():
                                 if new_found:
                                     last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
                                     save_last_seen_id(last_seen_id)
+
+                            except Exception as e:
+                                log(f"⚠️ Erreur locale '{query}': {e}")
                             finally:
-                                page.close()
+                                if page:
+                                    page.close()
+                                time.sleep(random.uniform(1, 2))
 
-                            time.sleep(random.uniform(1, 2))
-                        except Exception as e:
-                            log(f"⚠️ Erreur locale sur '{query}': {e}")
-                    
-                    browser.close()
-                
-                # Désactivation du Watchdog après succès du cycle
-                signal.alarm(0)
-            except Exception as e:
-                log(f"🚨 Bug moteur Playwright : {e}. Redémarrage au prochain cycle.")
-                signal.alarm(0)
+                        # Fin de cycle réussi
+                        cycle_count += 1
+                        is_initial_cycle = False
+                        signal.alarm(0) # Désarme le watchdog
 
-            # 3. Entretien du Cache
-            is_initial_cycle = False
-            if len(seen_ids) > 2000:
-                seen_ids_list = sorted(list(seen_ids), reverse=True)
-                seen_ids = set(seen_ids_list[:1500])
+                        # Cache maintenance
+                        if len(seen_ids) > 2000:
+                            seen_ids_list = sorted(list(seen_ids), reverse=True)
+                            seen_ids = set(seen_ids_list[:1500])
 
-            # 4. Sommeil
-            log(f"⏳ Cycle {datetime.now().strftime('%H:%M:%S')} terminé. Repos 10s...")
-            time.sleep(10)
+                        log(f"⏳ Repos 15s...")
+                        time.sleep(15)
+
+                    except Exception as e:
+                        log(f"🚨 Bug cycle : {e}")
+                        signal.alarm(0)
+                        break
+
+                log("🔄 Redémarrage préventif du navigateur pour la RAM...")
+                browser.close()
+                cycle_count = 0
 
     except KeyboardInterrupt:
         log("\n⛔ Arrêt du bot demandé")
+    except Exception as e:
+        log(f"🚨 Erreur fatale run_bot: {e}")
     finally:
         log("👋 Bot éteint proprement")
 
