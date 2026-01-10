@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.9 - ZERO LATENCY SNIPER
-- Retour à la détection instantanée (Toutes les requêtes à chaque cycle)
-- Suppression des délais de 20 min (Sniper total)
-- Optimisation Browser Persistant (Maintien du coût $0.00)
-- Bypass Cache Vinted (&v=timestamp)
+Vinted Bot V11.10 - NICKEL VERSION (REVERT)
+- Retour à l'architecture V10.x (Browser refresh à chaque cycle)
+- Sniping instantané (Zéro latence cache)
+- Alertes Premium V10.2
 """
 
 import os
@@ -19,9 +18,6 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 # Configuration
 PRIORITY_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne"]
 SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Camiseta Asse", "Ensemble Asse", "Trikot Asse"]
-# On fusionne tout pour un Sniping total comme avant
-SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
-
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 
@@ -50,19 +46,22 @@ def clean_text(text):
     return text.strip()
 
 def get_search_url(query, color_id=None):
-    # Ajout d'un paramètre v= pour forcer Vinted à ne pas servir de cache
-    v = int(time.time())
-    url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first&v={v}"
+    url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
     if color_id:
         url += f"&color_ids[]={color_id}"
     return url
 
 def scrape_item_details(page, item_url):
     try:
-        log(f"🔎 Détails : {item_url}")
-        page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
+        page.goto(item_url, wait_until='domcontentloaded', timeout=20000)
         time.sleep(1)
-
+        
+        # Extraction Photos
+        photos = page.evaluate("""() => {
+            const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
+            return imgs.map(img => img.src).filter(src => src && src.includes('images.vinted'));
+        }""")
+        
         import re
         id_match = re.search(r'/items/(\d+)', item_url)
         item_id = id_match.group(1) if id_match else "0"
@@ -76,7 +75,6 @@ def scrape_item_details(page, item_url):
 
         if api_data and 'item' in api_data:
             it = api_data['item']
-            photos = [p.get('url') for p in it.get('photos', [])]
             return {
                 "description": it.get('description', ''),
                 "photos": photos,
@@ -86,16 +84,8 @@ def scrape_item_details(page, item_url):
             }
         
         # Fallback DOM
-        details = page.evaluate("""() => {
-            const desc = document.querySelector('[itemprop="description"]')?.innerText || "";
-            const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img')).map(i => i.src);
-            return { description: desc, photos: imgs };
-        }""")
-        return {
-            "description": details['description'],
-            "photos": details['photos'],
-            "brand": "N/A", "size": "N/A", "status": "N/A"
-        }
+        desc = page.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
+        return {"description": desc, "photos": photos, "brand": "N/A", "size": "N/A", "status": "N/A"}
     except:
         return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
@@ -132,24 +122,26 @@ def send_discord_alert(context, item):
         d = scrape_item_details(p, item['url'])
         p.close()
         
+        f_brand = d['brand'] if d['brand'] != 'N/A' else item['brand']
+        f_size = d['size'] if d['size'] != 'N/A' else item['size']
+        f_desc = clean_text(d['description'])
+        f_photo = d['photos'][0] if d['photos'] else item['photo']
+        
         import re
         clean_title = item['title'].split(',')[0].split('·')[0].strip()
         clean_title = re.sub(r'\\d+[.,]\\d+\\s*€.*$', '', clean_title).strip()
         if not clean_title: clean_title = "Maillot ASSE"
 
-        f_brand = d['brand'] if d['brand'] != 'N/A' else item['brand']
-        f_size = d['size'] if d['size'] != 'N/A' else item['size']
-        f_desc = clean_text(d['description'])
-        f_photo = d['photos'][0] if d['photos'] else item['photo']
-        desc_preview = f_desc[:1000] + "..." if len(f_desc) > 1000 else (f_desc if f_desc else "Pas de description")
-        
+        desc_full = f_desc if f_desc else "Pas de description"
+        desc_preview = desc_full[:1000] + "..." if len(desc_full) > 1000 else desc_full
+
         payload = {
             "content": f"@everyone | {clean_title}\n💰 {item['price']} | 📏 {f_size} | 🏷️ {f_brand}\n📝 {desc_preview}",
             "username": "Vinted ASSE Bot",
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
             "embeds": [{
                 "title": f"🔔 {clean_title}", "url": item['url'], "color": 0x09B83E,
-                "description": f"**{item['price']}** | Taille: **{f_size}**\nMarque: **{f_brand}**\nÉtat: {d.get('status', 'N/A')}\n\n{f_desc[:300]}...",
+                "description": f"**{item['price']}** | Taille: **{f_size}**\nMarque: **{f_brand}**\nÉtat: {d.get('status', 'N/A')}\n\n{desc_full[:300]}...",
                 "image": {"url": f_photo},
                 "footer": {"text": f"Vinted Bot • ID: {item['id']}"},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
@@ -158,21 +150,22 @@ def send_discord_alert(context, item):
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         log(f"✅ Alerte envoyée #{item['id']}")
     except Exception as e:
-        log(f"❌ Erreur Discord: {e}")
+        log(f"❌ Erreur alerte: {e}")
 
 def watchdog_handler(signum, frame):
     log("🚨 WATCHDOG !"); os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage ZERO LATENCY SNIPER V11.9")
+    log("🚀 Démarrage NICKEL VERSION V11.10 (Architecture V10.x)")
     seen_ids = set()
     last_green_check = 0
+    last_secondary_check = 0
     last_seen_id = load_last_seen_id()
     is_initial = True
-    cycle_count = 0
 
     while True:
         try:
+            # ON OUVRE LE NAVIGATEUR POUR CE CYCLE SEULEMENT
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
                 context = browser.new_context(
@@ -180,59 +173,57 @@ def run_bot():
                     locale="fr-FR"
                 )
                 
-                # OPTIMISATION ENERGY
+                # OPTIMISATION (On garde le CSS pour la stabilité)
                 def block(route):
                     if route.request.resource_type in ["image", "font", "media"]: route.abort()
                     else: route.continue_()
                 context.route("**/*", block)
 
-                search_page = context.new_page()
+                now = time.time()
+                hour = (datetime.utcnow().hour + 1) % 24
+                if 1 <= hour < 7:
+                    log("🌙 Sommeil..."); browser.close(); time.sleep(600); continue
 
-                while cycle_count < 20:
-                    now = time.time()
-                    hour = (datetime.utcnow().hour + 1) % 24
-                    if 1 <= hour < 7:
-                        log("🌙 Sommeil..."); time.sleep(600); continue
+                # Détermination des requêtes
+                queries = [(q, None) for q in PRIORITY_QUERIES]
+                if now - last_green_check > 300:
+                    queries += [(q, 10) for q in PRIORITY_QUERIES]; last_green_check = now
+                if now - last_secondary_check > 1200:
+                    queries += [(q, None) for q in SECONDARY_QUERIES]; last_secondary_check = now
 
-                    # RETOUR AU SNIPING TOTAL : On lance TOUT à chaque fois
-                    queries = [(q, None) for q in SEARCH_QUERIES]
-                    
-                    # On ajoute quand même le scan vert pour les maillots prioritaires
-                    if now - last_green_check > 300:
-                        queries += [(q, 10) for q in PRIORITY_QUERIES]
-                        last_green_check = now
+                signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(400)
 
-                    log(f"🚀 Cycle {cycle_count}/20 - Sniper Actif ({len(queries)} requêtes)")
-                    signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(450)
+                for q, c in queries:
+                    try:
+                        log(f"🔎 Check: '{q}'{' [VERTE]' if c else ''}")
+                        page = context.new_page()
+                        page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=30000)
+                        time.sleep(1.5)
+                        page.wait_for_selector('div[data-testid*="item"]', timeout=15000)
+                        
+                        items = extract_items_from_page(page)
+                        for it in items:
+                            if it['id'] not in seen_ids:
+                                seen_ids.add(it['id'])
+                                if not is_initial and it['id'] > last_seen_id:
+                                    t = it['title'].lower()
+                                    if any(k in t for k in ["asse", "saint", "st-", "sainté"]) and \
+                                       (any(k in t for k in ["maillot", "jersey", "camiseta", "trikot", "ensemble"]) or c == 10):
+                                        send_discord_alert(context, it)
+                                        last_seen_id = max(last_seen_id, it['id']); save_last_seen_id(last_seen_id)
+                        page.close()
+                        time.sleep(random.uniform(0.5, 1))
+                    except Exception as e:
+                        log(f"⚠️ Erreur {q}: {e}")
 
-                    for q, c in queries:
-                        try:
-                            log(f"🔎 Check: '{q}'{' [VERTE]' if c else ''}")
-                            search_page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=30000)
-                            time.sleep(1.2)
-                            search_page.wait_for_selector('div[data-testid*="item"]', timeout=15000)
-                            
-                            items = extract_items_from_page(search_page)
-                            for it in items:
-                                if it['id'] not in seen_ids:
-                                    seen_ids.add(it['id'])
-                                    if not is_initial and it['id'] > last_seen_id:
-                                        t_low = it['title'].lower()
-                                        if any(k in t_low for k in ["asse", "saint", "st-", "sainté"]) and \
-                                           (any(k in t_low for k in ["maillot", "jersey", "camiseta", "trikot", "ensemble"]) or c == 10):
-                                            send_discord_alert(context, it)
-                                            last_seen_id = max(last_seen_id, it['id']); save_last_seen_id(last_seen_id)
-                            time.sleep(random.uniform(0.3, 0.7))
-                        except Exception as e:
-                            log(f"⚠️ Erreur {q}: {str(e)[:40]}")
-                    
-                    is_initial = False; cycle_count += 1; signal.alarm(0)
-                    log(f"⏳ Repos 5s...")
-                    time.sleep(5) # Sniping agressif
+                browser.close() # ON FERME TOUT À LA FIN DU CYCLE
+                signal.alarm(0)
+                is_initial = False
+                log("⏳ Cycle terminé. Repos 10s...")
+                time.sleep(10)
 
-                browser.close(); cycle_count = 0; log("🔄 Refresh...")
         except Exception as e:
-            log(f"🚨 Bug: {e}"); time.sleep(30)
+            log(f"🚨 Bug global : {e}"); time.sleep(20)
 
 if __name__ == "__main__":
     run_bot()
