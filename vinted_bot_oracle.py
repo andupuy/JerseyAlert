@@ -480,10 +480,11 @@ def run_bot():
                                         seen_ids.add(item['id'])
                                         if not is_initial_cycle and item['id'] > last_seen_id:
                                             new_found.append(item)
-                                                send_discord_alert(context, item)
-                                        
-                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                        save_last_seen_id(last_seen_id)
+                                            send_discord_alert(context, item)
+                                
+                                if new_found:
+                                    last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
+                                    save_last_seen_id(last_seen_id)
                             finally:
                                 page.close()
 
