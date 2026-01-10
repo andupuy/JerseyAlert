@@ -31,17 +31,19 @@ jobs:
         if: steps.account.outputs.account == '1'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_1 }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_1 }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE_1 }}
         run: |
-          railway link ${{ secrets.RAILWAY_PROJECT_1 }}
-          railway up --service ${{ secrets.RAILWAY_SERVICE_1 }} --detach
+          railway up --detach
 
       - name: Deploy to Railway Account 2
         if: steps.account.outputs.account == '2'
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_2 }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_2 }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE_2 }}
         run: |
-          railway link ${{ secrets.RAILWAY_PROJECT_2 }}
-          railway up --service ${{ secrets.RAILWAY_SERVICE_2 }} --detach
+          railway up --detach
 
       - name: Deployment success
         run: |
