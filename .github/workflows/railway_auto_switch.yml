@@ -1,57 +1,41 @@
 name: Railway Auto Switch
 
 on:
+  push:
+    branches: [ main ]
   schedule:
     # Tous les jours à 2h du matin (Paris time)
     - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
-  switch:
+  deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
       - name: Determine active Railway account
         id: account
         run: |
-          # FORCE ACCOUNT 2 FOR TESTING - Remove this line later
+          # FORCE ACCOUNT 2 POUR LE TEST
           echo "active=2" >> $GITHUB_OUTPUT
-          echo "inactive=1" >> $GITHUB_OUTPUT
-          echo "🔵 TEST: Account 2 actif, Account 1 en pause"
+          echo "🔵 TEST: Force déploiement sur Account 2"
           
-          # Uncomment this for production:
+          # Pour la prod plus tard :
           # DAY=$(date +%d)
-          # if [ $DAY -le 14 ]; then
-          #   echo "active=1" >> $GITHUB_OUTPUT
-          #   echo "inactive=2" >> $GITHUB_OUTPUT
-          #   echo "🟢 Account 1 actif (jours 1-14)"
-          # else
-          #   echo "active=2" >> $GITHUB_OUTPUT
-          #   echo "inactive=1" >> $GITHUB_OUTPUT
-          #   echo "🔵 Account 2 actif (jours 15-28)"
-          # fi
+          # if [ $DAY -le 14 ]; then echo "active=1" >> $GITHUB_OUTPUT; else echo "active=2" >> $GITHUB_OUTPUT; fi
 
-      - name: Pause inactive service
+      - name: Install Railway CLI
         run: |
-          if [ "${{ steps.account.outputs.inactive }}" == "1" ]; then
-            TOKEN="${{ secrets.RAILWAY_TOKEN_1 }}"
-            SERVICE="${{ secrets.RAILWAY_SERVICE_1 }}"
-            echo "⏸️ Mise en pause du service Account 1"
-          else
-            TOKEN="${{ secrets.RAILWAY_TOKEN_2 }}"
-            SERVICE="${{ secrets.RAILWAY_SERVICE_2 }}"
-            echo "⏸️ Mise en pause du service Account 2"
-          fi
-          
-          # Note: Railway n'a pas d'API simple pour pause/unpause
-          # On va juste s'assurer que le bon compte est déployé
-          echo "✅ Switch préparé"
+          curl -fsSL https://railway.app/install.sh | sh
+          echo "$HOME/.railway/bin" >> $GITHUB_PATH
 
-      - name: Trigger deployment on active account
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ steps.account.outputs.active == '1' && secrets.RAILWAY_TOKEN_1 || secrets.RAILWAY_TOKEN_2 }}
+          PROJECT_ID: ${{ steps.account.outputs.active == '1' && secrets.RAILWAY_PROJECT_1 || secrets.RAILWAY_PROJECT_2 }}
+          SERVICE_ID: ${{ steps.account.outputs.active == '1' && secrets.RAILWAY_SERVICE_1 || secrets.RAILWAY_SERVICE_2 }}
         run: |
-          if [ "${{ steps.account.outputs.active }}" == "1" ]; then
-            echo "🚀 Account 1 est actif (déjà connecté à GitHub)"
-          else
-            echo "🚀 Account 2 est actif (déjà connecté à GitHub)"
-          fi
-          echo "Les deux comptes se déploient automatiquement via GitHub."
-          echo "Pour économiser, supprimez manuellement le service inactif ou configurez des replicas à 0."
+          railway up --project "$PROJECT_ID" --service "$SERVICE_ID" --detach
+
