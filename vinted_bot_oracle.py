@@ -137,7 +137,7 @@ def watchdog_handler(signum, frame):
     os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage FLASH SNIPER V11.3")
+    log("🚀 Démarrage FLASH SNIPER V11.4")
     seen_ids = set()
     last_green_check = 0
     last_secondary_check = 0
@@ -179,7 +179,8 @@ def run_bot():
                             log(f"🔎 Check: '{q}'{' [VERTE]' if c else ''}")
                             page = context.new_page()
                             page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=30000)
-                            page.wait_for_selector('div[data-testid*="item"]', timeout=5000)
+                            time.sleep(1) # Petite pause pour laisser le JS s'initialiser
+                            page.wait_for_selector('div[data-testid*="item"]', timeout=15000)
                             
                             items = extract_items_from_page(page)
                             for it in items:
