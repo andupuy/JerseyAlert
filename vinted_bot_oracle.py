@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.12 - ECONOMY SNIPER
-- Redéploiement des optimisations V10.6 (Green Energy)
-- Repos 20s pour diviser le coût Railway par 2
-- Tri des requêtes (Priorité ASSE)
-- Alertes Premium V10.2 conservées
+Vinted Bot V11.13 - RAM SHIELD
+- Optimisation RAM pour Railway (512MB limit)
+- Nettoyage automatique du cache IDs (>2000)
+- Flags Chromium anti-crash (--disable-dev-shm-usage)
+- Maintien du coût réduit (20s repos + Green Energy)
 """
 
 import os
@@ -13,6 +13,7 @@ import time
 import random
 import requests
 import signal
+import gc
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
@@ -54,11 +55,8 @@ def get_search_url(query, color_id=None):
 
 def scrape_item_details(page, item_url):
     try:
-        # On va sur la page détail
         page.goto(item_url, wait_until='domcontentloaded', timeout=20000)
         time.sleep(1)
-        
-        # Extraction Photos (Indispensable pour Discord)
         photos = page.evaluate("""() => {
             const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
             return imgs.map(img => img.src).filter(src => src && src.includes('images.vinted'));
@@ -68,7 +66,6 @@ def scrape_item_details(page, item_url):
         id_match = re.search(r'/items/(\d+)', item_url)
         item_id = id_match.group(1) if id_match else "0"
 
-        # On tente l'API pour avoir la description complète
         api_data = page.evaluate(f"""async () => {{
             try {{
                 const r = await fetch('/api/v2/items/{item_id}?localize=false');
@@ -123,7 +120,6 @@ def extract_items_from_page(page):
 def send_discord_alert(context, item):
     if not DISCORD_WEBHOOK_URL: return
     try:
-        # Pour les détails, on ouvre exceptionnellement les images pour avoir la photo
         p = context.new_page()
         d = scrape_item_details(p, item['url'])
         p.close()
@@ -157,7 +153,7 @@ def watchdog_handler(signum, frame):
     log("🚨 WATCHDOG !"); os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage ECONOMY SNIPER V11.12")
+    log("🚀 Démarrage RAM SHIELD SNIPER V11.13")
     seen_ids = set()
     initialized_queries = set()
     last_green_check = 0
@@ -166,31 +162,36 @@ def run_bot():
 
     while True:
         try:
+            # Pour chaque cycle, on nettoie tout
+            gc.collect()
+
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
+                # Flags anti-crash mémoire
+                browser = p.chromium.launch(headless=True, args=[
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu'
+                ])
                 context = browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     locale="fr-FR"
                 )
                 
-                # OPTIMISATION AGRESSIVE (Green Energy)
                 def block(route):
-                    if route.request.resource_type in ["image", "font", "media"]:
-                        route.abort()
-                    else:
-                        route.continue_()
+                    if route.request.resource_type in ["image", "font", "media"]: route.abort()
+                    else: route.continue_()
                 context.route("**/*", block)
 
                 now = time.time()
                 hour = (datetime.utcnow().hour + 1) % 24
                 if 1 <= hour < 7:
-                    log("🌙 Veille Nuit (Sommeil)"); browser.close(); time.sleep(600); continue
+                    log("🌙 Veille Nuit"); browser.close(); time.sleep(600); continue
 
-                # Détermination des requêtes (Optimisé pour le coût)
                 queries = [(q, None) for q in PRIORITY_QUERIES]
                 if now - last_green_check > 300:
                     queries += [(q, 10) for q in PRIORITY_QUERIES]; last_green_check = now
-                if now - last_secondary_check > 900: # Toutes les 15 minutes (au lieu de chaque cycle)
+                if now - last_secondary_check > 900:
                     queries += [(q, None) for q in SECONDARY_QUERIES]; last_secondary_check = now
 
                 signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(450)
@@ -211,7 +212,7 @@ def run_bot():
                             if it['id'] not in seen_ids:
                                 seen_ids.add(it['id'])
                                 if not is_new_query and it['id'] > last_seen_id:
-                                    if it['is_boosted'] and it['index'] > 2: continue # Filtre anti-vieux
+                                    if it['is_boosted'] and it['index'] > 2: continue
                                     
                                     t = it['title'].lower()
                                     if any(k in t for k in ["asse", "saint", "st-", "sainté"]) and \
@@ -227,7 +228,14 @@ def run_bot():
 
                 browser.close()
                 signal.alarm(0)
-                log("⏳ Cycle terminé. Repos 20s...") # Repos allongé pour économie
+                
+                # Entretien Cache Mémoire
+                if len(seen_ids) > 2000:
+                    sorted_ids = sorted(list(seen_ids), reverse=True)
+                    seen_ids = set(sorted_ids[:1500])
+                    log("🧹 Nettoyage RAM (Cache IDs)")
+
+                log("⏳ Cycle terminé. Repos 20s...")
                 time.sleep(20)
 
         except Exception as e:
