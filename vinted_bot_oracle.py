@@ -397,10 +397,15 @@ def run_bot():
     last_secondary_check = 0
     last_green_check = 0
     
-    log("🚀 Phase d'initialisation rapide...")
-    # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
-    is_initial_cycle = True
-    last_seen_id = load_last_seen_id() # Load last_seen_id here
+    log("🚀 Phase d'initialisation...")
+    # Le cycle n'est silencieux QUE si on n'a pas d'historique (last_seen_id == 0)
+    last_seen_id = load_last_seen_id()
+    is_initial_cycle = (last_seen_id == 0)
+    
+    if is_initial_cycle:
+        log("🆕 Premier démarrage : cycle silencieux pour initialisation...")
+    else:
+        log(f"🔄 Reprise d'activité : recherche depuis l'ID {last_seen_id}")
 
     try:
         while True:
@@ -497,9 +502,15 @@ def run_bot():
                                         new_found.sort(key=lambda x: x['id'])
                                         for item in new_found:
                                             title_low = item.get('title', '').lower()
-                                            synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
+                                            synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot", "reproduction"]
                                             has_item_kw = any(s in title_low for s in synonyms)
-                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne", "sainté"])
+                                            # Liste de mots-clés club ultra-large
+                                            team_keywords = [
+                                                "asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", 
+                                                "saint étienne", "saint-étienne", "st étienne", "st-étienne", 
+                                                "sainté", "sainte", "as st", "as saint", "vert"
+                                            ]
+                                            has_team = any(x in title_low for x in team_keywords)
                                             
                                             # Match si (Maillot + Club) OU (Scan Vert + Club)
                                             if (has_item_kw and has_team) or (color == 10 and has_team):
