@@ -203,7 +203,8 @@ def run_bot():
                                 # log(f"   ∟ ID {it['id']} trop vieux (<= {last_id})")
                                 continue
                             
-                            if it['id'] > cycle_last_id := cycle_max_id: cycle_max_id = it['id']
+                            if it['id'] > cycle_max_id: 
+                                cycle_max_id = it['id']
 
                             if it['signature'] in sent_signatures:
                                 log(f"   ∟ 🚫 Doublon (Signature): {it['title']}")
