@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.20 - SNIPER ANTI-REPOST (RESTAURATION LOGS)
-- Signature automatique (Vendeur + Titre + Prix)
-- Historique 10000 signatures
-- Restauration des logs détaillés et de l'attente selector
+Vinted Bot V11.21 - SNIPER ULTIME (ANTI-REPOST & ANTI-BLIND)
+- Signature automatique intelligente (Vendeur + Titre + Prix)
+- Mémoire d'éléphant (10 000 signatures)
+- Correction bug boucle : processe TOUTES les nouvelles annonces d'un coup
+- Restauration parsing robuste (V10.6 Nickel)
 """
 
 import os
@@ -14,6 +15,7 @@ import requests
 import signal
 import gc
 import json
+import re
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
@@ -50,7 +52,6 @@ def load_last_seen_id():
 
 def clean_text(text):
     if not text: return ""
-    import re
     text = re.sub(r'(?i)enlevé\s*!?', '', text)
     text = re.sub(r'(?i)nouveau\s*!?', '', text)
     text = re.sub(r'\s+', ' ', text)
@@ -62,16 +63,18 @@ def get_search_url(query, color_id=None):
     return url
 
 def scrape_item_details(page, item_url):
+    """Extraction riche via API interne et DOM"""
     try:
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
         time.sleep(1)
+        
         photos = page.evaluate("""() => {
             const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
             return imgs.map(img => img.src).filter(src => src && src.includes('images.vinted'));
         }""")
+        
         desc = page.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
         
-        import re
         id_match = re.search(r'/items/(\d+)', item_url)
         item_id = id_match.group(1) if id_match else None
         
@@ -94,32 +97,63 @@ def scrape_item_details(page, item_url):
         return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
 def extract_items_from_page(page):
+    """Le moteur d'extraction robuste de la V10.6"""
     try:
-        # ATTENTE INDISPENSABLE POUR LE SNIPING
-        page.wait_for_selector('div[data-testid*="item"]', timeout=8000)
-        return page.evaluate("""() => {
-            const items = [];
-            const elements = document.querySelectorAll('div[data-testid*="item"]');
-            elements.forEach((el) => {
-                const a = el.querySelector('a');
-                if (!a) return;
-                const url = a.href;
-                const idMatch = url.match(/items\\/(\\d+)/);
-                if (!idMatch) return;
+        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+        return page.evaluate("""
+            () => {
+                const items = [];
+                const itemElements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
                 
-                const sellerEl = el.querySelector('h4[class*="Text"], [class*="seller"]');
-                const seller = sellerEl ? sellerEl.innerText.trim() : "Inconnu";
-                const title = a.getAttribute('title') || "Maillot ASSE";
-                const priceMatch = el.innerText.match(/\\d+[.,]\\d+\\s*[$€]/);
-                const price = priceMatch ? priceMatch[0] : 'N/A';
+                itemElements.forEach((el) => {
+                    try {
+                        const link = el.querySelector('a');
+                        if (!link) return;
+                        
+                        const url = link.href;
+                        const idMatch = url.match(/items\\/(\\d+)/);
+                        if (!idMatch) return;
+                        const itemId = parseInt(idMatch[1]);
+                        
+                        // Vendeur (important pour Signature)
+                        const sellerEl = el.querySelector('h4[class*="Text"], [class*="seller"], [data-testid*="seller-name"]');
+                        const seller = sellerEl ? sellerEl.innerText.trim() : "Inconnu";
+                        
+                        let rawTitle = link.getAttribute('title') || '';
+                        let price = 'N/A';
+                        let size = 'N/A';
+                        let brand = 'N/A';
+                        let status = 'Non spécifié';
+                        let title = rawTitle;
 
-                items.push({
-                    id: parseInt(idMatch[1]), url: url, title: title, price: price, seller: seller,
-                    signature: seller + "_" + title + "_" + price
+                        if (rawTitle.includes('marque:') || rawTitle.includes('taille:')) {
+                            title = rawTitle.split(',')[0].trim();
+                            const bm = rawTitle.match(/marque:\\s*([^,]+)/i); if (bm) brand = bm[1].trim();
+                            const sm = rawTitle.match(/taille:\\s*([^,]+)/i); if (sm) size = sm[1].trim();
+                            const stm = rawTitle.match(/état:\\s*([^,]+)/i); if (stm) status = stm[1].trim();
+                        }
+                        
+                        const texts = Array.from(el.querySelectorAll('p, h3, h4, span, div')).map(e => e.innerText.trim()).filter(t => t);
+                        price = texts.find(t => t.includes('€') || t.includes('$')) || 'N/A';
+                        
+                        if (size === 'N/A') {
+                            const sizeRegex = /^(XS|S|M|L|XL|XXL|\\d{2,3}|Unique)$/i;
+                            size = texts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
+                        }
+
+                        if (!title || title.length < 3) title = 'Maillot ASSE';
+                        const photo = el.querySelector('img')?.src || '';
+                        
+                        items.push({
+                            id: itemId, title: title, price: price, size: size,
+                            brand: brand, status: status, url: url, photo: photo, seller: seller,
+                            signature: seller + "_" + title + "_" + price
+                        });
+                    } catch (e) {}
                 });
-            });
-            return items;
-        }""")
+                return items;
+            }
+        """)
     except: return []
 
 def send_discord_alert(context, item):
@@ -132,17 +166,21 @@ def send_discord_alert(context, item):
         f_desc = clean_text(d['description'])
         desc_preview = f_desc[:1000] + "..." if len(f_desc) > 1000 else (f_desc if f_desc else "Pas de description")
         
-        import re
-        clean_title = item['title'].split(',')[0].split('·')[0].strip()
-        clean_title = re.sub(r'\\d+[.,]\\d+\\s*€.*$', '', clean_title).strip()
-        if not clean_title: clean_title = "Maillot ASSE"
+        # Nettoyage Titre
+        c_title = item['title'].split(',')[0].split('·')[0].strip()
+        c_title = re.sub(r'\d+[.,]\d+\s*€.*$', '', c_title).strip()
+        if not c_title: c_title = "Maillot ASSE"
+
+        # Marque/Taille fusionnée (si possible)
+        final_brand = d['brand'] if d['brand'] != 'N/A' else item['brand']
+        final_size = d['size'] if d['size'] != 'N/A' else item['size']
 
         payload = {
-            "content": f"@everyone | {clean_title}\n💰 {item['price']} | 📏 {d['size']} | 🏷️ {d['brand']} | 👤 {item['seller']}\n📝 {desc_preview}",
+            "content": f"@everyone | {c_title}\n💰 {item['price']} | 📏 {final_size} | 🏷️ {final_brand} | 👤 {item['seller']}\n📝 {desc_preview}",
             "embeds": [{
-                "title": f"🔔 {clean_title}", "url": item['url'], "color": 0x09B83E,
-                "description": f"**{item['price']}** | Taille: **{d['size']}**\nVendeur: **{item['seller']}**\n\n{f_desc[:300]}...",
-                "image": {"url": d['photos'][0] if d['photos'] else ""},
+                "title": f"🔔 {c_title}", "url": item['url'], "color": 0x09B83E,
+                "description": f"**{item['price']}** | Taille: **{final_size}**\nVendeur: **{item['seller']}**\n\n{f_desc[:300]}...",
+                "image": {"url": d['photos'][0] if d['photos'] else (item['photo'] if item['photo'] else "")},
                 "footer": {"text": "Vinted Bot • Anti-Repost Actif"},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }]
@@ -155,12 +193,12 @@ def watchdog_handler(signum, frame):
     log("🚨 WATCHDOG ! Redémarrage..."); os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage SNIPER V11.20 (Anti-Repost + Full Logs)")
+    log("🚀 Démarrage SNIPER V11.21 (Anti-Repost + Fix Boucle)")
     
+    # Init
     last_id = load_last_seen_id()
-    sent_signatures = load_json(SIGNATURES_FILE, [])
-    if len(sent_signatures) > 10000: sent_signatures = sent_signatures[-10000:]
-
+    sent_signatures = set(load_json(SIGNATURES_FILE, []))
+    
     seen_ids = set()
     initialized_queries = set()
     last_green_check = 0
@@ -174,7 +212,11 @@ def run_bot():
             gc.collect()
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'])
-                context = browser.new_context(user_agent="Mozilla/5.0", locale="fr-FR")
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 720},
+                    locale='fr-FR'
+                )
                 
                 def block(route):
                     if route.request.resource_type in ["image", "stylesheet", "font", "media"]: route.abort()
@@ -188,9 +230,11 @@ def run_bot():
                 if now - last_secondary_check > 1200:
                     queries += [(q, None) for q in SECONDARY_QUERIES]; last_secondary_check = now
 
-                log(f"\n🚀 {'='*40}")
-                log(f"⚡ Scan en cours : {len(queries)} requêtes")
+                log(f"\n🚀 "+ "="*40)
+                log(f"⚡ Scan : {len(queries)} requêtes")
                 signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(300)
+
+                temp_last_id = last_id # On stocke le max du cycle ici
 
                 for q, c in queries:
                     q_key = f"{q}_{c}"
@@ -200,8 +244,7 @@ def run_bot():
                         page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=25000)
                         items = extract_items_from_page(page)
                         
-                        if items:
-                            log(f"   ∟ {len(items)} articles trouvés")
+                        if items: log(f"   ∟ {len(items)} articles trouvés")
                         
                         is_new_query = q_key not in initialized_queries
                         for it in items:
@@ -209,23 +252,28 @@ def run_bot():
                             seen_ids.add(it['id'])
                             
                             if it['id'] > last_id:
-                                if it['signature'] in sent_signatures:
-                                    # Optionnel: log(f"🚫 Doublon ignoré : {it['title']}")
+                                # Update global max (mais sans casser la boucle)
+                                if it['id'] > temp_last_id: temp_last_id = it['id']
+
+                                # VERIFICATION SIGNATURE
+                                sig = it['signature']
+                                if sig in sent_signatures:
                                     continue
                                 
-                                t = it['title'].lower()
+                                # FILTRES CLUB (V11.16+)
+                                low_t = it['title'].lower()
                                 team_kw = ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "sainté", "sainte", "as st", "as saint", "vert"]
                                 wear_kw = ["maillot", "jersey", "maglia", "camiseta", "trikot", "ensemble", "reproduction"]
                                 
-                                if any(k in t for k in team_kw) and (any(k in t for k in wear_kw) or c == 10):
+                                if any(k in low_t for k in team_kw) and (any(k in low_t for k in wear_kw) or c == 10):
+                                    # Alerte seulement si ce n'est pas le tour de chauffe
                                     if not (is_initial_run and is_new_query):
                                         send_discord_alert(context, it)
-                                        sent_signatures.append(it['signature'])
-                                        if len(sent_signatures) > 10000: sent_signatures.pop(0)
-                                        save_json(SIGNATURES_FILE, sent_signatures)
-                                    
-                                    last_id = max(last_id, it['id'])
-                                    with open(STATE_FILE, "w") as f: f.write(str(last_id))
+                                        sent_signatures.add(sig)
+                                        # Gestion taille signatures (10000 max)
+                                        if len(sent_signatures) > 10000:
+                                            sent_signatures.remove(next(iter(sent_signatures)))
+                                        save_json(SIGNATURES_FILE, list(sent_signatures))
                         
                         initialized_queries.add(q_key)
                         page.close()
@@ -234,6 +282,12 @@ def run_bot():
                 browser.close()
                 signal.alarm(0)
                 
+                # Mise à jour finale du last_id
+                if temp_last_id > last_id:
+                    last_id = temp_last_id
+                    with open(STATE_FILE, "w") as f: f.write(str(last_id))
+
+                # Nettoyage cache IDs
                 if len(seen_ids) > 2000:
                     ids_sorted = sorted(list(seen_ids), reverse=True)
                     seen_ids = set(ids_sorted[:1500])
