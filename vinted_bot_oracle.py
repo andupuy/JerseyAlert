@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.18 - FULL AUTO ANTI-REPOST
+Vinted Bot V11.20 - SNIPER ANTI-REPOST (RESTAURATION LOGS)
 - Signature automatique (Vendeur + Titre + Prix)
-- Historique persistant pour éviter les doublons (sent_signatures.json)
-- Zéro action manuelle requise
-- Moteur Sniper V10.6 maintenu avec détection élargie
+- Historique 10000 signatures
+- Restauration des logs détaillés et de l'attente selector
 """
 
 import os
@@ -66,17 +65,12 @@ def scrape_item_details(page, item_url):
     try:
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
         time.sleep(1)
-        
-        # Photos
         photos = page.evaluate("""() => {
             const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
             return imgs.map(img => img.src).filter(src => src && src.includes('images.vinted'));
         }""")
-        
-        # Description
         desc = page.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
         
-        # API Fallback pour marque/taille si besoin
         import re
         id_match = re.search(r'/items/(\d+)', item_url)
         item_id = id_match.group(1) if id_match else None
@@ -95,18 +89,14 @@ def scrape_item_details(page, item_url):
                 size = it.get('size_title', 'N/A')
                 status = it.get('status', 'N/A')
 
-        return {
-            "description": desc,
-            "photos": photos,
-            "brand": brand,
-            "size": size,
-            "status": status
-        }
+        return {"description": desc, "photos": photos, "brand": brand, "size": size, "status": status}
     except:
         return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
 def extract_items_from_page(page):
     try:
+        # ATTENTE INDISPENSABLE POUR LE SNIPING
+        page.wait_for_selector('div[data-testid*="item"]', timeout=8000)
         return page.evaluate("""() => {
             const items = [];
             const elements = document.querySelectorAll('div[data-testid*="item"]');
@@ -117,21 +107,14 @@ def extract_items_from_page(page):
                 const idMatch = url.match(/items\\/(\\d+)/);
                 if (!idMatch) return;
                 
-                // Détection Vendeur
                 const sellerEl = el.querySelector('h4[class*="Text"], [class*="seller"]');
                 const seller = sellerEl ? sellerEl.innerText.trim() : "Inconnu";
-                
                 const title = a.getAttribute('title') || "Maillot ASSE";
                 const priceMatch = el.innerText.match(/\\d+[.,]\\d+\\s*[$€]/);
                 const price = priceMatch ? priceMatch[0] : 'N/A';
 
                 items.push({
-                    id: parseInt(idMatch[1]),
-                    url: url,
-                    title: title,
-                    price: price,
-                    seller: seller,
-                    // Signature unique combine Vendeur + Titre + Prix
+                    id: parseInt(idMatch[1]), url: url, title: title, price: price, seller: seller,
                     signature: seller + "_" + title + "_" + price
                 });
             });
@@ -156,31 +139,26 @@ def send_discord_alert(context, item):
 
         payload = {
             "content": f"@everyone | {clean_title}\n💰 {item['price']} | 📏 {d['size']} | 🏷️ {d['brand']} | 👤 {item['seller']}\n📝 {desc_preview}",
-            "username": "Vinted ASSE Bot",
-            "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
             "embeds": [{
                 "title": f"🔔 {clean_title}", "url": item['url'], "color": 0x09B83E,
                 "description": f"**{item['price']}** | Taille: **{d['size']}**\nVendeur: **{item['seller']}**\n\n{f_desc[:300]}...",
                 "image": {"url": d['photos'][0] if d['photos'] else ""},
-                "footer": {"text": f"Vinted Bot • Anti-Repost Active"},
+                "footer": {"text": "Vinted Bot • Anti-Repost Actif"},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         log(f"✅ Alerte envoyée: {item['title']} (#{item['id']})")
-    except Exception as e:
-        log(f"❌ Erreur Alert: {e}")
+    except Exception as e: log(f"❌ Erreur Alert: {e}")
 
 def watchdog_handler(signum, frame):
     log("🚨 WATCHDOG ! Redémarrage..."); os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage SNIPER V11.18 (Auto Anti-Repost)")
+    log("🚀 Démarrage SNIPER V11.20 (Anti-Repost + Full Logs)")
     
-    # Chargement historique
     last_id = load_last_seen_id()
     sent_signatures = load_json(SIGNATURES_FILE, [])
-    # On garde les 10000 dernières signatures pour une protection longue durée
     if len(sent_signatures) > 10000: sent_signatures = sent_signatures[-10000:]
 
     seen_ids = set()
@@ -188,12 +166,8 @@ def run_bot():
     last_green_check = 0
     last_secondary_check = 0
     
-    # Cycle silencieux uniquement si c'est le tout premier lancement (zéro historique)
     is_initial_run = (last_id == 0)
-    if is_initial_run:
-        log("🆕 Premier lancement détecté. Premier cycle silencieux.")
-    else:
-        log(f"🔄 Reprise d'activité (Dernier ID : {last_id})")
+    log(f"🔄 Reprise d'activité (Dernier ID : {last_id})")
 
     while True:
         try:
@@ -202,7 +176,6 @@ def run_bot():
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'])
                 context = browser.new_context(user_agent="Mozilla/5.0", locale="fr-FR")
                 
-                # Blocage agressif (NICKEL mode)
                 def block(route):
                     if route.request.resource_type in ["image", "stylesheet", "font", "media"]: route.abort()
                     else: route.continue_()
@@ -215,14 +188,20 @@ def run_bot():
                 if now - last_secondary_check > 1200:
                     queries += [(q, None) for q in SECONDARY_QUERIES]; last_secondary_check = now
 
+                log(f"\n🚀 {'='*40}")
+                log(f"⚡ Scan en cours : {len(queries)} requêtes")
                 signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(300)
 
                 for q, c in queries:
                     q_key = f"{q}_{c}"
                     try:
+                        log(f"🔎 Check: '{q}'{' [VERT]' if c else ''}")
                         page = context.new_page()
                         page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=25000)
                         items = extract_items_from_page(page)
+                        
+                        if items:
+                            log(f"   ∟ {len(items)} articles trouvés")
                         
                         is_new_query = q_key not in initialized_queries
                         for it in items:
@@ -230,12 +209,10 @@ def run_bot():
                             seen_ids.add(it['id'])
                             
                             if it['id'] > last_id:
-                                # VÉRIFICATION ANTI-REPOST (Signature)
                                 if it['signature'] in sent_signatures:
-                                    log(f"🚫 Doublon (Signature déjà envoyée) : {it['title']} ({it['seller']})")
+                                    # Optionnel: log(f"🚫 Doublon ignoré : {it['title']}")
                                     continue
                                 
-                                # Filtrage Club
                                 t = it['title'].lower()
                                 team_kw = ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "sainté", "sainte", "as st", "as saint", "vert"]
                                 wear_kw = ["maillot", "jersey", "maglia", "camiseta", "trikot", "ensemble", "reproduction"]
@@ -252,18 +229,16 @@ def run_bot():
                         
                         initialized_queries.add(q_key)
                         page.close()
-                    except Exception as e:
-                        log(f"⚠️ Erreur {q}: {e}")
+                    except Exception as e: log(f"⚠️ Erreur {q}: {e}")
 
                 browser.close()
                 signal.alarm(0)
                 
-                # Entretien Cache IDs
                 if len(seen_ids) > 2000:
                     ids_sorted = sorted(list(seen_ids), reverse=True)
                     seen_ids = set(ids_sorted[:1500])
 
-                log("⏳ Cycle terminé. Repos 10s...")
+                log(f"⏳ Cycle terminé. Repos 10s...")
                 time.sleep(10)
 
         except Exception as e:
