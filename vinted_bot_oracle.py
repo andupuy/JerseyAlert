@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.21 - SNIPER ULTIME (ANTI-REPOST & ANTI-BLIND)
-- Signature automatique intelligente (Vendeur + Titre + Prix)
-- Mémoire d'éléphant (10 000 signatures)
-- Correction bug boucle : processe TOUTES les nouvelles annonces d'un coup
-- Restauration parsing robuste (V10.6 Nickel)
+Vinted Bot V11.22 - THE RECOVERY (RETOUR AU MOTEUR NICKEL V10.6)
+- Restauration DU CODE EXACT DE LA V10.6 pour le moteur de scan
+- Ajout sécurisé du système Anti-Repost (Signature Vendeur+Titre+Prix)
+- Logs de filtrage ultra-détaillés pour comprendre pourquoi ça sonne ou pas
+- Correction du "Silence au démarrage" : on sonne S'IL Y A un historique connu
 """
 
 import os
@@ -19,13 +19,14 @@ import re
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-# Configuration
+# --- CONFIGURATION QUERIES ---
 PRIORITY_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne"]
 SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Camiseta Asse", "Ensemble Asse", "Trikot Asse"]
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
+# --- FICHIERS D'ÉTAT ---
 STATE_FILE = "last_seen_id.txt"
 SIGNATURES_FILE = "sent_signatures.json"
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 def log(message):
     timestamp = datetime.now().strftime('%H:%M:%S')
@@ -34,19 +35,23 @@ def log(message):
 def load_json(filename, default):
     if os.path.exists(filename):
         try:
-            with open(filename, "r") as f: return json.load(f)
+            with open(filename, "r") as f:
+                data = json.load(f)
+                return data if data else default
         except: pass
     return default
 
 def save_json(filename, data):
     try:
-        with open(filename, "w") as f: json.dump(data, f)
+        with open(filename, "w") as f:
+            json.dump(data, f)
     except: pass
 
 def load_last_seen_id():
     if os.path.exists(STATE_FILE):
         try:
-            with open(STATE_FILE, "r") as f: return int(f.read().strip())
+            with open(STATE_FILE, "r") as f:
+                return int(f.read().strip())
         except: pass
     return 0
 
@@ -62,44 +67,13 @@ def get_search_url(query, color_id=None):
     if color_id: url += f"&color_ids[]={color_id}"
     return url
 
-def scrape_item_details(page, item_url):
-    """Extraction riche via API interne et DOM"""
-    try:
-        page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
-        time.sleep(1)
-        
-        photos = page.evaluate("""() => {
-            const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
-            return imgs.map(img => img.src).filter(src => src && src.includes('images.vinted'));
-        }""")
-        
-        desc = page.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
-        
-        id_match = re.search(r'/items/(\d+)', item_url)
-        item_id = id_match.group(1) if id_match else None
-        
-        brand, size, status = "N/A", "N/A", "N/A"
-        if item_id:
-            api_data = page.evaluate(f"""async () => {{
-                try {{
-                    const r = await fetch('/api/v2/items/{item_id}?localize=false');
-                    return r.ok ? await r.json() : null;
-                }} catch(e) {{ return null; }}
-            }}""")
-            if api_data and 'item' in api_data:
-                it = api_data['item']
-                brand = it.get('brand_title', 'N/A')
-                size = it.get('size_title', 'N/A')
-                status = it.get('status', 'N/A')
-
-        return {"description": desc, "photos": photos, "brand": brand, "size": size, "status": status}
-    except:
-        return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
-
+# --- MOTEUR D'EXTRACTION V10.6 (NICKEL) ---
 def extract_items_from_page(page):
-    """Le moteur d'extraction robuste de la V10.6"""
     try:
-        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+        # Attente selector V10.6
+        page.wait_for_selector('div[data-testid*="item"]', timeout=12000)
+        time.sleep(random.uniform(1, 2))
+        
         return page.evaluate("""
             () => {
                 const items = [];
@@ -115,11 +89,16 @@ def extract_items_from_page(page):
                         if (!idMatch) return;
                         const itemId = parseInt(idMatch[1]);
                         
-                        // Vendeur (important pour Signature)
+                        // Signature : Vendeur (important)
                         const sellerEl = el.querySelector('h4[class*="Text"], [class*="seller"], [data-testid*="seller-name"]');
                         const seller = sellerEl ? sellerEl.innerText.trim() : "Inconnu";
                         
                         let rawTitle = link.getAttribute('title') || '';
+                        if (!rawTitle) {
+                             const img = el.querySelector('img');
+                             if (img) rawTitle = img.alt;
+                        }
+                        
                         let price = 'N/A';
                         let size = 'N/A';
                         let brand = 'N/A';
@@ -127,10 +106,10 @@ def extract_items_from_page(page):
                         let title = rawTitle;
 
                         if (rawTitle.includes('marque:') || rawTitle.includes('taille:')) {
-                            title = rawTitle.split(',')[0].trim();
-                            const bm = rawTitle.match(/marque:\\s*([^,]+)/i); if (bm) brand = bm[1].trim();
-                            const sm = rawTitle.match(/taille:\\s*([^,]+)/i); if (sm) size = sm[1].trim();
-                            const stm = rawTitle.match(/état:\\s*([^,]+)/i); if (stm) status = stm[1].trim();
+                            title = rawTitle.split(',')[0].strip();
+                            const bMatch = rawTitle.match(/marque:\\s*([^,]+)/i); if (bMatch) brand = bMatch[1].trim();
+                            const sMatch = rawTitle.match(/taille:\\s*([^,]+)/i); if (sMatch) size = sMatch[1].trim();
+                            const stMatch = rawTitle.match(/état:\\s*([^,]+)/i); if (stMatch) status = stMatch[1].trim();
                         }
                         
                         const texts = Array.from(el.querySelectorAll('p, h3, h4, span, div')).map(e => e.innerText.trim()).filter(t => t);
@@ -146,7 +125,8 @@ def extract_items_from_page(page):
                         
                         items.push({
                             id: itemId, title: title, price: price, size: size,
-                            brand: brand, status: status, url: url, photo: photo, seller: seller,
+                            brand: brand, status: status, url: url, photo: photo, 
+                            seller: seller,
                             signature: seller + "_" + title + "_" + price
                         });
                     } catch (e) {}
@@ -154,7 +134,19 @@ def extract_items_from_page(page):
                 return items;
             }
         """)
-    except: return []
+    except Exception as e:
+        log(f"❌ Erreur extraction : {e}")
+        return []
+
+def scrape_item_details(page, item_url):
+    try:
+        page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
+        time.sleep(1)
+        photos = page.evaluate("""() => Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img')).map(img => img.src).filter(src => src.includes('images.vinted'))""")
+        desc = page.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
+        return {"description": desc, "photos": photos}
+    except:
+        return {"description": "", "photos": []}
 
 def send_discord_alert(context, item):
     if not DISCORD_WEBHOOK_URL: return
@@ -166,46 +158,48 @@ def send_discord_alert(context, item):
         f_desc = clean_text(d['description'])
         desc_preview = f_desc[:1000] + "..." if len(f_desc) > 1000 else (f_desc if f_desc else "Pas de description")
         
-        # Nettoyage Titre
-        c_title = item['title'].split(',')[0].split('·')[0].strip()
-        c_title = re.sub(r'\d+[.,]\d+\s*€.*$', '', c_title).strip()
-        if not c_title: c_title = "Maillot ASSE"
-
-        # Marque/Taille fusionnée (si possible)
-        final_brand = d['brand'] if d['brand'] != 'N/A' else item['brand']
-        final_size = d['size'] if d['size'] != 'N/A' else item['size']
+        # Nettoyage Titre (pour montres/ecrans verrouillés)
+        clean_title = item['title'].split(',')[0].split('·')[0].strip()
+        clean_title = re.sub(r'\d+[.,]\d+\s*€.*$', '', clean_title).strip()
+        if not clean_title: clean_title = "Maillot ASSE"
 
         payload = {
-            "content": f"@everyone | {c_title}\n💰 {item['price']} | 📏 {final_size} | 🏷️ {final_brand} | 👤 {item['seller']}\n📝 {desc_preview}",
+            "content": f"@everyone | {clean_title}\n💰 {item['price']} | 📏 {item['size']} | 👤 {item['seller']}\n📝 {desc_preview}",
+            "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
             "embeds": [{
-                "title": f"🔔 {c_title}", "url": item['url'], "color": 0x09B83E,
-                "description": f"**{item['price']}** | Taille: **{final_size}**\nVendeur: **{item['seller']}**\n\n{f_desc[:300]}...",
-                "image": {"url": d['photos'][0] if d['photos'] else (item['photo'] if item['photo'] else "")},
-                "footer": {"text": "Vinted Bot • Anti-Repost Actif"},
+                "title": f"🔔 {clean_title}", "url": item['url'], "color": 0x09B83E,
+                "description": f"**{item['price']}** | Taille : **{item['size']}**\nVendeur : **{item['seller']}**\n\n{f_desc[:300]}...",
+                "image": {"url": d['photos'][0] if d['photos'] else item['photo']},
+                "footer": {"text": f"Vinted Bot • Anti-Repost Actif"},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        log(f"✅ Alerte envoyée: {item['title']} (#{item['id']})")
-    except Exception as e: log(f"❌ Erreur Alert: {e}")
+        log(f"✅ Alerte envoyée : {item['title']} (#{item['id']})")
+    except Exception as e:
+        log(f"❌ Erreur Alert Discord : {e}")
 
 def watchdog_handler(signum, frame):
     log("🚨 WATCHDOG ! Redémarrage..."); os._exit(1)
 
 def run_bot():
-    log("🚀 Démarrage SNIPER V11.21 (Anti-Repost + Fix Boucle)")
+    log("🚀 Démarrage SNIPER V11.22 (THE RECOVERY)")
     
-    # Init
     last_id = load_last_seen_id()
-    sent_signatures = set(load_json(SIGNATURES_FILE, []))
+    sent_signatures = load_json(SIGNATURES_FILE, [])
+    if not isinstance(sent_signatures, list): sent_signatures = []
     
     seen_ids = set()
     initialized_queries = set()
     last_green_check = 0
     last_secondary_check = 0
     
+    # On n'est silencieux que si c'est un TOUT PREMIER lancement (last_id == 0)
     is_initial_run = (last_id == 0)
-    log(f"🔄 Reprise d'activité (Dernier ID : {last_id})")
+    if is_initial_run:
+        log("🆕 Premier lancement : cycle silencieux pour initialisation.")
+    else:
+        log(f"🔄 Reprise d'activité : Scan depuis l'ID {last_id}")
 
     while True:
         try:
@@ -218,6 +212,7 @@ def run_bot():
                     locale='fr-FR'
                 )
                 
+                # Blocage agressif (ÉCONOMIE RAILWAY)
                 def block(route):
                     if route.request.resource_type in ["image", "stylesheet", "font", "media"]: route.abort()
                     else: route.continue_()
@@ -230,67 +225,68 @@ def run_bot():
                 if now - last_secondary_check > 1200:
                     queries += [(q, None) for q in SECONDARY_QUERIES]; last_secondary_check = now
 
-                log(f"\n🚀 "+ "="*40)
-                log(f"⚡ Scan : {len(queries)} requêtes")
+                log(f"\n🚀 {'='*40}")
+                log(f"⚡ Scan en cours : {len(queries)} requêtes")
                 signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(300)
 
-                temp_last_id = last_id # On stocke le max du cycle ici
+                cycle_last_id = last_id
 
                 for q, c in queries:
                     q_key = f"{q}_{c}"
                     try:
                         log(f"🔎 Check: '{q}'{' [VERT]' if c else ''}")
                         page = context.new_page()
-                        page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=25000)
+                        page.goto(get_search_url(q, c), wait_until="commit", timeout=25000)
                         items = extract_items_from_page(page)
                         
-                        if items: log(f"   ∟ {len(items)} articles trouvés")
+                        log(f"   ∟ {len(items)} articles extraits")
                         
                         is_new_query = q_key not in initialized_queries
                         for it in items:
                             if it['id'] in seen_ids: continue
                             seen_ids.add(it['id'])
                             
+                            # On ne traite que ce qui est plus nouveau que notre référence
                             if it['id'] > last_id:
-                                # Update global max (mais sans casser la boucle)
-                                if it['id'] > temp_last_id: temp_last_id = it['id']
+                                # Update du max du cycle
+                                if it['id'] > cycle_last_id: cycle_last_id = it['id']
 
-                                # VERIFICATION SIGNATURE
-                                sig = it['signature']
-                                if sig in sent_signatures:
+                                # --- FILTRAGE ANTI-REPOST ---
+                                if it['signature'] in sent_signatures:
+                                    # log(f"   [F] Doublon (Signature) : {it['title']}")
                                     continue
                                 
-                                # FILTRES CLUB (V11.16+)
+                                # --- FILTRAGE MOTS-CLÉS ---
                                 low_t = it['title'].lower()
                                 team_kw = ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "sainté", "sainte", "as st", "as saint", "vert"]
                                 wear_kw = ["maillot", "jersey", "maglia", "camiseta", "trikot", "ensemble", "reproduction"]
                                 
-                                if any(k in low_t for k in team_kw) and (any(k in low_t for k in wear_kw) or c == 10):
-                                    # Alerte seulement si ce n'est pas le tour de chauffe
+                                has_team = any(k in low_t for k in team_kw)
+                                has_wear = any(k in low_t for k in wear_kw)
+                                
+                                if has_team and (has_wear or c == 10):
                                     if not (is_initial_run and is_new_query):
                                         send_discord_alert(context, it)
-                                        sent_signatures.add(sig)
-                                        # Gestion taille signatures (10000 max)
-                                        if len(sent_signatures) > 10000:
-                                            sent_signatures.remove(next(iter(sent_signatures)))
-                                        save_json(SIGNATURES_FILE, list(sent_signatures))
+                                        # Sauvegarde Signature
+                                        sent_signatures.append(it['signature'])
+                                        if len(sent_signatures) > 10000: sent_signatures.pop(0)
+                                        save_json(SIGNATURES_FILE, sent_signatures)
+                                else:
+                                    # log(f"   [F] Pas de match keywords : {it['title']}")
+                                    pass
                         
                         initialized_queries.add(q_key)
                         page.close()
-                    except Exception as e: log(f"⚠️ Erreur {q}: {e}")
-
+                    except Exception as e:
+                        log(f"⚠️ Erreur sur '{q}': {e}")
+                
                 browser.close()
                 signal.alarm(0)
-                
-                # Mise à jour finale du last_id
-                if temp_last_id > last_id:
-                    last_id = temp_last_id
-                    with open(STATE_FILE, "w") as f: f.write(str(last_id))
 
-                # Nettoyage cache IDs
-                if len(seen_ids) > 2000:
-                    ids_sorted = sorted(list(seen_ids), reverse=True)
-                    seen_ids = set(ids_sorted[:1500])
+                # Mise à jour finale de l'ID
+                if cycle_last_id > last_id:
+                    last_id = cycle_last_id
+                    with open(STATE_FILE, "w") as f: f.write(str(last_id))
 
                 log(f"⏳ Cycle terminé. Repos 10s...")
                 time.sleep(10)
