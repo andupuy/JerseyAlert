@@ -180,8 +180,8 @@ def run_bot():
     # Chargement historique
     last_id = load_last_seen_id()
     sent_signatures = load_json(SIGNATURES_FILE, [])
-    # On garde les 500 dernières signatures pour rester léger
-    if len(sent_signatures) > 500: sent_signatures = sent_signatures[-500:]
+    # On garde les 10000 dernières signatures pour une protection longue durée
+    if len(sent_signatures) > 10000: sent_signatures = sent_signatures[-10000:]
 
     seen_ids = set()
     initialized_queries = set()
@@ -244,7 +244,7 @@ def run_bot():
                                     if not (is_initial_run and is_new_query):
                                         send_discord_alert(context, it)
                                         sent_signatures.append(it['signature'])
-                                        if len(sent_signatures) > 500: sent_signatures.pop(0)
+                                        if len(sent_signatures) > 10000: sent_signatures.pop(0)
                                         save_json(SIGNATURES_FILE, sent_signatures)
                                     
                                     last_id = max(last_id, it['id'])
