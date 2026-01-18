@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.27 - RETOUR AUX SOURCES (V10.6 NICKEL + ANTI-REPOST)
-- Reprise du code EXACT de la version stable V10.6
-- Ajout UNIQUE de la signature Anti-Repost (Vendeur+Titre+Prix)
-- Cycle 10s / Pas de fioritures / Simplicité maximum
+Vinted Bot V11.28 - SIMPLE STABLE RECOVERY
+- Code épuré au maximum pour la stabilité
+- Logs de décompte d'articles pour voir ce que le bot "voit" réellement
+- Correction du sélecteur d'articles (grid-item)
+- Signature Anti-Repost (Vendeur+Titre+Prix)
 """
 
 import os
@@ -18,7 +19,7 @@ import re
 from datetime import datetime
 from playwright.sync_api import sync_playwright
 
-# --- CONFIGURATION (V10.6) ---
+# Configuration
 PRIORITY_QUERIES = ["Maillot Asse", "Maillot Saint-Etienne", "Maillot St Etienne"]
 SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Camiseta Asse", "Ensemble Asse", "Trikot Asse"]
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
@@ -50,28 +51,34 @@ def load_last_seen_id():
     return 0
 
 def get_search_url(query, color_id=None):
-    url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
+    # Ajout d'un cache-buster léger
+    ts = int(time.time() / 15)
+    url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first&v={ts}"
     if color_id: url += f"&color_ids[]={color_id}"
     return url
 
-# Moteur d'extraction V10.6 d'origine
 def extract_items(page):
     try:
-        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+        # Attente d'un élément de grille ou de catalogue
+        page.wait_for_selector('div[data-testid*="item"], div[class*="feed-grid__item"]', timeout=12000)
         return page.evaluate("""() => {
             const items = [];
-            document.querySelectorAll('div[data-testid*="item"]').forEach(el => {
+            const elements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
+            elements.forEach(el => {
                 const a = el.querySelector('a');
                 if (!a) return;
                 const url = a.href;
-                const id = parseInt(url.match(/items\\/(\\d+)/)?.[1] || 0);
-                if (!id) return;
+                const idMatch = url.match(/items\\/(\\d+)/);
+                if (!idMatch) return;
+                const id = parseInt(idMatch[1]);
                 
                 const title = a.getAttribute('title') || "Maillot ASSE";
-                const sellerEl = el.querySelector('h4, [class*="seller"]');
+                const sellerEl = el.querySelector('h4, span[class*="seller"], [data-testid*="seller-name"]');
                 const seller = sellerEl ? sellerEl.innerText.trim() : "Inconnu";
-                const texts = Array.from(el.querySelectorAll('p, span, h3')).map(e => e.innerText);
-                const price = texts.find(t => t.includes('€')) || "N/A";
+                
+                const priceEl = el.querySelector('h3, [class*="price"], [data-testid*="price"]');
+                let price = priceEl ? priceEl.innerText.trim().split('\\n')[0] : "N/A";
+                
                 const photo = el.querySelector('img')?.src || "";
                 
                 items.push({
@@ -82,7 +89,8 @@ def extract_items(page):
             });
             return items;
         }""")
-    except: return []
+    except Exception as e:
+        return []
 
 def send_alert(context, item):
     if not DISCORD_WEBHOOK_URL: return
@@ -90,7 +98,7 @@ def send_alert(context, item):
         p = context.new_page()
         p.goto(item['url'], wait_until='domcontentloaded', timeout=15000)
         time.sleep(1)
-        photos = p.evaluate("() => Array.from(document.querySelectorAll('.item-photo--1 img')).map(img => img.src)")
+        photos = p.evaluate("() => Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img')).map(img => img.src).filter(s => s.includes('images.vinted'))")
         desc = p.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
         p.close()
         
@@ -100,15 +108,16 @@ def send_alert(context, item):
                 "title": f"🔔 {item['title']}", "url": item['url'], "color": 0x09B83E,
                 "description": f"**{item['price']}**\n\n{desc[:300]}...",
                 "image": {"url": photos[0] if photos else item['photo']},
-                "footer": {"text": "Vinted Sniper V11.27"}
+                "footer": {"text": "Vinted Sniper V11.28"},
+                "timestamp": datetime.utcnow().isoformat() + "Z"
             }]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        log(f"✅ Alerte envoyée : {item['title']}")
+        log(f"✅ Alerte envoyée : {item['title']} (#{item['id']})")
     except: pass
 
 def run_bot():
-    log("🚀 Démarrage V11.27 (RETOUR NICKEL)")
+    log("🚀 Démarrage V11.28 (SIMPLE & STABLE)")
     last_id = load_last_seen_id()
     sent_signatures = load_json(SIGNATURES_FILE, [])
     
@@ -116,17 +125,21 @@ def run_bot():
     last_green_check = 0
     last_secondary_check = 0
     
-    # Silence au démarrage (Comme la V10.6)
+    # Premier cycle silencieux pour caler l'ID de référence
     is_initial_cycle = True
+    log(f"🎯 Référence actuelle : ID {last_id}")
 
     while True:
         try:
             gc.collect()
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
-                context = browser.new_context(user_agent='Mozilla/5.0')
+                browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    locale='fr-FR'
+                )
                 
-                # Bloquer le superflu (V10.6 Nickel)
+                # Bloquer les ressources lourdes pour économiser Railway
                 def block(route):
                     if route.request.resource_type in ["image", "stylesheet", "font", "media"]: route.abort()
                     else: route.continue_()
@@ -136,15 +149,25 @@ def run_bot():
                 queries = [(q, None) for q in PRIORITY_QUERIES]
                 if now - last_green_check > 300:
                     queries += [(q, 10) for q in PRIORITY_QUERIES]; last_green_check = now
+                if now - last_secondary_check > 1200:
+                    queries += [(q, None) for q in SECONDARY_QUERIES]; last_secondary_check = now
                 
                 cycle_max_id = last_id
                 
                 for q, c in queries:
                     try:
-                        log(f"🔎 Check: {q}")
+                        log(f"🔎 Check: {q}{' [VERT]' if c else ''}")
                         page = context.new_page()
-                        page.goto(get_search_url(q, c), timeout=25000)
+                        page.goto(get_search_url(q, c), wait_until='domcontentloaded', timeout=25000)
+                        
+                        # Vérification du blocage
+                        title = page.title()
+                        if "Vinted" not in title and "Articles" not in title:
+                            log(f"   ⚠️ Block probable (Titre: {title})")
+                            page.close(); continue
+                            
                         items = extract_items(page)
+                        log(f"   ∟ {len(items)} articles vus")
                         
                         for it in items:
                             if it['id'] in seen_ids: continue
@@ -156,19 +179,22 @@ def run_bot():
                                 if is_initial_cycle: continue
                                 if it['signature'] in sent_signatures: continue
                                 
-                                # Filtres simples ASSE
+                                # Filtres ASSE un peu plus larges
                                 t = it['title'].lower()
-                                if any(k in t for k in ["asse", "saint-etienne", "st etienne", "sainté", "vert"]) or c == 10:
+                                keywords = ["asse", "saint-etienne", "saint etienne", "st etienne", "sainté", "vert"]
+                                if any(k in t for k in keywords) or c == 10:
                                     send_alert(context, it)
                                     sent_signatures.append(it['signature'])
-                                    if len(sent_signatures) > 500: sent_signatures.pop(0)
+                                    if len(sent_signatures) > 3000: sent_signatures.pop(0)
                                     save_json(SIGNATURES_FILE, sent_signatures)
                         
                         page.close()
-                    except: pass
+                    except Exception as e:
+                        # log(f"   ⚠️ Erreur sur {q}: {e}")
+                        pass
                 
                 browser.close()
-                is_initial_cycle = False
+                is_initial_cycle = False # Fin du premier cycle silencieux
                 
                 if cycle_max_id > last_id:
                     last_id = cycle_max_id
@@ -178,7 +204,7 @@ def run_bot():
                 time.sleep(10)
 
         except Exception as e:
-            log(f"🚨 Erreur : {e}"); time.sleep(20)
+            log(f"🚨 Erreur globale : {e}"); time.sleep(20)
 
 if __name__ == "__main__":
     run_bot()
