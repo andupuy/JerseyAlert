@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Vinted Bot V11.25 - THE ANTI-BLOCK SNIPER
-- Correction du blocage (Accept-Language + Stealth Headers)
-- Retour à wait_until='domcontentloaded' pour la stabilité
-- Fix du silence au démarrage (on garde l'ID de référence sans spammer)
-- Signature Anti-Repost maintenue
+Vinted Bot V11.26 - ULTIMATE STEALTH RECOVERY
+- Evasion avancée (navigator.webdriver bypass)
+- Navigation organique (Home -> Search)
+- Correction "Silence au démarrage" (on capture l'ID au 1er tour sans spammer)
+- Headers 100% identiques à un Chrome Windows récent
+- Sélection d'articles par sélecteurs multiples
 """
 
 import os
@@ -46,27 +47,34 @@ def save_json(filename, data):
 def load_last_seen_id():
     if os.path.exists(STATE_FILE):
         try:
-            with open(STATE_FILE, "r") as f:
-                val = int(f.read().strip())
-                return val
+            with open(STATE_FILE, "r") as f: return int(f.read().strip())
         except: pass
     return 0
 
 def get_search_url(query, color_id=None):
-    # Bypass cache léger
-    ts = int(time.time() / 10) # Change toutes les 10s seulement
+    ts = int(time.time() / 15)
     url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first&v={ts}"
     if color_id: url += f"&color_ids[]={color_id}"
     return url
 
 def extract_items_from_page(page):
     try:
-        # Attente selector avec timeout raisonnable
-        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+        # Attente selector multiple (Vinted change souvent)
+        selectors = ['div[data-testid="grid-item"]', 'div[data-testid*="item"]', 'div[class*="feed-grid__item"]']
+        found = False
+        for sel in selectors:
+             try:
+                 page.wait_for_selector(sel, timeout=7000)
+                 found = True
+                 break
+             except: continue
+        
+        if not found: return []
+
         return page.evaluate("""
             () => {
                 const items = [];
-                const itemElements = document.querySelectorAll('div[data-testid*="item"]');
+                const itemElements = document.querySelectorAll('div[data-testid="grid-item"], div[class*="feed-grid__item"]');
                 
                 itemElements.forEach((el) => {
                     try {
@@ -103,12 +111,11 @@ def extract_items_from_page(page):
 def send_discord_alert(context, item):
     if not DISCORD_WEBHOOK_URL: return
     try:
-        # Détails riches
         photos, desc = [item['photo']], "Nouveauté !"
         try:
             p = context.new_page()
-            p.goto(item['url'], wait_until='domcontentloaded', timeout=12000)
-            time.sleep(1)
+            p.goto(item['url'], wait_until='domcontentloaded', timeout=15000)
+            time.sleep(1.5)
             photos = p.evaluate("""() => Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img')).map(img => img.src).filter(src => src.includes('images.vinted'))""")
             desc = p.evaluate("() => document.querySelector('[itemprop=\"description\"]')?.innerText || ''")
             p.close()
@@ -120,7 +127,7 @@ def send_discord_alert(context, item):
                 "title": f"🔔 {item['title']}", "url": item['url'], "color": 0x09B83E,
                 "description": f"**{item['price']}**\nVendeur : **{item['seller']}**\n\n{desc[:300]}...",
                 "image": {"url": photos[0] if photos else item['photo']},
-                "footer": {"text": f"Vinted Sniper V11.25"}
+                "footer": {"text": f"Vinted Sniper V11.26"}
             }]
         }
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
@@ -128,7 +135,7 @@ def send_discord_alert(context, item):
     except: pass
 
 def run_bot():
-    log("🚀 Démarrage V11.25 ANTI-BLOCK")
+    log("🚀 Démarrage V11.26 ULTRA-STEALTH")
     
     last_id = load_last_seen_id()
     sent_signatures = set(load_json(SIGNATURES_FILE, []))
@@ -139,26 +146,29 @@ def run_bot():
     last_secondary_check = 0
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'])
+        browser = p.chromium.launch(headless=True, args=[
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage', 
+            '--disable-blink-features=AutomationControlled',
+            '--disable-gpu'
+        ])
         
-        # Contexte furtif
+        # Contexte ultra-réaliste
         context = browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             viewport={'width': 1280, 'height': 720},
+            locale='fr-FR',
             extra_http_headers={
                 "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Windows"',
-                "sec-fetch-dest": "document",
-                "sec-fetch-mode": "navigate",
-                "sec-fetch-site": "none",
-                "sec-fetch-user": "?1",
-                "upgrade-insecure-requests": "1"
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1"
             }
         )
         
+        # Bypass navigator.webdriver
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
         def block(route):
             if route.request.resource_type in ["image", "stylesheet", "font", "media"]: route.abort()
             else: route.continue_()
@@ -179,20 +189,29 @@ def run_bot():
 
                 cycle_max_id = last_id
                 
-                # Le premier cycle de chaque requête remplit juste l'ID sans sonner
-                is_warming_up = (last_id == 0)
-
                 for q, c in queries:
                     q_key = f"{q}_{c}"
                     try:
                         page = context.new_page()
-                        # Navigation plus stable
+                        
+                        # ANTI-DETECTION : On passe par la home une fois sur 5
+                        if random.random() < 0.2:
+                             page.goto("https://www.vinted.fr", wait_until="domcontentloaded", timeout=20000)
+                             time.sleep(random.uniform(1, 2))
+                        
+                        # Navigation vers la recherche
                         page.goto(get_search_url(q, c), wait_until="domcontentloaded", timeout=25000)
                         items = extract_items_from_page(page)
                         
                         if not items:
-                            log(f"   ⚠️ {q}: Rien détecté (Block ?)")
-                            page.close(); continue
+                            # Verification si c'est une page de block
+                            if "Articles" not in page.title():
+                                log(f"   ⚠️ Blocage détecté sur '{q}' (Titre: {page.title()})")
+                            else:
+                                log(f"   🔎 '{q}': Aucun item (Grid vide)")
+                            page.close()
+                            time.sleep(random.uniform(2, 5))
+                            continue
                         
                         log(f"   🔎 {q}: {len(items)} items")
                         
@@ -203,7 +222,7 @@ def run_bot():
                             if it['id'] > last_id:
                                 if it['id'] > cycle_max_id: cycle_max_id = it['id']
 
-                                # On ne sonne pas au premier tour d'une nouvelle requête
+                                # Silence intelligent : on note l'ID mais on ne sonne pas au 1er cycle de CHAQUE requête
                                 if q_key not in initialized_queries: continue
 
                                 # Anti-Repost
@@ -222,7 +241,7 @@ def run_bot():
 
                         initialized_queries.add(q_key)
                         page.close()
-                        time.sleep(random.uniform(1, 2))
+                        time.sleep(random.uniform(1, 3))
                     except: pass
 
                 if cycle_max_id > last_id:
@@ -233,7 +252,7 @@ def run_bot():
                     ids_sorted = sorted(list(seen_ids), reverse=True)
                     seen_ids = set(ids_sorted[:1500])
 
-                log(f"⏳ Repos 10s...")
+                log("⏳ Repos 10s...")
                 time.sleep(10)
         finally:
             browser.close()
