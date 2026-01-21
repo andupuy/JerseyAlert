@@ -55,8 +55,10 @@ def save_last_seen_id(item_id):
 def clean_text(text):
     if not text: return ""
     import re
+    # Nettoyage agressif des parasites
     text = re.sub(r'(?i)enlevé\s*!?', '', text)
     text = re.sub(r'(?i)nouveau\s*!?', '', text)
+    text = re.sub(r'(?i)favori[st]?\s*\d*', '', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
@@ -103,13 +105,24 @@ def extract_items_from_page(page):
                 const a = el.querySelector('a'); if (!a) return;
                 const url = a.href; const id = parseInt(url.match(/items\\/(\\d+)/)?.[1] || 0); if (!id) return;
                 
-                let rawT = a.getAttribute('title') || el.querySelector('img')?.alt || '';
-                let price = 'N/A', size = 'N/A', brand = 'N/A', title = rawT;
+                // Récupération intelligente du titre
+                let title = a.getAttribute('title') || '';
+                if (!title || title.length < 5) {
+                    // Si l'attribut title est absent, on cherche le texte dans les enfants (h3, h4, p)
+                    const textEl = el.querySelector('h3, h4, [class*="title"], p:not(:empty)');
+                    title = textEl ? textEl.innerText.trim() : (a.innerText || '');
+                }
+                if (!title) {
+                    const img = el.querySelector('img');
+                    title = img ? img.getAttribute('alt') : '';
+                }
+
+                let price = 'N/A', size = 'N/A', brand = 'N/A';
                 
-                if (rawT.includes('marque:')) {
-                    title = rawT.split(',')[0].trim();
-                    const b = rawT.match(/marque:\\s*([^,]+)/i); if (b) brand = b[1].trim();
-                    const s = rawT.match(/taille:\\s*([^,]+)/i); if (s) size = s[1].trim();
+                if (title.includes('marque:')) {
+                    const b = title.match(/marque:\s*([^,]+)/i); if (b) brand = b[1].trim();
+                    const s = title.match(/taille:\s*([^,]+)/i); if (s) size = s[1].trim();
+                    title = title.split(',')[0].trim();
                 }
                 const ts = Array.from(el.querySelectorAll('p, h3, h4, span, div')).map(e => e.innerText.trim()).filter(t => t);
                 price = ts.find(t => t.includes('€')) || 'N/A';
@@ -136,7 +149,7 @@ def send_discord_alert(context, item):
         final_desc = clean_text(d['description'])
         
         # Formatage du message iPhone/Montre
-        clean_title = item['title'].split(',')[0].strip()
+        clean_title = clean_text(item['title'].split(',')[0])
         desc_preview = final_desc[:1000] + "..." if len(final_desc) > 1000 else (final_desc if final_desc else "Pas de description")
 
         payload = {
@@ -167,12 +180,19 @@ def run_bot():
     with open(LOCK_FILE, "w") as f: f.write(str(os.getpid()))
 
     log("🚀 Restauration V11.28 NICKEL (Stability + Fix Triple)")
-    seen_ids = set(); last_green = 0; last_sec = 0; is_warm = True 
+    seen_ids = set(); last_green = 0; last_sec = 0; startup_phase = True 
     last_id = load_last_seen_id()
     sent_signatures = set(load_json(SIGNATURES_FILE, []))
 
     try:
         while True:
+            # GESTION NUIT (Repos entre 1h et 7h du matin Paris)
+            now_hour = (datetime.utcnow().hour + 1) % 24
+            if 1 <= now_hour < 7:
+                log(f"🌙 Mode Veille Silencieuse activé ({now_hour}h). Repos 10 min...")
+                time.sleep(600)
+                continue
+
             try:
                 signal.signal(signal.SIGALRM, watchdog_handler); signal.alarm(180)
                 with sync_playwright() as p:
@@ -194,20 +214,23 @@ def run_bot():
                     for q, col in q_run:
                         try:
                             page = ctx.new_page(); log(f"🔎 Check: {q}")
-                            page.goto(f"https://www.vinted.fr/catalog?search_text={q.replace(' ', '+')}&order=newest_first" + (f"&color_ids[]={col}" if col else ""), wait_until='commit', timeout=20000)
+                            page.goto(f"https://www.vinted.fr/catalog?search_text={q.replace(' ', '+')}&order=newest_first" + (f"&color_ids[]={col}" if col else ""), wait_until='domcontentloaded', timeout=20000)
                             items = extract_items_from_page(page)
                             for it in items:
                                 if it['id'] in seen_ids: continue
                                 seen_ids.add(it['id'])
+                                
                                 if it['id'] > last_id:
                                     if it['id'] > c_max: c_max = it['id']
-                                    if not is_warm:
-                                        # ANTI-REPOST (Signature)
-                                        sig = f"{it['seller']}_{it['title']}_{it['price']}"
-                                        if sig in sent_signatures: continue
-                                        
-                                        tl = it['title'].lower()
-                                        if any(x in tl for x in ["asse", "saint etienne", "st etienne", "sainté", "vert"]) or col == 10:
+                                    
+                                    # ANTI-REPOST (Signature)
+                                    sig = f"{it['seller']}_{it['title']}_{it['price']}"
+                                    if sig in sent_signatures: continue
+                                    
+                                    tl = it['title'].lower()
+                                    if any(x in tl for x in ["asse", "saint etienne", "st etienne", "sainté", "vert"]) or col == 10:
+                                        # On n'alerte que si on est déjà "chaud" (après le 1er scan) ou si c'est vraiment nouveau
+                                        if not startup_phase:
                                             send_discord_alert(ctx, it)
                                             sent_signatures.add(sig)
                                             if len(sent_signatures) > 3000: sent_signatures.remove(next(iter(sent_signatures)))
@@ -218,7 +241,7 @@ def run_bot():
                     if c_max > last_id: last_id = c_max; save_last_seen_id(last_id)
                 signal.alarm(0)
             except: signal.alarm(0)
-            is_warm = False
+            startup_phase = False
             if len(seen_ids) > 2000: seen_ids = set(sorted(list(seen_ids), reverse=True)[:1500])
             log("⏳ Cycle terminé. Repos 10s..."); time.sleep(10)
     finally:
