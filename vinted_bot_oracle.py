@@ -24,6 +24,7 @@ SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Cami
 SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+DISCORD_TICKETING_WEBHOOK_URL = os.environ.get("DISCORD_TICKETING_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
@@ -413,7 +414,11 @@ def check_asse_ticketing(context):
         target_zone = "Est Centrale"
         if any(target_zone.lower() in zone.lower() for zone in zones):
             log(f"🎯 {target_zone.upper()} DISPONIBLE ! Envoi de l'alerte...")
-            if DISCORD_WEBHOOK_URL:
+            
+            # Utiliser le webhook ticketing s'il existe, sinon fallback sur le webhook général
+            webhook_url = DISCORD_TICKETING_WEBHOOK_URL or DISCORD_WEBHOOK_URL
+            
+            if webhook_url:
                 payload = {
                     "content": f"@everyone 🚨 **PLACES {target_zone.upper()} DISPONIBLES !** 🚨\nFoncez : " + ASSE_TICKET_URL,
                     "username": "ASSE Ticketing Bot",
@@ -425,7 +430,7 @@ def check_asse_ticketing(context):
                         "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
                     }]
                 }
-                requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+                requests.post(webhook_url, json=payload, timeout=10)
             return True
         else:
             log(f"❌ {target_zone} toujours indisponible.")
