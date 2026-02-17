@@ -385,8 +385,8 @@ def send_discord_alert(context, item):
         log(f"❌ Erreur Discord: {e}")
 
 def check_asse_ticketing(context):
-    """Vérifie la disponibilité des places en Corner Famille"""
-    log("🎟️ Vérification billetterie ASSE (Corner Famille)...")
+    """Vérifie la disponibilité des places en Est Centrale"""
+    log("🎟️ Vérification billetterie ASSE (Est Centrale)...")
     try:
         page = context.new_page()
         # Blocage ressources pour aller plus vite
@@ -410,7 +410,7 @@ def check_asse_ticketing(context):
         
         page.close()
         
-        target_zone = "Corner Famille"
+        target_zone = "Est Centrale"
         if any(target_zone.lower() in zone.lower() for zone in zones):
             log(f"🎯 {target_zone.upper()} DISPONIBLE ! Envoi de l'alerte...")
             if DISCORD_WEBHOOK_URL:
