@@ -28,6 +28,10 @@ STATE_FILE = "last_seen_id.txt"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
 
+# Configuration ASSE Ticketing
+ASSE_TICKET_URL = "https://billetterie.asse.fr/fr/second/match-asse-vs-laval-1/#bkde8797e6-zone"
+ASSE_CHECK_INTERVAL = 60 # secondes
+
 def clean_text(text):
     """Nettoyage radical des parasites Vinted (Enlevé, Nouveau, etc)"""
     if not text: return ""
@@ -380,6 +384,57 @@ def send_discord_alert(context, item):
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
 
+def check_asse_ticketing(context):
+    """Vérifie la disponibilité des places en Corner Famille"""
+    log("🎟️ Vérification billetterie ASSE (Corner Famille)...")
+    try:
+        page = context.new_page()
+        # Blocage ressources pour aller plus vite
+        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
+        
+        page.goto(ASSE_TICKET_URL, wait_until='domcontentloaded', timeout=30000)
+        
+        # Accepter les cookies si besoin
+        try:
+            page.click('#didomi-notice-agree-button', timeout=3000)
+        except:
+            pass
+            
+        # Attendre un peu que le JS s'exécute
+        page.wait_for_timeout(2000)
+        
+        # Extraire les zones
+        zones = page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('.bookingCategoryToggle b, .bookingCatCore b')).map(el => el.innerText);
+        }""")
+        
+        page.close()
+        
+        target_zone = "Corner Famille"
+        if any(target_zone.lower() in zone.lower() for zone in zones):
+            log(f"🎯 {target_zone.upper()} DISPONIBLE ! Envoi de l'alerte...")
+            if DISCORD_WEBHOOK_URL:
+                payload = {
+                    "content": f"@everyone 🚨 **PLACES {target_zone.upper()} DISPONIBLES !** 🚨\nFoncez : " + ASSE_TICKET_URL,
+                    "username": "ASSE Ticketing Bot",
+                    "embeds": [{
+                        "title": f"🎟️ ASSE vs LAVAL - {target_zone} dispo !",
+                        "url": ASSE_TICKET_URL,
+                        "description": f"Les places pour le {target_zone} viennent d'apparaître !",
+                        "color": 0x00FF00,
+                        "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+                    }]
+                }
+                requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+            return True
+        else:
+            log(f"❌ {target_zone} toujours indisponible.")
+            return False
+            
+    except Exception as e:
+        log(f"⚠️ Erreur check ticketing: {e}")
+        return False
+
 def watchdog_handler(signum, frame):
     """Tue le bot si un cycle prend trop de temps (Freeze detection)"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -401,6 +456,7 @@ def run_bot():
     # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
     is_initial_cycle = True
     last_seen_id = load_last_seen_id() # Load last_seen_id here
+    last_asse_check = 0
 
     try:
         while True:
@@ -429,6 +485,11 @@ def run_bot():
                         locale='fr-FR',
                         timezone_id='Europe/Paris'
                     )
+
+                    # --- CHECK ASSE TICKETING ---
+                    if (time.time() - last_asse_check) > ASSE_CHECK_INTERVAL:
+                        check_asse_ticketing(context)
+                        last_asse_check = time.time()
 
                     # OPTIMISATION (ÉCONOMIE D'ÉNERGIE) : Bloquer images/CSS/Polices
                     def block_aggressively(route):
