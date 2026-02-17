@@ -31,7 +31,7 @@ CHECK_INTERVAL_MAX = 20
 
 # Configuration ASSE Ticketing
 ASSE_TICKET_URL = "https://billetterie.asse.fr/fr/second/match-asse-vs-laval-1/#bkde8797e6-zone"
-ASSE_CHECK_INTERVAL = 60 # secondes
+ASSE_CHECK_INTERVAL = 30 # secondes
 
 def clean_text(text):
     """Nettoyage radical des parasites Vinted (Enlevé, Nouveau, etc)"""
@@ -386,8 +386,8 @@ def send_discord_alert(context, item):
         log(f"❌ Erreur Discord: {e}")
 
 def check_asse_ticketing(context):
-    """Vérifie la disponibilité des places en Est Centrale"""
-    log("🎟️ Vérification billetterie ASSE (Est Centrale)...")
+    """Vérifie la disponibilité des places en Kop Nord"""
+    log("🎟️ Vérification billetterie ASSE (Kop Nord)...")
     try:
         page = context.new_page()
         # Blocage ressources pour aller plus vite
@@ -411,7 +411,7 @@ def check_asse_ticketing(context):
         
         page.close()
         
-        target_zone = "Est Centrale"
+        target_zone = "Kop Nord"
         if any(target_zone.lower() in zone.lower() for zone in zones):
             log(f"🎯 {target_zone.upper()} DISPONIBLE ! Envoi de l'alerte...")
             
@@ -425,7 +425,7 @@ def check_asse_ticketing(context):
                     "embeds": [{
                         "title": f"🎟️ ASSE vs LAVAL - {target_zone} dispo !",
                         "url": ASSE_TICKET_URL,
-                        "description": f"Les places pour le {target_zone} viennent d'apparaître !",
+                        "description": f"Les places pour le {target_zone} (Charles Paret) viennent d'apparaître !",
                         "color": 0x00FF00,
                         "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
                     }]
