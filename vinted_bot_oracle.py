@@ -31,7 +31,7 @@ CHECK_INTERVAL_MAX = 20
 
 # Configuration ASSE Ticketing
 ASSE_TICKET_URL = "https://billetterie.asse.fr/fr/second/match-asse-vs-laval-1/#bkde8797e6-zone"
-ASSE_CHECK_INTERVAL = 30 # secondes
+ASSE_CHECK_INTERVAL = 10 # secondes
 
 def clean_text(text):
     """Nettoyage radical des parasites Vinted (Enlevé, Nouveau, etc)"""
