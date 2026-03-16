@@ -25,6 +25,8 @@ SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
+VFA_STATE_FILE = "last_seen_vfa_id.txt"
+VFA_URL = "https://www.vintagefootballarea.com/collections/asse?sort_by=created-descending"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
 
@@ -63,6 +65,114 @@ def save_last_seen_id(item_id):
     """Sauvegarde le dernier ID vu"""
     with open(STATE_FILE, "w") as f:
         f.write(str(item_id))
+
+def load_last_vfa_id():
+    """Charge le dernier ID VFA vu"""
+    if os.path.exists(VFA_STATE_FILE):
+        try:
+            with open(VFA_STATE_FILE, "r") as f:
+                return int(f.read().strip())
+        except:
+            pass
+    return 0
+
+def save_last_vfa_id(item_id):
+    """Sauvegarde le dernier ID VFA vu"""
+    with open(VFA_STATE_FILE, "w") as f:
+        f.write(str(item_id))
+
+def send_vfa_discord_alert(item):
+    """Envoie une alerte pour un article Vintage Football Area"""
+    if not DISCORD_WEBHOOK_URL: return
+
+    embed = {
+        "title": f"🆕 {item['title']} - Vintage Football Area",
+        "url": item['url'],
+        "description": f"**Prix: {item['price']}**\n\nNouveauté détectée sur Vintage Football Area !",
+        "color": 0x008000,
+        "image": {"url": item['image']},
+        "footer": {"text": f"VFA Bot • ID: {item['id']}"},
+        "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+    }
+
+    payload = {
+        "content": f"📢 Nouveau maillot ASSE dispo sur Vintage Football Area !\n{item['title']}",
+        "embeds": [embed],
+        "username": "Vintage Football Bot",
+        "avatar_url": "https://www.vintagefootballarea.com/cdn/shop/files/favicon-32x32_32x32.png"
+    }
+    
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        log(f"✅ Alerte VFA envoyée: {item['title']}")
+    except Exception as e:
+        log(f"❌ Erreur envoi Discord VFA: {e}")
+
+def check_vfa_site(page, last_id, is_initial=False):
+    """Scrape Vintage Football Area pour les nouveautés"""
+    log(f"🔎 Check VFA: {VFA_URL}")
+    try:
+        page.goto(VFA_URL, wait_until="domcontentloaded", timeout=30000)
+        time.sleep(2)
+        
+        items = page.evaluate("""
+            () => {
+                const results = [];
+                const products = document.querySelectorAll('.product-block');
+                products.forEach(el => {
+                    const id = el.getAttribute('data-product-id');
+                    const titleEl = el.querySelector('.title');
+                    const priceEl = el.querySelector('.price');
+                    const linkEl = el.querySelector('a.product-link');
+                    const imgEl = el.querySelector('img');
+                    
+                    if (id && titleEl && priceEl && linkEl) {
+                        let imgSrc = imgEl ? imgEl.src : '';
+                        if (imgEl && imgEl.srcset) {
+                            const sources = imgEl.srcset.split(',').map(s => s.trim().split(' ')[0]);
+                            if (sources.length > 0) imgSrc = sources[sources.length - 1];
+                        }
+                        if (imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
+
+                        results.push({
+                            id: parseInt(id),
+                            title: titleEl.innerText.trim(),
+                            price: priceEl.innerText.trim(),
+                            url: linkEl.href,
+                            image: imgSrc
+                        });
+                    }
+                });
+                return results;
+            }
+        """)
+        
+        if items:
+            new_items = [it for it in items if it['id'] > last_id]
+            if new_items:
+                if is_initial:
+                    log(f"✨ Initialisation VFA accomplie ({len(new_items)} articles indexés)")
+                else:
+                    log(f"🆕 {len(new_items)} nouveaux maillots VFA détectés !")
+                    for it in reversed(new_items):
+                        send_vfa_discord_alert(it)
+                return max(last_id, max(it['id'] for it in new_items))
+        return last_id
+    except Exception as e:
+        log(f"❌ Erreur scraping VFA: {e}")
+        return last_id
+
+def check_vfa_site_with_context(context, last_id, is_initial=False):
+    """Gère l'ouverture de page et le check VFA"""
+    try:
+        vfa_page = context.new_page()
+        # On ne bloque pas agressivement ici au cas où le site serait sensible
+        res = check_vfa_site(vfa_page, last_id, is_initial)
+        vfa_page.close()
+        return res
+    except Exception as e:
+        log(f"⚠️ Erreur lors du check VFA context: {e}")
+        return last_id
 
 def scrape_item_details(page, item_url):
     """Va sur la page de l'article pour récupérer infos détaillées via API interne (V3.0 API Call)"""
@@ -392,15 +502,27 @@ def run_bot():
     
     log(f"⚡ Mode Sniper : Réactivité maximale + International toutes les 20 min")
     
+    if not DISCORD_WEBHOOK_URL:
+        log("⚠️ ALERTE : DISCORD_WEBHOOK_URL n'est pas configuré ! Le bot ne pourra rien envoyer.")
+    else:
+        log("✅ Discord Webhook configuré.")
+    
     # Initialisation
     seen_ids = set()
     last_secondary_check = 0
     last_green_check = 0
     
     log("🚀 Phase d'initialisation rapide...")
-    # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
-    is_initial_cycle = True
-    last_seen_id = load_last_seen_id() # Load last_seen_id here
+    last_seen_id = load_last_seen_id()
+    last_seen_vfa_id = load_last_vfa_id()
+    
+    # On n'active l'initialisation silencieuse QUE si c'est le premier lancement absolu (ID=0)
+    # Sinon, on veut les alertes dès le premier cycle après un redémarrage.
+    is_initial_cycle = (last_seen_id == 0)
+    is_initial_vfa_cycle = (last_seen_vfa_id == 0)
+    
+    log(f"📊 État initial: Vinted={last_seen_id}, VFA={last_seen_vfa_id}")
+    last_vfa_check = 0
 
     try:
         while True:
@@ -414,9 +536,10 @@ def run_bot():
 
             # 2. DÉMARRAGE MOTEUR (Watchdog activé)
             try:
-                # On arme le Watchdog pour 3 minutes (180s)
+                # On arme le Watchdog pour 5 minutes (300s) au lieu de 180s
+                # Playwright peut être lent sur les machines chargées
                 signal.signal(signal.SIGALRM, watchdog_handler)
-                signal.alarm(180) 
+                signal.alarm(300) 
 
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
@@ -515,6 +638,31 @@ def run_bot():
                         except Exception as e:
                             log(f"⚠️ Erreur locale sur '{query}': {e}")
                     
+                    # 3. CHECK VFA (Priorité revue à la hausse)
+                    if (now - last_vfa_check) > 300:
+                        try:
+                            log("🔎 Passage check VFA...")
+                            new_vfa_id = check_vfa_site_with_context(context, last_seen_vfa_id, is_initial_vfa_cycle)
+                            if new_vfa_id > last_seen_vfa_id:
+                                last_seen_vfa_id = new_vfa_id
+                                save_last_vfa_id(last_seen_vfa_id)
+                                log(f"✅ State VFA mis à jour : {last_seen_vfa_id}")
+                            
+                            is_initial_vfa_cycle = False
+                            last_vfa_check = now
+                        except Exception as e:
+                            log(f"⚠️ Erreur lors du check VFA: {e}")
+
+                    # 4. Requêtes Secondaires Vinted (Plus loin dans la boucle car plus risquées)
+                    if (now - last_secondary_check) > 1200:
+                        log("🌍 Mode Cycle Complet (International)")
+                        # On réutilise queries_to_run qui a été calculé au début du cycle
+                        # Mais wait, queries_to_run contient déjà tout si c'est le moment.
+                        # En fait, la logique au début de la boucle remplissait queries_to_run.
+                        # Je vais simplifier : tout ce qui est dans queries_to_run est déjà traité.
+                        # Je vais juste mettre à jour le timer ici.
+                        last_secondary_check = now
+
                     browser.close()
                 
                 # Désactivation du Watchdog après succès du cycle
