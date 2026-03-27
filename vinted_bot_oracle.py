@@ -613,6 +613,7 @@ def run_bot():
                                             seen_ids.add(item['id'])
                                     
                                     if is_initial_cycle:
+                                        log(f"✨ Initialisation: {len(new_found)} items trouvés.")
                                         if new_found:
                                             last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
                                     elif new_found:
@@ -624,13 +625,19 @@ def run_bot():
                                             has_item_kw = any(s in title_low for s in synonyms)
                                             has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne", "sainté"])
                                             
-                                            # Match si (Maillot + Club) OU (Scan Vert + Club)
+                                            # 🎯 MATCH : (Maillot + Club) OU (Scan Vert + Club)
                                             if (has_item_kw and has_team) or (color == 10 and has_team):
                                                 log(f"🎯 MATCH : '{item.get('title')}'")
-                                                send_discord_alert(context, item)
-                                        
-                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                        save_last_seen_id(last_seen_id)
+                                                
+                                                # On envoie l'alerte même au premier cycle, mais on limite à 10 items
+                                                # pour éviter de spammer si on relance le bot après un moment.
+                                                if not is_initial_cycle or (is_initial_cycle and len(new_found) <= 10):
+                                                    send_discord_alert(context, item)
+                                                else:
+                                                    log(f"⏩ Skip alerte (Initial Cycle & {len(new_found)} items > 10)")
+                                            
+                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
+                                            save_last_seen_id(last_seen_id)
                             finally:
                                 page.close()
 
