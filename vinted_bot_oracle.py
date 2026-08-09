@@ -39,18 +39,12 @@ def clean_text(text):
     return text.strip()
 
 def is_asse_jersey_match(title):
-    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia, Kassel, etc)"""
+    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
     if not title: return False
     import re
     title_low = title.lower()
-    synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot", "top", "tenue", "veste", "survetement", "short"]
-    item_pattern = r'\b(' + '|'.join(synonyms) + r')\b'
-    has_item_kw = bool(re.search(item_pattern, title_low))
-    
-    team_pattern = r'\b(asse|saint[- ]etienne|st[- ]etienne|sainté|saint[- ]étienne|st[- ]étienne)\b'
-    has_team_kw = bool(re.search(team_pattern, title_low))
-    
-    return has_item_kw and has_team_kw
+    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
+    return bool(re.search(team_pattern, title_low))
 
 def get_search_url(query, color_id=None):
     url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
