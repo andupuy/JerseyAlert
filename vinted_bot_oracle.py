@@ -154,6 +154,63 @@ def scrape_item_details(page, item_url):
         log(f"⚠️ Erreur scraping détails (API Mode): {e}")
         return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
+def fetch_direct_catalog_api(page, api_url):
+    """Interroge directement l'API catalogue Vinted via fetch() dans le navigateur"""
+    try:
+        data = page.evaluate(f"""async () => {{
+            try {{
+                const res = await fetch('{api_url}', {{
+                    headers: {{ 'Accept': 'application/json, text/plain, */*' }}
+                }});
+                if (res.ok) return await res.json();
+                return null;
+            }} catch(e) {{
+                return null;
+            }}
+        }}""")
+        if not data or 'items' not in data:
+            return []
+        
+        items = []
+        for raw in data.get('items', []):
+            try:
+                item_id = raw.get('id')
+                if not item_id: continue
+                title = raw.get('title') or ''
+                price_data = raw.get('price')
+                if isinstance(price_data, dict):
+                    price = f"{price_data.get('amount', 'N/A')} €"
+                elif price_data is not None:
+                    price = f"{price_data} €"
+                else:
+                    price = 'N/A'
+                
+                size = raw.get('size_title') or 'N/A'
+                brand = raw.get('brand_title') or 'N/A'
+                status = raw.get('status') or 'Non spécifié'
+                url = raw.get('url') or f"https://www.vinted.fr/items/{item_id}"
+                
+                photo = ''
+                if raw.get('photo') and isinstance(raw['photo'], dict):
+                    photo = raw['photo'].get('url', '')
+                
+                items.append({
+                    'id': item_id,
+                    'title': title,
+                    'price': price,
+                    'size': size,
+                    'brand': brand,
+                    'status': status,
+                    'url': url,
+                    'photo': photo
+                })
+            except Exception:
+                pass
+        return items
+    except Exception as e:
+        log(f"⚠️ Erreur fetch API catalogue direct: {e}")
+        return []
+
 def extract_items_from_page(page):
     """Extrait les articles avec Parsing Intelligent du Titre (V5.0)"""
     try:
@@ -442,6 +499,55 @@ def run_bot():
                             route.continue_()
                     
                     context.route("**/*", block_aggressively)
+
+                    # 0. SCAN FLUX DIRECT (Page d'accueil / Catégorie Football & Verts)
+                    log("⚡ Scan Flux Direct (Catalogue Football / Nuances de Vert)...")
+                    direct_endpoints = [
+                        ("Maillots Foot Verts", "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&color_ids=16&color_ids=10&color_ids=28&order=newest_first&page=1&per_page=96"),
+                        ("Tous Maillots Foot", "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&order=newest_first&page=1&per_page=96")
+                    ]
+                    try:
+                        direct_page = context.new_page()
+                        direct_page.set_default_timeout(20000)
+                        direct_page.goto("https://www.vinted.fr/", wait_until='commit', timeout=15000)
+                        
+                        for label, endpoint_url in direct_endpoints:
+                            try:
+                                log(f"🔎 Direct API: '{label}'")
+                                direct_items = fetch_direct_catalog_api(direct_page, endpoint_url)
+                                if direct_items:
+                                    new_direct = []
+                                    for item in direct_items:
+                                        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
+                                            new_direct.append(item)
+                                            seen_ids.add(item['id'])
+                                    
+                                    if is_initial_cycle:
+                                        if new_direct:
+                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_direct))
+                                    elif new_direct:
+                                        log(f"🆕 {len(new_direct)} nouveaux articles vus dans le flux '{label}' !")
+                                        new_direct.sort(key=lambda x: x['id'])
+                                        for item in new_direct:
+                                            title_low = item.get('title', '').lower()
+                                            synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
+                                            has_item_kw = any(s in title_low for s in synonyms)
+                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne", "sainté"])
+                                            
+                                            if (has_item_kw and has_team) or ("vert" in label.lower() and has_team):
+                                                log(f"🎯 MATCH FLUX DIRECT : '{item.get('title')}'")
+                                                send_discord_alert(context, item)
+                                        
+                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_direct))
+                                        save_last_seen_id(last_seen_id)
+                            except Exception as e:
+                                log(f"⚠️ Erreur locale sur flux '{label}': {e}")
+                            time.sleep(random.uniform(1, 2))
+                    except Exception as e:
+                        log(f"⚠️ Erreur ouverture page flux direct: {e}")
+                    finally:
+                        try: direct_page.close()
+                        except: pass
 
                     # Détermination des recherches
                     current_cycle_queries = [] # On va remplir dynamiquement
