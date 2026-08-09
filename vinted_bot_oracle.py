@@ -38,6 +38,20 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
+def is_asse_jersey_match(title):
+    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia, Kassel, etc)"""
+    if not title: return False
+    import re
+    title_low = title.lower()
+    synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot", "top", "tenue", "veste", "survetement", "short"]
+    item_pattern = r'\b(' + '|'.join(synonyms) + r')\b'
+    has_item_kw = bool(re.search(item_pattern, title_low))
+    
+    team_pattern = r'\b(asse|saint[- ]etienne|st[- ]etienne|sainté|saint[- ]étienne|st[- ]étienne)\b'
+    has_team_kw = bool(re.search(team_pattern, title_low))
+    
+    return has_item_kw and has_team_kw
+
 def get_search_url(query, color_id=None):
     url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
     if color_id:
@@ -529,12 +543,7 @@ def run_bot():
                                         log(f"🆕 {len(new_direct)} nouveaux articles vus dans le flux '{label}' !")
                                         new_direct.sort(key=lambda x: x['id'])
                                         for item in new_direct:
-                                            title_low = item.get('title', '').lower()
-                                            synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
-                                            has_item_kw = any(s in title_low for s in synonyms)
-                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne", "sainté"])
-                                            
-                                            if (has_item_kw and has_team) or ("vert" in label.lower() and has_team):
+                                            if is_asse_jersey_match(item.get('title')):
                                                 log(f"🎯 MATCH FLUX DIRECT : '{item.get('title')}'")
                                                 send_discord_alert(context, item)
                                         
@@ -606,13 +615,7 @@ def run_bot():
                                         log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
                                         new_found.sort(key=lambda x: x['id'])
                                         for item in new_found:
-                                            title_low = item.get('title', '').lower()
-                                            synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]
-                                            has_item_kw = any(s in title_low for s in synonyms)
-                                            has_team = any(x in title_low for x in ["asse", "saint etienne", "saint-etienne", "st etienne", "st-etienne", "saint étienne", "saint-étienne", "st étienne", "st-étienne", "sainté"])
-                                            
-                                            # Match si (Maillot + Club) OU (Scan Vert + Club)
-                                            if (has_item_kw and has_team) or (color == 10 and has_team):
+                                            if is_asse_jersey_match(item.get('title')):
                                                 log(f"🎯 MATCH : '{item.get('title')}'")
                                                 send_discord_alert(context, item)
                                         
