@@ -97,10 +97,26 @@ def scrape_item_details(page, item_url):
         # Pour être sûr, on va quand même sur la page de l'item (ça génère les cookies spécifiques item)
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
 
-        # Récupération des photos (DOM, ça marche toujours bien et c'est joli)
+        # Récupération de TOUTES les photos haute résolution (/f800/) depuis les scripts Next.js ou le DOM
         photos = page.evaluate("""() => {
-            const imgs = Array.from(document.querySelectorAll('.item-photo--1 img, .item-photos img'));
-            return imgs.map(img => img.src).filter(src => src);
+            const photos = [];
+            const scripts = document.querySelectorAll('script');
+            scripts.forEach(s => {
+                const txt = s.textContent || '';
+                const parts = txt.split('https://images1.vinted.net/');
+                for (let i = 1; i < parts.length; i++) {
+                    const urlPart = parts[i].split('"')[0].split('\\\\')[0];
+                    if (urlPart.includes('/f800/')) {
+                        photos.push('https://images1.vinted.net/' + urlPart);
+                    }
+                }
+            });
+            if (photos.length > 0) return Array.from(new Set(photos));
+            
+            const imgs = Array.from(document.querySelectorAll('img'))
+                                 .map(i => i.src || i.getAttribute('data-src') || '')
+                                 .filter(s => s && s.includes('vinted.net') && (s.includes('/f800/') || s.includes('/full/') || s.includes('/1500/')));
+            return Array.from(new Set(imgs));
         }""")
         photos = list(dict.fromkeys(photos))
 
