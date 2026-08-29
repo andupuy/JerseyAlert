@@ -238,9 +238,22 @@ def run_bot():
                                 seen_ids.add(ad['id'])
                         
                         if is_initial_cycle:
-                            if new_found:
-                                last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                log(f"✅ Initialisation terminée. {len(seen_ids)} annonces chargées. Dernier ID: {last_seen_id}")
+                            if last_seen_id == 0:
+                                if new_found:
+                                    last_seen_id = max(x['id'] for x in new_found)
+                                    save_last_seen_id(last_seen_id)
+                                    log(f"✅ Première initialisation terminée. {len(seen_ids)} annonces chargées. Dernier ID enregistré: {last_seen_id}")
+                            else:
+                                if new_found:
+                                    log(f"🆕 {len(new_found)} nouvelles annonces détectées au redémarrage LeBonCoin !")
+                                    new_found.sort(key=lambda x: x['id'])
+                                    for ad in new_found:
+                                        if is_asse_match(ad['title']):
+                                            log(f"🎯 MATCH LEBONCOIN : '{ad['title']}' ({ad['price']})")
+                                            send_discord_alert(context, ad)
+                                    
+                                    last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
+                                    save_last_seen_id(last_seen_id)
                         elif new_found:
                             log(f"🆕 {len(new_found)} nouvelles annonces détectées sur LeBonCoin !")
                             new_found.sort(key=lambda x: x['id'])
