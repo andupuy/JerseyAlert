@@ -216,14 +216,23 @@ def run_bot():
                     
                     raw_ads = page.evaluate("""() => {
                         const anchors = Array.from(document.querySelectorAll('a[href*="/ad/"]'));
+                        const ignoreBadges = ['urgent', 'pro', 'sponsorisé', 'sponsorise', 'livraison possible', 'nouveau', 'livraison', 'recommandé', 'boosté', 'à la une'];
+                        
                         return anchors.map(a => {
                             const idMatch = a.href.match(/\\/(\\d+)(\\?|$)/);
                             const parent = a.closest('div') || a.parentElement;
                             const img = a.querySelector('img') || parent.querySelector('img');
                             const textLines = a.innerText.split('\\n').map(t => t.trim()).filter(t => t.length > 0);
                             
-                            // Formattage des infos
-                            let title = textLines[0] || 'Annonce LeBonCoin';
+                            let title = textLines.find(line => {
+                                const low = line.toLowerCase();
+                                if (ignoreBadges.includes(low)) return false;
+                                if (line.includes('€') || line.includes('$')) return false;
+                                if (/^\\d{5}\\b/.test(line)) return false;
+                                if (/^(aujourd'hui|hier|\\d{1,2}\\/\\d{1,2})/i.test(low)) return false;
+                                return line.length > 2;
+                            }) || textLines[0] || 'Annonce LeBonCoin';
+                            
                             let price = 'N/A';
                             let location = 'France';
                             let date = '';
@@ -231,7 +240,7 @@ def run_bot():
                             textLines.forEach(line => {
                                 if (line.includes('€')) price = line;
                                 else if (/\\d{5}/.test(line)) location = line;
-                                else if (line.includes('/') || line.includes(':')) date = line;
+                                else if (line.includes('/') || line.includes(':') || line.toLowerCase().includes('hier') || line.toLowerCase().includes('aujourd')) date = line;
                             });
                             
                             return {
@@ -241,7 +250,8 @@ def run_bot():
                                 location: location,
                                 date: date,
                                 url: a.href,
-                                photo: img ? (img.src || img.getAttribute('data-src') || '') : ''
+                                photo: img ? (img.src || img.getAttribute('data-src') || '') : '',
+                                fullText: a.innerText
                             };
                         }).filter(x => x.id && x.title.length > 3);
                     }""")
@@ -266,7 +276,7 @@ def run_bot():
                                     log(f"🆕 {len(new_found)} nouvelles annonces détectées au redémarrage LeBonCoin !")
                                     new_found.sort(key=lambda x: x['id'])
                                     for ad in new_found:
-                                        if is_asse_match(ad['title']):
+                                        if is_asse_match(ad['title']) or is_asse_match(ad.get('fullText', '')):
                                             log(f"🎯 MATCH LEBONCOIN : '{ad['title']}' ({ad['price']})")
                                             send_discord_alert(context, ad)
                                     
@@ -276,7 +286,7 @@ def run_bot():
                             log(f"🆕 {len(new_found)} nouvelles annonces détectées sur LeBonCoin !")
                             new_found.sort(key=lambda x: x['id'])
                             for ad in new_found:
-                                if is_asse_match(ad['title']):
+                                if is_asse_match(ad['title']) or is_asse_match(ad.get('fullText', '')):
                                     log(f"🎯 MATCH LEBONCOIN : '{ad['title']}' ({ad['price']})")
                                     send_discord_alert(context, ad)
                             
