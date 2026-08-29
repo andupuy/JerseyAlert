@@ -662,13 +662,18 @@ def run_bot():
         log("👋 Bot éteint proprement")
 
 if __name__ == "__main__":
-    import threading
+    import subprocess
     try:
-        import leboncoin_bot
-        log("🚀 Lancement du thread LeBonCoin Bot en arrière-plan...")
-        lbc_thread = threading.Thread(target=leboncoin_bot.run_bot, name="LeBonCoinThread", daemon=True)
-        lbc_thread.start()
+        log("🚀 Lancement du sous-processus LeBonCoin Bot indépendant...")
+        subprocess.Popen([sys.executable, "leboncoin_bot.py"])
     except Exception as e:
-        log(f"⚠️ Erreur démarrage thread LeBonCoin: {e}")
+        log(f"⚠️ Erreur démarrage sous-processus LeBonCoin: {e}")
+        try:
+            import threading, leboncoin_bot
+            log("🚀 Lancement du thread LeBonCoin Bot en secours...")
+            lbc_thread = threading.Thread(target=leboncoin_bot.run_bot, name="LeBonCoinThread", daemon=True)
+            lbc_thread.start()
+        except Exception as e2:
+            log(f"⚠️ Erreur démarrage thread LeBonCoin: {e2}")
 
     run_bot()

@@ -149,6 +149,25 @@ def watchdog_handler(signum, frame):
     log("🚨 WATCHDOG: Bot LeBonCoin figé ! Redémarrage...")
     os._exit(1)
 
+import threading
+
+def set_watchdog():
+    """Active le watchdog uniquement si exécuté dans le thread principal"""
+    if threading.current_thread() is threading.main_thread():
+        try:
+            signal.signal(signal.SIGALRM, watchdog_handler)
+            signal.alarm(180)
+        except Exception:
+            pass
+
+def reset_watchdog():
+    """Désactive le watchdog uniquement si exécuté dans le thread principal"""
+    if threading.current_thread() is threading.main_thread():
+        try:
+            signal.alarm(0)
+        except Exception:
+            pass
+
 def run_bot():
     """Boucle principale du bot LeBonCoin"""
     log("🚀 Démarrage du Bot LeBonCoin ASSE")
@@ -171,8 +190,7 @@ def run_bot():
                 continue
 
             try:
-                signal.signal(signal.SIGALRM, watchdog_handler)
-                signal.alarm(180)
+                set_watchdog()
 
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
@@ -267,10 +285,10 @@ def run_bot():
                     
                     browser.close()
 
-                signal.alarm(0)
+                reset_watchdog()
             except Exception as e:
                 log(f"🚨 Bug moteur LeBonCoin : {e}")
-                signal.alarm(0)
+                reset_watchdog()
 
             is_initial_cycle = False
             if len(seen_ids) > 2000:
