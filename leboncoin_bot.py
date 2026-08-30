@@ -268,6 +268,16 @@ def run_bot():
                         if is_initial_cycle:
                             if last_seen_id == 0:
                                 if new_found:
+                                    log(f"⚡ Initialisation LeBonCoin : Analyse de {len(new_found)} annonces...")
+                                    new_found.sort(key=lambda x: x['id'])
+                                    for ad in new_found:
+                                        date_low = ad.get('date', '').lower()
+                                        is_today = any(kw in date_low for kw in ["aujourd", ":"])
+                                        if is_asse_match(ad['title']) or is_asse_match(ad.get('fullText', '')):
+                                            if is_today:
+                                                log(f"🎯 MATCH INITIALISATION (Aujourd'hui) : '{ad['title']}' ({ad['price']})")
+                                                send_discord_alert(context, ad)
+                                    
                                     last_seen_id = max(x['id'] for x in new_found)
                                     save_last_seen_id(last_seen_id)
                                     log(f"✅ Première initialisation terminée. {len(seen_ids)} annonces chargées. Dernier ID enregistré: {last_seen_id}")
