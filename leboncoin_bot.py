@@ -195,24 +195,42 @@ def run_bot():
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
                         headless=True,
-                        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                        args=[
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-blink-features=AutomationControlled',
+                            '--disable-infobars',
+                            '--disable-gpu',
+                            '--window-size=1920,1080'
+                        ]
                     )
                     context = browser.new_context(
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        viewport={'width': 1280, 'height': 720},
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                        viewport={'width': 1920, 'height': 1080},
                         locale='fr-FR',
-                        timezone_id='Europe/Paris'
+                        timezone_id='Europe/Paris',
+                        color_scheme='light',
+                        device_scale_factor=1
                     )
 
                     page = context.new_page()
+                    page.add_init_script("""
+                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                        window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+                        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                        Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'] });
+                    """)
                     page.set_default_timeout(20000)
                     
                     log(f"🔎 Consultation LeBonCoin : {SEARCH_URL}")
-                    page.goto(SEARCH_URL, wait_until='domcontentloaded', timeout=20000)
+                    response = page.goto(SEARCH_URL, wait_until='domcontentloaded', timeout=20000)
+                    status_code = response.status if response else 0
+                    log(f"📡 Réponse HTTP LeBonCoin : Status {status_code}")
+                    
                     try:
-                        page.wait_for_selector('a[href*="/ad/"]', timeout=10000)
-                    except Exception:
-                        pass
+                        page.wait_for_selector('a[href*="/ad/"]', timeout=12000)
+                    except Exception as err:
+                        log(f"⚠️ Attente annonces LeBonCoin: {err}")
                     
                     raw_ads = page.evaluate("""() => {
                         const anchors = Array.from(document.querySelectorAll('a[href*="/ad/"]'));

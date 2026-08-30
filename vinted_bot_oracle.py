@@ -665,7 +665,7 @@ if __name__ == "__main__":
     import subprocess
     try:
         log("🚀 Lancement du sous-processus LeBonCoin Bot indépendant...")
-        subprocess.Popen([sys.executable, "leboncoin_bot.py"])
+        subprocess.Popen([sys.executable, "leboncoin_bot.py"], env=os.environ.copy())
     except Exception as e:
         log(f"⚠️ Erreur démarrage sous-processus LeBonCoin: {e}")
         try:
