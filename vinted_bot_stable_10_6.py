@@ -27,6 +27,7 @@ SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 BLACKLIST_FILE = "blacklist.json"
+FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
 
@@ -146,6 +147,61 @@ def clean_text(text):
     text = re.sub(r'(?i)nouveau\s*!?', '', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+
+def is_excluded_size(size_str, title_str="", desc_str=""):
+    """
+    Filtre les tailles enfants (âges, cm, mots-clés) ainsi que XS et S.
+    Conserve les tailles adultes M, L, XL, XXL+, tailles uniques et N/A non identifiés comme enfant.
+    """
+    import re
+    s = (size_str or "").strip().upper()
+    t = (title_str or "").strip().lower()
+
+    # 1. Détection des tailles enfants
+    # Mots-clés dans la taille (ex: '10 ans', '12 ans', '14 ans / 164 cm', '6 mois')
+    child_size_keywords = ['ans', 'mois', 'yr', 'year', 'anni', 'anos', 'enfant', 'kid', 'junior', 'jr', 'cm']
+    if any(k in s.lower() for k in child_size_keywords):
+        return True, f"Taille enfant ({size_str})"
+
+    # Mots-clés enfants dans le titre (ex: 'Maillot ASSE Enfant 10 ans')
+    if any(re.search(rf'\b{re.escape(kw)}\b', t) for kw in ['enfant', 'enfants', 'kids', 'junior', 'bebe', 'bébé', 'garcon', 'garçon', 'fille', 'baby', 'youth']):
+        return True, "Mot-clé enfant dans le titre"
+
+    # Âge enfant dans le titre (ex: '10 ans', '8a', '12 ans')
+    if re.search(r'\b\d{1,2}\s*(?:ans|a|mois|m|years|yrs)\b', t):
+        return True, "Âge enfant dans le titre"
+
+    # Tailles jeunesse internationales type YXS, YS, YM, YL, YXL
+    if re.match(r'^Y[SMLX]+$', s):
+        return True, f"Taille Youth ({size_str})"
+
+    # Tailles en cm (ex: 128, 140, 152, 164 cm)
+    if re.search(r'\b(1[0-7][0-9])\s*cm\b', s.lower()) or re.search(r'\b(1[0-7][0-9])\s*cm\b', t):
+        return True, "Taille en cm (enfant)"
+
+    # Tailles numériques enfant pures (tailles standards Vinted enfant)
+    if re.match(r'^(104|110|116|122|128|134|140|146|152|158|164|170|176)$', s):
+        return True, f"Taille numérique enfant ({size_str})"
+
+    # 2. Exclusion des tailles XS et S
+    # Strictement XS, XXS, XXXS
+    if re.match(r'^(X{1,3}S|EXTRA\s*SMALL)$', s):
+        return True, f"Taille XS ({size_str})"
+
+    # Strictement S
+    if re.match(r'^(S|SMALL)$', s):
+        return True, f"Taille S ({size_str})"
+
+    # Combinaison type XS/S ou S/XS
+    if re.match(r'^(XS\s*/\s*S|S\s*/\s*XS)$', s):
+        return True, f"Taille XS/S ({size_str})"
+
+    # Tailles numériques équivalentes à XS/S (32, 34, 36)
+    if re.match(r'^(32|34|36)(?:\s*/\s*(?:XS|S))?$', s) or re.match(r'^(?:XS|S)\s*/\s*(32|34|36)$', s):
+        return True, f"Taille numérique XS/S ({size_str})"
+
+    return False, "OK"
 
 def get_search_url(query, color_id=None):
     url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
@@ -549,6 +605,13 @@ def send_discord_alert(context, item):
                 if cand and len(cand) <= 10:
                     final_size = cand
 
+        # Filtrage des tailles enfants et XS/S
+        if FILTER_ADULT_ONLY:
+            is_excl, reason = is_excluded_size(final_size, raw_title_val, final_desc)
+            if is_excl:
+                log(f"🚫 Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
+                return
+
         if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
 
         description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
@@ -714,6 +777,12 @@ def run_bot():
                                             if seller_username and is_blacklisted_item(item):
                                                 log(f"🚫 Ignoré (blacklist): {seller_username}")
                                                 continue
+
+                                            if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
+                                                is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
+                                                if is_excl:
+                                                    log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
+                                                    continue
 
                                             title_low = item.get('title', '').lower()
                                             synonyms = ["maillot", "jersey", "maglia", "camiseta", "ensemble", "trikot"]

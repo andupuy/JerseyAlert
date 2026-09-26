@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Sun Sep 27 00:42:00 CEST 2026 (FIX VINTED SIZE PARSING & DOM FALLBACK) 🛡️🚀
+# Force Update Sun Sep 27 00:48:00 CEST 2026 (ADD ADULT-ONLY SIZE FILTER: NO KIDS, NO S/XS) 🛡️🚀
