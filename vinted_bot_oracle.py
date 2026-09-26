@@ -25,8 +25,60 @@ SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
+BLACKLIST_FILE = "blacklisted_sellers.json"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
+
+def load_blacklisted_sellers():
+    """Charge la liste noire des vendeurs Vinted"""
+    sellers = set()
+    env_blocked = os.environ.get("BLOCKED_SELLERS", "")
+    if env_blocked:
+        for s in env_blocked.split(","):
+            if s.strip():
+                sellers.add(s.strip().lower().replace("@", ""))
+                
+    if os.path.exists(BLACKLIST_FILE):
+        try:
+            with open(BLACKLIST_FILE, "r") as f:
+                data = json.load(f)
+                for s in data:
+                    sellers.add(str(s).strip().lower().replace("@", ""))
+        except Exception:
+            pass
+    return sellers
+
+def save_blacklisted_sellers(sellers_set):
+    """Sauvegarde la liste noire des vendeurs Vinted"""
+    try:
+        with open(BLACKLIST_FILE, "w") as f:
+            json.dump(sorted(list(sellers_set)), f, indent=2)
+    except Exception as e:
+        log(f"⚠️ Erreur sauvegarde blacklist: {e}")
+
+def add_blacklisted_seller(username):
+    """Ajoute un vendeur à la liste noire"""
+    cleaned = username.strip().lower().replace("@", "")
+    if "vinted." in cleaned and "/member/" in cleaned:
+        cleaned = cleaned.split("/member/")[1].split("?")[0].split("-")[-1]
+    sellers = load_blacklisted_sellers()
+    sellers.add(cleaned)
+    save_blacklisted_sellers(sellers)
+    log(f"⛔ Vendeur '{cleaned}' ajouté à la liste noire Vinted.")
+    return cleaned
+
+def remove_blacklisted_seller(username):
+    """Retire un vendeur de la liste noire"""
+    cleaned = username.strip().lower().replace("@", "")
+    if "vinted." in cleaned and "/member/" in cleaned:
+        cleaned = cleaned.split("/member/")[1].split("?")[0].split("-")[-1]
+    sellers = load_blacklisted_sellers()
+    if cleaned in sellers:
+        sellers.remove(cleaned)
+        save_blacklisted_sellers(sellers)
+        log(f"✅ Vendeur '{cleaned}' retiré de la liste noire Vinted.")
+        return True
+    return False
 
 def clean_text(text):
     """Nettoyage radical des parasites Vinted (Enlevé, Nouveau, etc)"""
@@ -159,11 +211,65 @@ def scrape_item_details(page, item_url):
             
         else:
             log("⚠️ API Vinted muette ou erreur")
-            # Fallback DOM
-            description = page.evaluate("""() => {
-                const descEl = document.querySelector('[itemprop="description"]');
-                return descEl ? descEl.innerText : '';
-            }""")
+
+        # Si l'API n'a pas tout renvoyé ou a échoué, on extrait depuis les scripts / le DOM de la page
+        if not description or brand == 'N/A' or size == 'N/A' or status in ['N/A', 'Non spécifié']:
+            try:
+                dom_details = page.evaluate("""() => {
+                    let dBrand = 'N/A', dSize = 'N/A', dStatus = 'N/A', dDesc = '';
+                    
+                    const descEl = document.querySelector('[itemprop="description"]');
+                    if (descEl) dDesc = descEl.innerText.trim();
+
+                    // Recherche dans les scripts Next.js (hydratation JSON)
+                    try {
+                        const scripts = Array.from(document.querySelectorAll('script'));
+                        for (const s of scripts) {
+                            const txt = s.textContent || '';
+                            if (txt.includes('code') && (txt.includes('size') || txt.includes('brand') || txt.includes('status'))) {
+                                if (dSize === 'N/A') {
+                                    const m = txt.match(/["\\\\]+code["\\\\]+:\s*["\\\\]+size["\\\\]+.*?["\\\\]+value["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
+                                    if (m) dSize = m[1].trim();
+                                }
+                                if (dStatus === 'N/A') {
+                                    const m = txt.match(/["\\\\]+code["\\\\]+:\s*["\\\\]+status["\\\\]+.*?["\\\\]+value["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
+                                    if (m) dStatus = m[1].trim();
+                                }
+                                if (dBrand === 'N/A') {
+                                    const m = txt.match(/["\\\\]+code["\\\\]+:\s*["\\\\]+brand["\\\\]+.*?["\\\\]+title["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
+                                    if (m) dBrand = m[1].trim();
+                                }
+                            }
+                        }
+                    } catch (e) {}
+
+                    // Recherche dans les éléments DOM
+                    if (dSize === 'N/A' || dBrand === 'N/A' || dStatus === 'N/A') {
+                        const items = document.querySelectorAll('.details-list__item, [data-testid*="item-attributes"]');
+                        items.forEach(el => {
+                            const t = el.innerText || '';
+                            const valEl = el.querySelector('.details-list__item-value, [data-testid*="value"]');
+                            const val = valEl ? valEl.innerText.trim() : '';
+                            if (val) {
+                                if (/taille|size/i.test(t) && dSize === 'N/A') dSize = val;
+                                if (/marque|brand/i.test(t) && dBrand === 'N/A') dBrand = val;
+                                if (/état|status|condition/i.test(t) && dStatus === 'N/A') dStatus = val;
+                            }
+                        });
+                    }
+
+                    return { description: dDesc, brand: dBrand, size: dSize, status: dStatus };
+                }""")
+                if not description and dom_details.get('description'):
+                    description = dom_details['description']
+                if brand == 'N/A' and dom_details.get('brand') != 'N/A':
+                    brand = dom_details['brand']
+                if size == 'N/A' and dom_details.get('size') != 'N/A':
+                    size = dom_details['size']
+                if status in ['N/A', 'Non spécifié'] and dom_details.get('status') not in ['N/A', 'Non spécifié']:
+                    status = dom_details['status']
+            except Exception as e:
+                log(f"⚠️ Erreur fallback DOM/Scripts item: {e}")
         
         log(f"✅ Détails finaux: {brand} | {size} | {status}")
         
@@ -270,22 +376,26 @@ def extract_items_from_page(page):
                         let status = 'Non spécifié';
                         let title = rawTitle; // Par défaut on prend tout
 
-                        // ANALYSE DU TITRE (Parsing V5.0)
-                        // Exemple: "Maillot, marque: Nike, taille: L, état: Très bon état, 20,00 €"
-                        if (rawTitle.includes('marque:') || rawTitle.includes('taille:')) {
+                        // ANALYSE DU TITRE (Parsing V9.0 - Insensible à la casse)
+                        // Exemple: "Veste ASSE, Marque: Le Coq Sportif, État: Très bon état, Taille: M, 15.00 €, 16.45 €"
+                        const hasMeta = /(?:marque|brand|taille|size|taglia|talla|état|etat|condition)\s*:/i.test(rawTitle);
+                        if (hasMeta) {
+                            // Nettoyage du titre réel : on retire la chaîne de métadonnées Vinted
+                            const cleanT = rawTitle.replace(/,\s*(?:marque|brand|taille|size|taglia|talla|état|etat|condition)\s*:.*$/i, '').trim();
+                            if (cleanT) title = cleanT;
                             
-                            // Nettoyage du titre (on garde le début avant la première virgule souvent)
-                            title = rawTitle.split(',')[0].trim();
-                            
-                            // Extraction par Regex JS
-                            const brandMatch = rawTitle.match(/marque:\\s*([^,]+)/i);
+                            // Extraction par Regex JS insensible à la casse
+                            const brandMatch = rawTitle.match(/(?:marque|brand|marca|marke)\s*:\s*([^,]+)/i);
                             if (brandMatch) brand = brandMatch[1].trim();
                             
-                            const sizeMatch = rawTitle.match(/taille:\\s*([^,]+)/i);
+                            const sizeMatch = rawTitle.match(/(?:taille|size|taglia|talla|maat)\s*:\s*([^,]+)/i);
                             if (sizeMatch) size = sizeMatch[1].trim();
                             
-                            const statusMatch = rawTitle.match(/état:\\s*([^,]+)/i);
+                            const statusMatch = rawTitle.match(/(?:état|etat|condition|stato|estado)\s*:\s*([^,]+)/i);
                             if (statusMatch) status = statusMatch[1].trim();
+
+                            const priceMatch = rawTitle.match(/,\s*(\d+(?:[.,]\d+)?\s*€)/i);
+                            if (priceMatch) price = priceMatch[1].trim();
                         }
                         
                         // Récupération de TOUS les textes (morceaux + bloc complet)
@@ -297,12 +407,38 @@ def extract_items_from_page(page):
                         texts.push(el.innerText.trim());
                         
                         const uniqueTexts = [...new Set(texts)];
-                        price = uniqueTexts.find(t => t.includes('€') || t.includes('$')) || 'N/A';
                         
-                        // Si le parsing titre a échoué pour certains champs, on tente l'heuristique
+                        // Extraction d'un prix propre s'il manque ou est pollué
+                        if (price === 'N/A' || price.length > 20 || price.includes('·') || price.includes('incl')) {
+                            const priceRegex = /(\d+[\d\s]*[.,]\d{2}\s*€|\d+\s*€)/;
+                            const pText = uniqueTexts.find(t => priceRegex.test(t));
+                            if (pText) {
+                                const m = pText.match(priceRegex);
+                                if (m) price = m[1].trim();
+                            } else {
+                                price = uniqueTexts.find(t => t.includes('€') || t.includes('$')) || 'N/A';
+                            }
+                        }
+                        
+                        // Si la taille est encore N/A, on tente l'heuristique avancée sur uniqueTexts
                         if (size === 'N/A') {
-                            const sizeRegex = /^(XS|S|M|L|XL|XXL|\d{2,3}|Unique)$/i;
-                            size = uniqueTexts.find(t => sizeRegex.test(t) && !t.includes('€')) || 'N/A';
+                            const sizeRegex = /^(XS|S|M|L|XL|XXL|XXXL|[0-9]{1,3}(?:\s*ans)?|Unique|[0-9]{2}\s*\/\s*[0-9]{2})$/i;
+                            for (const t of uniqueTexts) {
+                                if (t.includes('€') || t.includes('$')) continue;
+                                if (sizeRegex.test(t)) {
+                                    size = t;
+                                    break;
+                                }
+                                // Découpage des éléments composites comme "M · Très bon état"
+                                const parts = t.split(/[·•|]/).map(p => p.trim());
+                                for (const p of parts) {
+                                    if (sizeRegex.test(p)) {
+                                        size = p;
+                                        break;
+                                    }
+                                }
+                                if (size !== 'N/A') break;
+                            }
                         }
 
                         // 4. Heuristique "État" ULTIME (V6.3)
@@ -398,22 +534,45 @@ def send_discord_alert(context, item):
         # Photos
         photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
         
+        import re
+
         # Nettoyage radical
-        final_title = clean_text(item.get('title'))
+        raw_title_val = clean_text(item.get('title'))
+        # Enlever les métadonnées Vinted collées au titre
+        clean_title = re.sub(r',\s*(?:marque|brand|taille|size|taglia|talla|état|etat|condition)\s*:.*$', '', raw_title_val, flags=re.IGNORECASE)
+        clean_title = re.sub(r'\s*·.*$', '', clean_title)  # Enlève tout après le "·"
+        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)  # Enlève les prix
+        clean_title = clean_title.strip()
+        final_title = clean_title if clean_title else "Maillot ASSE"
+
         final_brand = clean_text(brand_raw)
         final_price = clean_text(price_raw)
+        # Assainissement du prix si texte composite
+        if '·' in final_price or 'incl' in final_price or len(final_price) > 20:
+            p_match = re.search(r'(\d+[\d\s]*[.,]\d{2}\s*€|\d+\s*€)', final_price)
+            if p_match:
+                final_price = p_match.group(1).strip()
+
         final_size = clean_text(size_raw)
         final_status = clean_text(status_raw)
         final_desc = clean_text(desc_raw)
         
+        # Fallback ultime pour la taille : extraction depuis le titre ou la description
+        if final_size == 'N/A':
+            size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n]|\s*$)', raw_title_val, re.IGNORECASE)
+            if not size_search and final_desc:
+                size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n.]|\s*$)', final_desc, re.IGNORECASE)
+            if size_search:
+                cand = size_search.group(1).strip().upper()
+                if cand and len(cand) <= 10:
+                    final_size = cand
+
         if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
 
         description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
         
         # Un dernier coup de balai sur l'ensemble du bloc au cas où
         description_text = description_text.replace("  ", " ").strip()
-
-        if not final_title: final_title = "Nouvel article ASSE"
 
         embed1 = {
             "title": f"🔔 {final_title}",
@@ -430,14 +589,6 @@ def send_discord_alert(context, item):
         embeds = [embed1]
         for photo_url in photos[1:4]:
             embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
-
-        # NETTOYAGE DU TITRE (enlever les infos redondantes de Vinted)
-        import re
-        clean_title = re.sub(r'\s*·.*$', '', final_title)  # Enlève tout après le "·"
-        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)  # Enlève les prix
-        clean_title = clean_title.strip()
-        if not clean_title:
-            clean_title = "Maillot ASSE"
 
         # EXTRAIT DE DESCRIPTION (COMPLÈTE jusqu'à 1000 caractères)
         desc_preview = final_desc[:1000] if final_desc else "Pas de description"

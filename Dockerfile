@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Tue Jan 20 22:32:00 CET 2026 (ULTRA-VISION & QUICK-START V11.29) 🛡️🚀🔭
+# Force Update Sun Sep 27 00:42:00 CEST 2026 (FIX VINTED SIZE PARSING & DOM FALLBACK) 🛡️🚀
