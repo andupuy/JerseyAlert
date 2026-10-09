@@ -603,47 +603,32 @@ def extract_items_from_page(page):
         return []
 
 def send_discord_alert(context, item):
-    """Envoie une alerte Discord intelligente (fallback liste)"""
+    """Envoie une alerte Discord instantanée (<0.2s) avec bouton d'achat direct"""
     if not DISCORD_WEBHOOK_URL: return
 
-    # 1. On essaie d'avoir les détails riches (Photos + Desc)
-    # Mais on ne fait plus confiance au brand/size du scraping détail s'il échoue
-    # On garde les infos "liste" (item) comme base solide
-    
-    details = {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
     try:
-        detail_page = context.new_page()
-        detail_page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        details = scrape_item_details(detail_page, item['url'])
-        detail_page.close()
-    except Exception as e:
-        log(f"⚠️ Mode Simple (Détails échoués): {e}")
-
-    try:
-        # FUSION ET NETTOYAGE (V8.4 TOTAL CLEAN)
-        price_raw = item.get('price', 'N/A')
-        brand_raw = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
-        size_raw = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
-        status_raw = details['status'] if details['status'] not in ['N/A', 'Non spécifié'] else item.get('status', 'Non spécifié')
-        desc_raw = details['description']
-        
-        # Photos
-        photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
-        
         import re
 
-        # Nettoyage radical
+        # Données directes de la liste (instantané, zéro latence)
+        price_raw = item.get('price', 'N/A')
+        brand_raw = item.get('brand', 'N/A')
+        size_raw = item.get('size', 'N/A')
+        status_raw = item.get('status', 'Non spécifié')
+        photo_url = item.get('photo', '')
+        item_id = item.get('id')
+        item_url = item.get('url', f"https://www.vinted.fr/items/{item_id}")
+        buy_url = f"https://www.vinted.fr/transaction/buy/new?item_id={item_id}"
+
+        # Nettoyage radical du titre
         raw_title_val = clean_text(item.get('title'))
-        # Enlever les métadonnées Vinted collées au titre
         clean_title = re.sub(r',\s*(?:marque|brand|taille|size|taglia|talla|état|etat|condition)\s*:.*$', '', raw_title_val, flags=re.IGNORECASE)
-        clean_title = re.sub(r'\s*·.*$', '', clean_title)  # Enlève tout après le "·"
-        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)  # Enlève les prix
+        clean_title = re.sub(r'\s*·.*$', '', clean_title)
+        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)
         clean_title = clean_title.strip()
         final_title = clean_title if clean_title else "Maillot ASSE"
 
         final_brand = clean_text(brand_raw)
         final_price = clean_text(price_raw)
-        # Assainissement du prix si texte composite
         if '·' in final_price or 'incl' in final_price or len(final_price) > 20:
             p_match = re.search(r'(\d+[\d\s]*[.,]\d{2}\s*€|\d+\s*€)', final_price)
             if p_match:
@@ -651,13 +636,10 @@ def send_discord_alert(context, item):
 
         final_size = clean_text(size_raw)
         final_status = clean_text(status_raw)
-        final_desc = clean_text(desc_raw)
-        
-        # Fallback ultime pour la taille : extraction depuis le titre ou la description
+
+        # Fallback pour la taille si N/A depuis le titre
         if final_size == 'N/A':
             size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n]|\s*$)', raw_title_val, re.IGNORECASE)
-            if not size_search and final_desc:
-                size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n.]|\s*$)', final_desc, re.IGNORECASE)
             if size_search:
                 cand = size_search.group(1).strip().upper()
                 if cand and len(cand) <= 10:
@@ -665,52 +647,44 @@ def send_discord_alert(context, item):
 
         # Filtrage des tailles enfants et XS/S
         if FILTER_ADULT_ONLY:
-            is_excl, reason = is_excluded_size(final_size, raw_title_val, final_desc)
+            is_excl, reason = is_excluded_size(final_size, raw_title_val)
             if is_excl:
-                log(f"🚫 Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
+                log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
                 return
 
-        if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
-
-        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
-        
-        # Un dernier coup de balai sur l'ensemble du bloc au cas où
-        description_text = description_text.replace("  ", " ").strip()
+        # Description dans l'embed avec lien d'achat direct (cliquable en bleu dans Discord)
+        description_text = (
+            f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n"
+            f"🏷️ Marque: **{final_brand}** | État: **{final_status}**\n\n"
+            f"⚡ **[Acheter directement en 1 clic]({buy_url})**"
+        )
 
         embed1 = {
             "title": f"🔔 {final_title}",
-            "url": item.get('url'),
+            "url": item_url,
             "description": description_text,
             "color": 0x09B83E,
-            "footer": {"text": f"Vinted Bot • ID: {item.get('id')}"},
+            "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
             "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
-        
-        if photos:
-            embed1["image"] = {"url": photos[0]}
 
-        embeds = [embed1]
-        for photo_url in photos[1:4]:
-            embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
+        if photo_url:
+            embed1["image"] = {"url": photo_url}
 
-        # EXTRAIT DE DESCRIPTION (COMPLÈTE jusqu'à 1000 caractères)
-        desc_preview = final_desc[:1000] if final_desc else "Pas de description"
-        if len(final_desc) > 1000:
-            desc_preview += "..."
-
-        # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
-        notif_text = f"""@everyone | {clean_title}
-💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}
-📝 {desc_preview}"""
+        # TEXTE DE NOTIFICATION PUSH (Pour montres et écrans verrouillés)
+        # Garanti SANS le lien d'achat pour ne pas polluer l'écran de verrouillage
+        notif_text = f"""@everyone | {final_title}
+💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}"""
 
         payload = {
             "content": notif_text,
             "username": "Vinted ASSE Bot", 
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
-            "embeds": embeds
+            "embeds": [embed1]
         }
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        log(f"✅ Alerte envoyée #{item.get('id')}")
+
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
+        log(f"✅ [Vinted] Alerte envoyée instantanément #{item_id}")
 
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
@@ -880,8 +854,8 @@ def run_bot():
                         # Désactivation watchdog
                         signal.alarm(0)
 
-                        # Pause aléatoire humaine anti-ban (3.5 à 5.5 secondes)
-                        delay = random.uniform(3.5, 5.5)
+                        # Pause aléatoire humaine anti-ban (2.5 à 3.5 secondes)
+                        delay = random.uniform(2.5, 3.5)
                         time.sleep(delay)
 
                     try:
