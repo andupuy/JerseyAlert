@@ -1,8 +1,8 @@
 name: Wake Up Railway Bot
 on:
   schedule:
-    # 07:00 UTC = 08:00 Paris (Hiver) / 09:00 Paris (Été)
-    - cron: '0 7 * * *'
+    # 05:00 UTC = 07:00 Paris (Été) / 06:00 Paris (Hiver)
+    - cron: '0 5 * * *'
   workflow_dispatch: # Permet de le lancer manuellement si besoin
 
 jobs:

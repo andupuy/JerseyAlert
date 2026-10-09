@@ -10,10 +10,16 @@ Vinted Bot optimisé pour Oracle Cloud
 import os
 import sys
 import time
+import json
 import random
 import requests
 import signal
+from urllib.parse import quote_plus
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # Configuration
@@ -153,6 +159,26 @@ def is_asse_jersey_match(title):
     team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
     return bool(re.search(team_pattern, title_low))
 
+def get_api_search_url(query, color_id=None):
+    """Génère l'URL d'API directe Vinted pour une recherche texte"""
+    url = f"https://www.vinted.fr/api/v2/catalog/items?search_text={quote_plus(query)}&order=newest_first&page=1&per_page=48"
+    if color_id:
+        url += f"&color_ids[]={color_id}"
+    return url
+
+def get_paris_time():
+    """Retourne l'heure courante exacte de Paris (été/hiver garanti)"""
+    if ZoneInfo:
+        try:
+            return datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            pass
+    import time
+    os.environ['TZ'] = 'Europe/Paris'
+    if hasattr(time, 'tzset'):
+        time.tzset()
+    return datetime.now()
+
 def get_search_url(query, color_id=None):
     url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
     if color_id:
@@ -160,8 +186,8 @@ def get_search_url(query, color_id=None):
     return url
 
 def log(message):
-    """Log avec timestamp"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Log avec timestamp heure de Paris"""
+    timestamp = get_paris_time().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{timestamp}] {message}", flush=True)
 
 def load_last_seen_id():
@@ -347,13 +373,28 @@ def fetch_direct_catalog_api(page, api_url):
                 const res = await fetch('{api_url}', {{
                     headers: {{ 'Accept': 'application/json, text/plain, */*' }}
                 }});
+                if (res.status === 429) return {{ rate_limited: true, status: 429 }};
+                if (res.status === 401 || res.status === 403) return {{ auth_error: true, status: res.status }};
                 if (res.ok) return await res.json();
                 return null;
             }} catch(e) {{
                 return null;
             }}
         }}""")
-        if not data or 'items' not in data:
+        if not data:
+            return []
+        
+        if isinstance(data, dict):
+            if data.get('rate_limited'):
+                log("⚠️ Vinted Rate Limit (429) détecté ! Pause de sécurité de 90s...")
+                time.sleep(90)
+                return []
+            if data.get('auth_error'):
+                log(f"⚠️ Erreur statut Vinted ({data.get('status')}). Pause courte...")
+                time.sleep(5)
+                return []
+
+        if 'items' not in data:
             return []
         
         items = []
@@ -680,42 +721,68 @@ def watchdog_handler(signum, frame):
     print(f"[{timestamp}] 🚨 WATCHDOG: Bot figé depuis trop longtemps ! Redémarrage forcé...", flush=True)
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
-def run_bot():
-    """Boucle principale du bot V10.5 SNIPER"""
-    log("🚀 Démarrage du bot V10.5 SNIPER")
+def process_incoming_items(items, seen_ids, last_seen_id, is_initial_cycle, context, source_label="Flux"):
+    """Traite une liste d'articles récupérés (filtrage et alertes Discord)"""
+    new_found = []
+    for item in items:
+        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
+            new_found.append(item)
+            seen_ids.add(item['id'])
     
-    log(f"⚡ Mode Sniper : Réactivité maximale + International toutes les 20 min")
+    if not new_found:
+        return last_seen_id
     
-    # Initialisation
-    seen_ids = set()
-    last_secondary_check = 0
-    last_green_check = 0
+    if is_initial_cycle:
+        new_max = max(last_seen_id, max(x['id'] for x in new_found))
+        return new_max
     
-    log("🚀 Phase d'initialisation rapide...")
-    # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
-    is_initial_cycle = True
-    last_seen_id = load_last_seen_id() # Load last_seen_id here
+    log(f"🆕 {len(new_found)} nouvel/nouveaux article(s) détecté(s) ({source_label}) !")
+    new_found.sort(key=lambda x: x['id'])
+    
+    for item in new_found:
+        if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
+            is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
+            if is_excl:
+                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
+                continue
+        if is_asse_jersey_match(item.get('title')):
+            log(f"🎯 MATCH {source_label} : '{item.get('title')}' ({item.get('price')})")
+            send_discord_alert(context, item)
+    
+    new_max = max(last_seen_id, max(x['id'] for x in new_found))
+    save_last_seen_id(new_max)
+    return new_max
 
+def run_bot():
+    """Boucle principale du bot V12.0 SNIPER HYPER-RÉACTIF"""
+    log("🚀 Démarrage du bot V12.0 SNIPER HYPER-RÉACTIF")
+    log("⚡ Mode Sniper : Flux Direct Football (4-6s) + Scan Prioritaire API (25s) + Timezone Paris Fiable")
+    
+    seen_ids = set()
+    last_seen_id = load_last_seen_id()
+    is_initial_cycle = True
+    
+    last_priority_check = 0
+    last_green_check = 0
+    last_secondary_check = 0
+    priority_query_index = 0
+    
+    DIRECT_CATALOG_URL = "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&order=newest_first&page=1&per_page=96"
+    DIRECT_GREENS_URL = "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&color_ids=16&color_ids=10&color_ids=28&order=newest_first&page=1&per_page=96"
+    
     try:
         while True:
-            # 1. Gestion des heures (Europe/Paris - Automatique Été/Hiver)
-            import time
-            os.environ['TZ'] = 'Europe/Paris'
-            if hasattr(time, 'tzset'):
-                time.tzset()
-            current_hour = time.localtime().tm_hour
+            # 1. Gestion des heures (Europe/Paris garanti)
+            paris_now = get_paris_time()
+            current_hour = paris_now.hour
 
-            if current_hour >= 1 and current_hour < 7:
-                log(f"🌙 Mode Veille Silencieuse activé ({current_hour}h).")
-                time.sleep(600)
+            if 1 <= current_hour < 7:
+                log(f"🌙 Mode Veille Silencieuse activé ({paris_now.strftime('%H:%M:%S')} heure de Paris). Reprise automatique à 07:00.")
+                time.sleep(60)
                 continue
 
-            # 2. DÉMARRAGE MOTEUR (Watchdog activé)
+            # 2. Démarrage session Playwright persistante
             try:
-                # On arme le Watchdog pour 3 minutes (180s)
-                signal.signal(signal.SIGALRM, watchdog_handler)
-                signal.alarm(180) 
-
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
                         headless=True,
@@ -728,156 +795,121 @@ def run_bot():
                         timezone_id='Europe/Paris'
                     )
 
-                    # OPTIMISATION (ÉCONOMIE D'ÉNERGIE) : Bloquer images/CSS/Polices
+                    # Bloquer les ressources lourdes (images/CSS/polices) pour RAM minimale
                     def block_aggressively(route):
                         if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
                             route.abort()
                         else:
                             route.continue_()
-                    
                     context.route("**/*", block_aggressively)
 
-                    # 0. SCAN FLUX DIRECT (Page d'accueil / Catégorie Football & Verts)
-                    log("⚡ Scan Flux Direct (Catalogue Football / Nuances de Vert)...")
-                    direct_endpoints = [
-                        ("Maillots Foot Verts", "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&color_ids=16&color_ids=10&color_ids=28&order=newest_first&page=1&per_page=96"),
-                        ("Tous Maillots Foot", "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&order=newest_first&page=1&per_page=96")
-                    ]
-                    try:
-                        direct_page = context.new_page()
-                        direct_page.set_default_timeout(20000)
-                        direct_page.goto("https://www.vinted.fr/", wait_until='commit', timeout=15000)
-                        
-                        for label, endpoint_url in direct_endpoints:
-                            try:
-                                log(f"🔎 Direct API: '{label}'")
-                                direct_items = fetch_direct_catalog_api(direct_page, endpoint_url)
-                                if direct_items:
-                                    new_direct = []
-                                    for item in direct_items:
-                                        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-                                            new_direct.append(item)
-                                            seen_ids.add(item['id'])
-                                    
-                                    if is_initial_cycle:
-                                        if new_direct:
-                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_direct))
-                                    elif new_direct:
-                                        log(f"🆕 {len(new_direct)} nouveaux articles vus dans le flux '{label}' !")
-                                        new_direct.sort(key=lambda x: x['id'])
-                                        for item in new_direct:
-                                            if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
-                                                is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
-                                                if is_excl:
-                                                    log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
-                                                    continue
-                                            if is_asse_jersey_match(item.get('title')):
-                                                log(f"🎯 MATCH FLUX DIRECT : '{item.get('title')}'")
-                                                send_discord_alert(context, item)
-                                        
-                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_direct))
-                                        save_last_seen_id(last_seen_id)
-                            except Exception as e:
-                                log(f"⚠️ Erreur locale sur flux '{label}': {e}")
-                            time.sleep(random.uniform(1, 2))
-                    except Exception as e:
-                        log(f"⚠️ Erreur ouverture page flux direct: {e}")
-                    finally:
-                        try: direct_page.close()
-                        except: pass
+                    api_page = context.new_page()
+                    api_page.set_default_timeout(20000)
+                    log("🌐 Initialisation session Vinted...")
+                    api_page.goto("https://www.vinted.fr/", wait_until='commit', timeout=20000)
+                    time.sleep(2)
 
-                    # Détermination des recherches
-                    current_cycle_queries = [] # On va remplir dynamiquement
-                    now = time.time()
-                    
-                    # 1. Requêtes Prioritaires (Toujours)
-                    queries_to_run = [(q, None) for q in PRIORITY_QUERIES]
-                    
-                    # 2. Triple Scan Vert (Toutes les 5 min) sur les 3 prioritaires
-                    if (now - last_green_check) > 300:
-                        log("☘️ Mode Triple Scan Vert (Priority + Filter 10)")
-                        for q in PRIORITY_QUERIES:
-                            queries_to_run.append((q, 10))
-                        last_green_check = now
-                        
-                    # 3. Requêtes Secondaires (Toutes les 20 min)
-                    if (now - last_secondary_check) > 1200:
-                        log("🌍 Mode Cycle Complet (International)")
-                        for q in SECONDARY_QUERIES:
-                            queries_to_run.append((q, None))
-                        last_secondary_check = now
+                    session_start_time = time.time()
+                    cycle_count = 0
 
-                    log(f"\n" + "🚀" + "="*50)
-                    log(f"⚡ Scan V9.3 : {len(queries_to_run)} requêtes")
+                    while True:
+                        now = time.time()
+                        cycle_count += 1
 
-                    for query_data in queries_to_run:
-                        query, color = query_data
+                        # Watchdog 3 minutes
+                        signal.signal(signal.SIGALRM, watchdog_handler)
+                        signal.alarm(180)
+
+                        # Vérification de l'heure de Paris
+                        paris_now = get_paris_time()
+                        if 1 <= paris_now.hour < 7:
+                            log(f"🌙 Passage en Veille Silencieuse ({paris_now.strftime('%H:%M:%S')} heure de Paris).")
+                            signal.alarm(0)
+                            break
+
+                        # Recyclage préventif mémoire (toutes les 2h ou 1200 cycles)
+                        if (now - session_start_time) > 7200 or cycle_count > 1200:
+                            log("♻️ Recyclage mémoire de la session Playwright...")
+                            signal.alarm(0)
+                            break
+
+                        # A. SCAN ULTRA-RAPIDE FLUX DIRECT FOOTBALL (Toutes les 4 à 6s)
                         try:
-                            # 1. Ouverture page NEUVE
-                            page = context.new_page()
-                            page.set_default_timeout(20000)
-                            
-                            # 2. Blocage ressources (RAM optimisée)
-                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
-                            
-                            # 3. Navigation Ultra-Rapide (Commit mode)
-                            log(f"🔎 Check: '{query}'{' [VERTE]' if color else ''}")
-                            try:
-                                page.goto(get_search_url(query, color), wait_until='commit', timeout=20000)
-                                # On attend explicitement un élément pour confirmer le chargement
-                                page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-                                
-                                items = extract_items_from_page(page)
-                                
-                                if items:
-                                    new_found = []
-                                    for item in items:
-                                        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-                                            new_found.append(item)
-                                            seen_ids.add(item['id'])
-                                    
-                                    if is_initial_cycle:
-                                        if new_found:
-                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                    elif new_found:
-                                        log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
-                                        new_found.sort(key=lambda x: x['id'])
-                                        for item in new_found:
-                                            if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
-                                                is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
-                                                if is_excl:
-                                                    log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
-                                                    continue
-                                            if is_asse_jersey_match(item.get('title')):
-                                                log(f"🎯 MATCH : '{item.get('title')}'")
-                                                send_discord_alert(context, item)
-                                        
-                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                        save_last_seen_id(last_seen_id)
-                            finally:
-                                page.close()
-
-                            time.sleep(random.uniform(1, 2))
+                            direct_items = fetch_direct_catalog_api(api_page, DIRECT_CATALOG_URL)
+                            if direct_items:
+                                last_seen_id = process_incoming_items(
+                                    direct_items, seen_ids, last_seen_id, is_initial_cycle, context, "Flux Direct Foot"
+                                )
                         except Exception as e:
-                            log(f"⚠️ Erreur locale sur '{query}': {e}")
-                    
-                    browser.close()
-                
-                # Désactivation du Watchdog après succès du cycle
-                signal.alarm(0)
+                            log(f"⚠️ Erreur scan direct foot: {e}")
+
+                        # B. SCAN DES NUANCES DE VERT (Toutes les 2 minutes)
+                        if (now - last_green_check) > 120:
+                            try:
+                                green_items = fetch_direct_catalog_api(api_page, DIRECT_GREENS_URL)
+                                if green_items:
+                                    last_seen_id = process_incoming_items(
+                                        green_items, seen_ids, last_seen_id, is_initial_cycle, context, "Flux Verts"
+                                    )
+                                last_green_check = now
+                            except Exception as e:
+                                log(f"⚠️ Erreur scan direct vert: {e}")
+
+                        # C. SCAN RECHERCHES TEXTE PRIORITAIRES VIA API (Toutes les 20-25s en alternance)
+                        if (now - last_priority_check) > 25:
+                            query = PRIORITY_QUERIES[priority_query_index % len(PRIORITY_QUERIES)]
+                            priority_query_index += 1
+                            try:
+                                q_url = get_api_search_url(query)
+                                q_items = fetch_direct_catalog_api(api_page, q_url)
+                                if q_items:
+                                    last_seen_id = process_incoming_items(
+                                        q_items, seen_ids, last_seen_id, is_initial_cycle, context, f"Recherche '{query}'"
+                                    )
+                                last_priority_check = now
+                            except Exception as e:
+                                log(f"⚠️ Erreur scan recherche '{query}': {e}")
+
+                        # D. SCAN INTERNATIONAL (Toutes les 15 minutes)
+                        if (now - last_secondary_check) > 900:
+                            log("🌍 Scan International...")
+                            for sec_query in SECONDARY_QUERIES:
+                                try:
+                                    sec_url = get_api_search_url(sec_query)
+                                    sec_items = fetch_direct_catalog_api(api_page, sec_url)
+                                    if sec_items:
+                                        last_seen_id = process_incoming_items(
+                                            sec_items, seen_ids, last_seen_id, is_initial_cycle, context, f"Inter '{sec_query}'"
+                                        )
+                                    time.sleep(random.uniform(1.0, 2.0))
+                                except Exception as e:
+                                    log(f"⚠️ Erreur inter '{sec_query}': {e}")
+                            last_secondary_check = now
+
+                        # Premier cycle terminé
+                        is_initial_cycle = False
+
+                        # Nettoyage cache IDs
+                        if len(seen_ids) > 2500:
+                            seen_ids_list = sorted(list(seen_ids), reverse=True)
+                            seen_ids = set(seen_ids_list[:1800])
+
+                        # Désactivation watchdog
+                        signal.alarm(0)
+
+                        # Pause aléatoire humaine anti-ban (4.0 à 6.0 secondes)
+                        delay = random.uniform(4.0, 6.0)
+                        time.sleep(delay)
+
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+
             except Exception as e:
-                log(f"🚨 Bug moteur Playwright : {e}. Redémarrage au prochain cycle.")
+                log(f"🚨 Incident moteur Playwright : {e}. Redémarrage dans 10s...")
                 signal.alarm(0)
-
-            # 3. Entretien du Cache
-            is_initial_cycle = False
-            if len(seen_ids) > 2000:
-                seen_ids_list = sorted(list(seen_ids), reverse=True)
-                seen_ids = set(seen_ids_list[:1500])
-
-            # 4. Sommeil
-            log(f"⏳ Cycle {datetime.now().strftime('%H:%M:%S')} terminé. Repos 10s...")
-            time.sleep(10)
+                time.sleep(10)
 
     except KeyboardInterrupt:
         log("\n⛔ Arrêt du bot demandé")
