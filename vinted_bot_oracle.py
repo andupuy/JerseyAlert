@@ -441,7 +441,7 @@ def extract_items_from_page(page):
     """Extrait les articles avec Parsing Intelligent du Titre (V5.0)"""
     try:
         page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-        time.sleep(random.uniform(1, 2))
+        time.sleep(0.4)
         
         items = page.evaluate("""
             () => {
@@ -754,21 +754,19 @@ def process_incoming_items(items, seen_ids, last_seen_id, is_initial_cycle, cont
     return new_max
 
 def run_bot():
-    """Boucle principale du bot V12.0 SNIPER HYPER-RÉACTIF"""
-    log("🚀 Démarrage du bot V12.0 SNIPER HYPER-RÉACTIF")
-    log("⚡ Mode Sniper : Flux Direct Football (4-6s) + Scan Prioritaire API (25s) + Timezone Paris Fiable")
+    """Boucle principale du bot V12.0 SNIPER VINTED EXCLUSIF"""
+    log("🚀 [Vinted] Démarrage du bot V12.0 SNIPER (100% Vinted, 0% LeBonCoin)")
+    log("⚡ [Vinted] Cadence : Scan ultra-rapide (~4s) + Session persistante + Fuseau Paris garanti")
     
     seen_ids = set()
     last_seen_id = load_last_seen_id()
     is_initial_cycle = True
     
-    last_priority_check = 0
     last_green_check = 0
     last_secondary_check = 0
     priority_query_index = 0
     
-    DIRECT_CATALOG_URL = "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&order=newest_first&page=1&per_page=96"
-    DIRECT_GREENS_URL = "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&color_ids=16&color_ids=10&color_ids=28&order=newest_first&page=1&per_page=96"
+    FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&order=newest_first"
     
     try:
         while True:
@@ -777,7 +775,7 @@ def run_bot():
             current_hour = paris_now.hour
 
             if 1 <= current_hour < 7:
-                log(f"🌙 Mode Veille Silencieuse activé ({paris_now.strftime('%H:%M:%S')} heure de Paris). Reprise automatique à 07:00.")
+                log(f"🌙 [Vinted] Mode Veille Silencieuse activé ({paris_now.strftime('%H:%M:%S')} heure de Paris). Reprise automatique à 07:00.")
                 time.sleep(60)
                 continue
 
@@ -795,7 +793,7 @@ def run_bot():
                         timezone_id='Europe/Paris'
                     )
 
-                    # Bloquer les ressources lourdes (images/CSS/polices) pour RAM minimale
+                    # Bloquer les ressources lourdes (images/CSS/polices) pour RAM et CPU minimaux
                     def block_aggressively(route):
                         if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
                             route.abort()
@@ -803,11 +801,8 @@ def run_bot():
                             route.continue_()
                     context.route("**/*", block_aggressively)
 
-                    api_page = context.new_page()
-                    api_page.set_default_timeout(20000)
-                    log("🌐 Initialisation session Vinted...")
-                    api_page.goto("https://www.vinted.fr/", wait_until='commit', timeout=20000)
-                    time.sleep(2)
+                    page = context.new_page()
+                    page.set_default_timeout(20000)
 
                     session_start_time = time.time()
                     cycle_count = 0
@@ -823,68 +818,56 @@ def run_bot():
                         # Vérification de l'heure de Paris
                         paris_now = get_paris_time()
                         if 1 <= paris_now.hour < 7:
-                            log(f"🌙 Passage en Veille Silencieuse ({paris_now.strftime('%H:%M:%S')} heure de Paris).")
+                            log(f"🌙 [Vinted] Passage en Veille Silencieuse ({paris_now.strftime('%H:%M:%S')} heure de Paris).")
                             signal.alarm(0)
                             break
 
-                        # Recyclage préventif mémoire (toutes les 2h ou 1200 cycles)
+                        # Recyclage préventif mémoire (toutes les 2h ou 1200 scans)
                         if (now - session_start_time) > 7200 or cycle_count > 1200:
-                            log("♻️ Recyclage mémoire de la session Playwright...")
+                            log("♻️ [Vinted] Recyclage de maintenance de la session Playwright...")
                             signal.alarm(0)
                             break
 
-                        # A. SCAN ULTRA-RAPIDE FLUX DIRECT FOOTBALL (Toutes les 4 à 6s)
-                        try:
-                            direct_items = fetch_direct_catalog_api(api_page, DIRECT_CATALOG_URL)
-                            if direct_items:
-                                last_seen_id = process_incoming_items(
-                                    direct_items, seen_ids, last_seen_id, is_initial_cycle, context, "Flux Direct Foot"
-                                )
-                        except Exception as e:
-                            log(f"⚠️ Erreur scan direct foot: {e}")
+                        # Choix de la cible pour cette itération :
+                        # Alternance : 1 tour sur 2 = Flux Football Direct, 1 tour sur 2 = Recherche Prioritaire texte
+                        scan_label = ""
+                        target_url = ""
 
-                        # B. SCAN DES NUANCES DE VERT (Toutes les 2 minutes)
-                        if (now - last_green_check) > 120:
-                            try:
-                                green_items = fetch_direct_catalog_api(api_page, DIRECT_GREENS_URL)
-                                if green_items:
-                                    last_seen_id = process_incoming_items(
-                                        green_items, seen_ids, last_seen_id, is_initial_cycle, context, "Flux Verts"
-                                    )
-                                last_green_check = now
-                            except Exception as e:
-                                log(f"⚠️ Erreur scan direct vert: {e}")
+                        # A. Scan Vert (Toutes les 5 minutes)
+                        if (now - last_green_check) > 300:
+                            scan_label = "Maillot Asse [VERT]"
+                            target_url = get_search_url("Maillot Asse", color_id=10)
+                            last_green_check = now
 
-                        # C. SCAN RECHERCHES TEXTE PRIORITAIRES VIA API (Toutes les 20-25s en alternance)
-                        if (now - last_priority_check) > 25:
+                        # B. Scan International (Toutes les 20 minutes)
+                        elif (now - last_secondary_check) > 1200:
+                            sec_q = SECONDARY_QUERIES[cycle_count % len(SECONDARY_QUERIES)]
+                            scan_label = f"Inter '{sec_q}'"
+                            target_url = get_search_url(sec_q)
+                            if (cycle_count % len(SECONDARY_QUERIES)) == 0:
+                                last_secondary_check = now
+
+                        # C. Alternance normale (Flux Direct Foot vs Recherche Prioritaire)
+                        elif cycle_count % 2 == 1:
+                            scan_label = "Flux Direct Football"
+                            target_url = FOOTBALL_CATALOG_URL
+                        else:
                             query = PRIORITY_QUERIES[priority_query_index % len(PRIORITY_QUERIES)]
                             priority_query_index += 1
-                            try:
-                                q_url = get_api_search_url(query)
-                                q_items = fetch_direct_catalog_api(api_page, q_url)
-                                if q_items:
-                                    last_seen_id = process_incoming_items(
-                                        q_items, seen_ids, last_seen_id, is_initial_cycle, context, f"Recherche '{query}'"
-                                    )
-                                last_priority_check = now
-                            except Exception as e:
-                                log(f"⚠️ Erreur scan recherche '{query}': {e}")
+                            scan_label = f"Recherche '{query}'"
+                            target_url = get_search_url(query)
 
-                        # D. SCAN INTERNATIONAL (Toutes les 15 minutes)
-                        if (now - last_secondary_check) > 900:
-                            log("🌍 Scan International...")
-                            for sec_query in SECONDARY_QUERIES:
-                                try:
-                                    sec_url = get_api_search_url(sec_query)
-                                    sec_items = fetch_direct_catalog_api(api_page, sec_url)
-                                    if sec_items:
-                                        last_seen_id = process_incoming_items(
-                                            sec_items, seen_ids, last_seen_id, is_initial_cycle, context, f"Inter '{sec_query}'"
-                                        )
-                                    time.sleep(random.uniform(1.0, 2.0))
-                                except Exception as e:
-                                    log(f"⚠️ Erreur inter '{sec_query}': {e}")
-                            last_secondary_check = now
+                        # Exécution du scan
+                        try:
+                            page.goto(target_url, wait_until='domcontentloaded', timeout=20000)
+                            items = extract_items_from_page(page)
+                            log(f"🔎 [Vinted] Scan {scan_label} : {len(items)} annonces analysées")
+                            if items:
+                                last_seen_id = process_incoming_items(
+                                    items, seen_ids, last_seen_id, is_initial_cycle, context, scan_label
+                                )
+                        except Exception as e:
+                            log(f"⚠️ [Vinted] Erreur locale sur {scan_label}: {e}")
 
                         # Premier cycle terminé
                         is_initial_cycle = False
@@ -897,8 +880,8 @@ def run_bot():
                         # Désactivation watchdog
                         signal.alarm(0)
 
-                        # Pause aléatoire humaine anti-ban (4.0 à 6.0 secondes)
-                        delay = random.uniform(4.0, 6.0)
+                        # Pause aléatoire humaine anti-ban (3.5 à 5.5 secondes)
+                        delay = random.uniform(3.5, 5.5)
                         time.sleep(delay)
 
                     try:
@@ -907,28 +890,14 @@ def run_bot():
                         pass
 
             except Exception as e:
-                log(f"🚨 Incident moteur Playwright : {e}. Redémarrage dans 10s...")
+                log(f"🚨 [Vinted] Incident moteur Playwright : {e}. Redémarrage dans 10s...")
                 signal.alarm(0)
                 time.sleep(10)
 
     except KeyboardInterrupt:
-        log("\n⛔ Arrêt du bot demandé")
+        log("\n⛔ [Vinted] Arrêt du bot demandé")
     finally:
-        log("👋 Bot éteint proprement")
+        log("👋 [Vinted] Bot éteint proprement")
 
 if __name__ == "__main__":
-    import subprocess
-    try:
-        log("🚀 Lancement du sous-processus LeBonCoin Bot indépendant...")
-        subprocess.Popen([sys.executable, "leboncoin_bot.py"], env=os.environ.copy())
-    except Exception as e:
-        log(f"⚠️ Erreur démarrage sous-processus LeBonCoin: {e}")
-        try:
-            import threading, leboncoin_bot
-            log("🚀 Lancement du thread LeBonCoin Bot en secours...")
-            lbc_thread = threading.Thread(target=leboncoin_bot.run_bot, name="LeBonCoinThread", daemon=True)
-            lbc_thread.start()
-        except Exception as e2:
-            log(f"⚠️ Erreur démarrage thread LeBonCoin: {e2}")
-
     run_bot()

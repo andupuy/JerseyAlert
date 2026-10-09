@@ -12,7 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY vinted_bot_oracle.py .
 COPY vinted_bot_oracle.py main.py
 COPY vinted_bot_oracle.py vinted_bot.py
-COPY leboncoin_bot.py .
 
 # Commande de démarrage
 CMD ["python3", "main.py"]
