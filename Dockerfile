@@ -4,11 +4,17 @@ WORKDIR /app
 
 # Copie des fichiers
 COPY requirements.txt .
-COPY vinted_bot_oracle.py main.py
 
 # Installation des dépendances Python supplémentaires
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copie des scripts du bot (alias multiples pour garantir la compatibilité avec Railway)
+COPY vinted_bot_oracle.py .
+COPY vinted_bot_oracle.py main.py
+COPY vinted_bot_oracle.py vinted_bot.py
+COPY leboncoin_bot.py .
+
 # Commande de démarrage
 CMD ["python3", "main.py"]
-# Force Update Sun Sep 27 00:48:00 CEST 2026 (ADD ADULT-ONLY SIZE FILTER: NO KIDS, NO S/XS) 🛡️🚀
+# Fix start command resilience (vinted_bot.py / main.py) 🛡️🚀
+
