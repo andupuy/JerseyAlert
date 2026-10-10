@@ -624,86 +624,8 @@ def extract_items_from_page(page):
         log(f"❌ Erreur extraction liste: {e}")
         return []
 
-def enrich_discord_alert_background(item_id, item_url, message_id, final_title, final_price, final_size, final_brand, final_status, initial_photo):
-    """En tâche de fond indépendante : récupère photos 2, 3, 4 et description sans ralentir la détection"""
-    if not message_id or not DISCORD_WEBHOOK_URL:
-        return
-    try:
-        import re
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'fr-FR,fr;q=0.9',
-        }
-        resp = requests.get(item_url, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            return
-
-        resp.encoding = 'utf-8'
-        html = resp.text
-
-        # Récupération de toutes les photos haute résolution (/f800/)
-        raw_photos = re.findall(r'https://images1\.vinted\.net/[^\"\'\s]+\/f800\/[^\"\'\s]+', html)
-        photos = []
-        for p in raw_photos:
-            p_clean = p.split('"')[0].split("'")[0].split('\\')[0]
-            if p_clean not in photos:
-                photos.append(p_clean)
-
-        if not photos and initial_photo:
-            photos = [initial_photo]
-
-        # Récupération propre de la description (préservation des accents et emojis)
-        desc_raw = ""
-        m_json = re.search(r'\"description\":\"(.*?)\"', html)
-        if m_json:
-            raw_val = m_json.group(1)
-            def unescape_u(m):
-                try:
-                    return chr(int(m.group(1), 16))
-                except Exception:
-                    return m.group(0)
-            desc_raw = re.sub(r'\\u([0-9a-fA-F]{4})', unescape_u, raw_val)
-            desc_raw = desc_raw.replace('\\n', '\n').replace('\\r', '').replace('\\"', '"').replace('\\/', '/').replace('\\\\', '\\')
-        if not desc_raw:
-            m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
-            if m_dom:
-                desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
-
-        desc_clean = clean_text(desc_raw)
-        if len(desc_clean) > 350:
-            desc_clean = desc_clean[:350] + "..."
-
-        description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
-        if desc_clean:
-            description_text += f"\n\n{desc_clean}"
-
-        embed1 = {
-            "title": f"🔔 {final_title}",
-            "url": item_url,
-            "description": description_text,
-            "color": 0x09B83E,
-            "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
-            "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-        }
-        if photos:
-            embed1["image"] = {"url": photos[0]}
-
-        embeds = [embed1]
-        for photo_url in photos[1:10]:
-            embeds.append({"url": item_url, "image": {"url": photo_url}})
-
-        # Mise à jour (PATCH) du message Discord pour ajouter les photos et la description
-        patch_url = f"{DISCORD_WEBHOOK_URL}/messages/{message_id}"
-        patch_resp = requests.patch(patch_url, json={"embeds": embeds}, timeout=8)
-        if patch_resp.status_code in [200, 204]:
-            log(f"📸 [Vinted] Alerte #{item_id} enrichie avec {len(photos)} photo(s)")
-        else:
-            log(f"⚠️ [Vinted] Échec PATCH Discord #{item_id} (Status {patch_resp.status_code})")
-    except Exception as e:
-        log(f"⚠️ [Vinted] Erreur enrichissement arrière-plan #{item_id}: {e}")
-
 def send_discord_alert(context, item):
-    """Envoie une alerte Discord instantanée (<0.2s) puis lance l'enrichissement photos en tâche de fond"""
+    """Envoie une alerte Discord ultra-rapide (~0.3s) avec description Garmin et jusqu'à 10 photos HD dès le 1er envoi"""
     if not DISCORD_WEBHOOK_URL: return
 
     try:
@@ -750,8 +672,54 @@ def send_discord_alert(context, item):
                 log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
                 return
 
-        # Description initiale propre
+        # Micro-fetch ultra-rapide HTTP (200-300ms) pour récupérer la description et les photos HD
+        photos = [photo_url] if photo_url else []
+        desc_clean = ""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'fr-FR,fr;q=0.9',
+            }
+            resp = requests.get(item_url, headers=headers, timeout=4)
+            if resp.status_code == 200:
+                resp.encoding = 'utf-8'
+                html = resp.text
+
+                # Récupération de toutes les photos HD (/f800/)
+                raw_photos = re.findall(r'https://images1\.vinted\.net/[^\"\'\s]+\/f800\/[^\"\'\s]+', html)
+                scraped_photos = []
+                for p in raw_photos:
+                    p_clean = p.split('"')[0].split("'")[0].split('\\')[0]
+                    if p_clean not in scraped_photos:
+                        scraped_photos.append(p_clean)
+                if scraped_photos:
+                    photos = scraped_photos
+
+                # Récupération propre de la description (préservation des accents et emojis)
+                desc_raw = ""
+                m_json = re.search(r'\"description\":\"(.*?)\"', html)
+                if m_json:
+                    raw_val = m_json.group(1)
+                    def unescape_u(m):
+                        try:
+                            return chr(int(m.group(1), 16))
+                        except Exception:
+                            return m.group(0)
+                    desc_raw = re.sub(r'\\u([0-9a-fA-F]{4})', unescape_u, raw_val)
+                    desc_raw = desc_raw.replace('\\n', '\n').replace('\\r', '').replace('\\"', '"').replace('\\/', '/').replace('\\\\', '\\')
+                if not desc_raw:
+                    m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
+                    if m_dom:
+                        desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
+                desc_clean = clean_text(desc_raw)
+        except Exception as e:
+            log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
+
+        # Description formatée pour Discord embed
         description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
+        if desc_clean:
+            embed_desc_body = desc_clean[:400] + ("..." if len(desc_clean) > 400 else "")
+            description_text += f"\n\n{embed_desc_body}"
 
         embed1 = {
             "title": f"🔔 {final_title}",
@@ -762,41 +730,35 @@ def send_discord_alert(context, item):
             "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
 
-        if photo_url:
-            embed1["image"] = {"url": photo_url}
+        if photos:
+            embed1["image"] = {"url": photos[0]}
 
-        # TEXTE DE NOTIFICATION PUSH (Pour montres et écrans verrouillés)
-        # 100% propre, sans liens d'achat parasites
+        embeds = [embed1]
+        for photo_url_item in photos[1:10]:
+            embeds.append({"url": item_url, "image": {"url": photo_url_item}})
+
+        # TEXTE DE NOTIFICATION PUSH POUR MONTRE GARMIN / ÉCRAN VERROUILLÉ
+        # Contient titre, prix, taille, marque ET l'extrait de description
+        desc_preview = ""
+        if desc_clean:
+            desc_preview = desc_clean[:250].strip()
+            if len(desc_clean) > 250:
+                desc_preview += "..."
+
         notif_text = f"""@everyone | {final_title}
 💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}"""
+        if desc_preview:
+            notif_text += f"\n📝 {desc_preview}"
 
         payload = {
             "content": notif_text,
             "username": "Vinted ASSE Bot", 
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
-            "embeds": [embed1]
+            "embeds": embeds
         }
 
-        # Envoi immédiat avec wait=true pour récupérer le message_id
-        post_url = f"{DISCORD_WEBHOOK_URL}?wait=true"
-        resp = requests.post(post_url, json=payload, timeout=8)
-        message_id = None
-        if resp.status_code in [200, 201]:
-            try:
-                message_id = resp.json().get('id')
-            except Exception:
-                pass
-            log(f"⚡ [Vinted] Alerte instantanée envoyée #{item_id}")
-        else:
-            log(f"✅ [Vinted] Alerte envoyée #{item_id} (Status {resp.status_code})")
-
-        # Lancement de l'enrichissement photos et description en tâche de fond (thread non-bloquant)
-        if message_id:
-            threading.Thread(
-                target=enrich_discord_alert_background,
-                args=(item_id, item_url, message_id, final_title, final_price, final_size, final_brand, final_status, photo_url),
-                daemon=True
-            ).start()
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
+        log(f"✅ [Vinted] Alerte envoyée #{item_id} ({len(photos)} photos, description Garmin incluse)")
 
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
