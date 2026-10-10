@@ -663,7 +663,7 @@ def enrich_discord_alert_background(item_id, item_url, message_id, final_title, 
             embed1["image"] = {"url": photos[0]}
 
         embeds = [embed1]
-        for photo_url in photos[1:4]:
+        for photo_url in photos[1:10]:
             embeds.append({"url": item_url, "image": {"url": photo_url}})
 
         # Mise à jour (PATCH) du message Discord pour ajouter les photos et la description
@@ -781,203 +781,269 @@ def watchdog_handler(signum, frame):
     print(f"[{timestamp}] 🚨 WATCHDOG: Bot figé depuis trop longtemps ! Redémarrage forcé...", flush=True)
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
-def process_incoming_items(items, seen_ids, last_seen_id, is_initial_cycle, context, source_label="Flux"):
-    """Traite une liste d'articles récupérés (filtrage et alertes Discord)"""
-    new_found = []
-    for item in items:
-        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-            new_found.append(item)
-            seen_ids.add(item['id'])
-    
-    if not new_found:
-        return last_seen_id
-    
-    if is_initial_cycle:
-        new_max = max(last_seen_id, max(x['id'] for x in new_found))
-        return new_max
-    
-    log(f"🆕 {len(new_found)} nouvel/nouveaux article(s) détecté(s) ({source_label}) !")
-    new_found.sort(key=lambda x: x['id'])
-    
-    for item in new_found:
-        if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
-            is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
-            if is_excl:
-                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
-                continue
-        if is_asse_jersey_match(item.get('title')):
-            log(f"🎯 MATCH {source_label} : '{item.get('title')}' ({item.get('price')})")
-            send_discord_alert(context, item)
-    
-    new_max = max(last_seen_id, max(x['id'] for x in new_found))
-    save_last_seen_id(new_max)
-    return new_max
+state_lock = threading.Lock()
+shared_seen_ids = set()
+shared_last_seen_id = load_last_seen_id()
+shared_initial_cycle = True
 
-def run_bot():
-    """Boucle principale du bot V12.0 SNIPER VINTED EXCLUSIF"""
-    log("🚀 [Vinted] Démarrage du bot V12.0 SNIPER (100% Vinted, 0% LeBonCoin)")
-    log("⚡ [Vinted] Cadence : Scan ultra-rapide (~4s) + Session persistante + Fuseau Paris garanti")
-    
-    seen_ids = set()
-    last_seen_id = load_last_seen_id()
-    is_initial_cycle = True
-    
-    last_green_check = 0
-    last_secondary_check = 0
-    priority_query_index = 0
-    
+def process_incoming_items_safe(items, source_label="Flux"):
+    """Traite une liste d'articles récupérés de manière thread-safe (filtrage et alertes Discord)"""
+    global shared_seen_ids, shared_last_seen_id, shared_initial_cycle
+    with state_lock:
+        new_found = []
+        for item in items:
+            if item['id'] not in shared_seen_ids and item['id'] > (shared_last_seen_id - 100000):
+                new_found.append(item)
+                shared_seen_ids.add(item['id'])
+        
+        if not new_found:
+            return
+        
+        if shared_initial_cycle:
+            shared_last_seen_id = max(shared_last_seen_id, max(x['id'] for x in new_found))
+            return
+        
+        log(f"🆕 [Vinted] {len(new_found)} nouvel/nouveaux article(s) détecté(s) ({source_label}) !")
+        new_found.sort(key=lambda x: x['id'])
+        
+        for item in new_found:
+            if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
+                is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
+                if is_excl:
+                    log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
+                    continue
+            if is_asse_jersey_match(item.get('title')):
+                log(f"🎯 MATCH {source_label} : '{item.get('title')}' ({item.get('price')})")
+                send_discord_alert(None, item)
+        
+        shared_last_seen_id = max(shared_last_seen_id, max(x['id'] for x in new_found))
+        save_last_seen_id(shared_last_seen_id)
+        
+        # Nettoyage cache IDs
+        if len(shared_seen_ids) > 3000:
+            seen_ids_list = sorted(list(shared_seen_ids), reverse=True)
+            shared_seen_ids = set(seen_ids_list[:2000])
+
+def worker_football_stream():
+    """Worker 1 dédié en permanence au Flux Football Direct (temps réel absolu)"""
     FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&order=newest_first"
-    
-    try:
-        while True:
-            # 1. Gestion des heures (Europe/Paris garanti)
-            paris_now = get_paris_time()
-            current_hour = paris_now.hour
+    log("⚽ [Vinted-Foot] Lancement du thread Flux Football Direct")
 
-            if 1 <= current_hour < 7:
-                log(f"🌙 [Vinted] Mode Veille Silencieuse activé ({paris_now.strftime('%H:%M:%S')} heure de Paris). Reprise automatique à 07:00.")
-                time.sleep(60)
-                continue
+    while True:
+        paris_now = get_paris_time()
+        if 1 <= paris_now.hour < 7:
+            log(f"🌙 [Vinted-Foot] Veille de nuit ({paris_now.strftime('%H:%M:%S')}).")
+            time.sleep(60)
+            continue
 
-            # 2. Démarrage session Playwright persistante
-            try:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(
-                        headless=True,
-                        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-                    )
-                    context = browser.new_context(
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        viewport={'width': 1280, 'height': 720},
-                        locale='fr-FR',
-                        timezone_id='Europe/Paris'
-                    )
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                )
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 720},
+                    locale='fr-FR',
+                    timezone_id='Europe/Paris'
+                )
+                context.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "stylesheet", "font", "media"] else r.continue_())
 
-                    # Bloquer les ressources lourdes (images/CSS/polices) pour RAM et CPU minimaux
-                    def block_aggressively(route):
-                        if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
-                            route.abort()
-                        else:
-                            route.continue_()
-                    context.route("**/*", block_aggressively)
+                page = context.new_page()
+                page.set_default_timeout(20000)
 
-                    page = context.new_page()
-                    page.set_default_timeout(20000)
+                session_start_time = time.time()
+                cycle_count = 0
 
-                    session_start_time = time.time()
-                    cycle_count = 0
+                while True:
+                    cycle_count += 1
+                    now = time.time()
 
-                    while True:
-                        now = time.time()
-                        cycle_count += 1
+                    paris_now = get_paris_time()
+                    if 1 <= paris_now.hour < 7:
+                        break
 
-                        # Watchdog 3 minutes
-                        signal.signal(signal.SIGALRM, watchdog_handler)
-                        signal.alarm(180)
+                    # Recyclage mémoire préventif toutes les 2h ou 1200 scans
+                    if (now - session_start_time) > 7200 or cycle_count > 1200:
+                        log("♻️ [Vinted-Foot] Recyclage préventif session Chromium...")
+                        break
 
-                        # Vérification de l'heure de Paris
-                        paris_now = get_paris_time()
-                        if 1 <= paris_now.hour < 7:
-                            log(f"🌙 [Vinted] Passage en Veille Silencieuse ({paris_now.strftime('%H:%M:%S')} heure de Paris).")
-                            signal.alarm(0)
-                            break
+                    # Purge préventive de l'onglet tous les 60 scans
+                    if cycle_count % 60 == 0:
+                        try: page.close()
+                        except: pass
+                        try:
+                            page = context.new_page()
+                            page.set_default_timeout(20000)
+                        except: pass
 
-                        # Recyclage préventif mémoire (toutes les 2h ou 1200 scans)
-                        if (now - session_start_time) > 7200 or cycle_count > 1200:
-                            log("♻️ [Vinted] Recyclage de maintenance de la session Playwright...")
-                            signal.alarm(0)
-                            break
-
-                        # Choix de la cible pour cette itération :
-                        # Alternance : 1 tour sur 2 = Flux Football Direct, 1 tour sur 2 = Recherche Prioritaire texte
-                        scan_label = ""
-                        target_url = ""
-
-                        # A. Scan Vert (Toutes les 5 minutes)
-                        if (now - last_green_check) > 300:
-                            scan_label = "Maillot Asse [VERT]"
-                            target_url = get_search_url("Maillot Asse", color_id=10)
-                            last_green_check = now
-
-                        # B. Scan International (Toutes les 20 minutes)
-                        elif (now - last_secondary_check) > 1200:
-                            sec_q = SECONDARY_QUERIES[cycle_count % len(SECONDARY_QUERIES)]
-                            scan_label = f"Inter '{sec_q}'"
-                            target_url = get_search_url(sec_q)
-                            if (cycle_count % len(SECONDARY_QUERIES)) == 0:
-                                last_secondary_check = now
-
-                        # C. Alternance normale (Flux Direct Foot vs Recherche Prioritaire)
-                        elif cycle_count % 2 == 1:
-                            scan_label = "Flux Direct Football"
-                            target_url = FOOTBALL_CATALOG_URL
-                        else:
-                            query = PRIORITY_QUERIES[priority_query_index % len(PRIORITY_QUERIES)]
-                            priority_query_index += 1
-                            scan_label = f"Recherche '{query}'"
-                            target_url = get_search_url(query)
-                        # Nettoyage préventif de l'onglet tous les 60 scans pour purger la RAM Chromium (anti-crash)
-                        if cycle_count % 60 == 0:
-                            try:
-                                page.close()
-                            except Exception:
-                                pass
+                    try:
+                        page.goto(FOOTBALL_CATALOG_URL, wait_until='domcontentloaded', timeout=20000)
+                        items = extract_items_from_page(page)
+                        log(f"⚡ [Vinted-Foot] Scan Flux Direct : {len(items)} annonces")
+                        if items:
+                            process_incoming_items_safe(items, "Flux Direct Foot")
+                    except Exception as e:
+                        log(f"⚠️ [Vinted-Foot] Erreur locale : {e}")
+                        err_str = str(e).lower()
+                        if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
+                            log("🔄 [Vinted-Foot] Recréation onglet suite à crash...")
+                            try: page.close()
+                            except: pass
                             try:
                                 page = context.new_page()
                                 page.set_default_timeout(20000)
-                            except Exception:
-                                pass
+                            except:
+                                break
 
-                        # Exécution du scan
+                    time.sleep(random.uniform(2.5, 3.5))
+
+                try: browser.close()
+                except: pass
+        except Exception as e:
+            log(f"🚨 [Vinted-Foot] Incident navigateur : {e}. Redémarrage dans 8s...")
+            time.sleep(8)
+
+def worker_search_stream():
+    """Worker 2 dédié aux recherches prioritaires texte en parallèle"""
+    log("🔎 [Vinted-Search] Lancement du thread Recherches Mots-Clés")
+    priority_query_index = 0
+    last_green_check = 0
+    last_secondary_check = 0
+
+    # Décalage de 1.5s pour désynchroniser les requêtes réseau
+    time.sleep(1.5)
+
+    while True:
+        paris_now = get_paris_time()
+        if 1 <= paris_now.hour < 7:
+            log(f"🌙 [Vinted-Search] Veille de nuit ({paris_now.strftime('%H:%M:%S')}).")
+            time.sleep(60)
+            continue
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                )
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 720},
+                    locale='fr-FR',
+                    timezone_id='Europe/Paris'
+                )
+                context.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "stylesheet", "font", "media"] else r.continue_())
+
+                page = context.new_page()
+                page.set_default_timeout(20000)
+
+                session_start_time = time.time()
+                cycle_count = 0
+
+                while True:
+                    cycle_count += 1
+                    now = time.time()
+
+                    paris_now = get_paris_time()
+                    if 1 <= paris_now.hour < 7:
+                        break
+
+                    # Recyclage mémoire préventif
+                    if (now - session_start_time) > 7200 or cycle_count > 1200:
+                        log("♻️ [Vinted-Search] Recyclage préventif session Chromium...")
+                        break
+
+                    # Purge préventive de l'onglet tous les 60 scans
+                    if cycle_count % 60 == 0:
+                        try: page.close()
+                        except: pass
                         try:
-                            page.goto(target_url, wait_until='domcontentloaded', timeout=20000)
-                            items = extract_items_from_page(page)
-                            log(f"🔎 [Vinted] Scan {scan_label} : {len(items)} annonces analysées")
-                            if items:
-                                last_seen_id = process_incoming_items(
-                                    items, seen_ids, last_seen_id, is_initial_cycle, context, scan_label
-                                )
-                        except Exception as e:
-                            log(f"⚠️ [Vinted] Erreur locale sur {scan_label}: {e}")
-                            err_str = str(e).lower()
-                            if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
-                                log("🔄 [Vinted] Remplacement automatique de l'onglet suite à crash Chromium...")
-                                try:
-                                    page.close()
-                                except Exception:
-                                    pass
-                                try:
-                                    page = context.new_page()
-                                    page.set_default_timeout(20000)
-                                except Exception as e_new:
-                                    log(f"🚨 [Vinted] Redémarrage complet de la session suite au crash: {e_new}")
-                                    break
+                            page = context.new_page()
+                            page.set_default_timeout(20000)
+                        except: pass
 
-                        # Premier cycle terminé
-                        is_initial_cycle = False
+                    # Choix de la cible :
+                    scan_label = ""
+                    target_url = ""
 
-                        # Nettoyage cache IDs
-                        if len(seen_ids) > 2500:
-                            seen_ids_list = sorted(list(seen_ids), reverse=True)
-                            seen_ids = set(seen_ids_list[:1800])
-
-                        # Désactivation watchdog
-                        signal.alarm(0)
-
-                        # Pause aléatoire humaine anti-ban (2.5 à 3.5 secondes)
-                        delay = random.uniform(2.5, 3.5)
-                        time.sleep(delay)
+                    # A. Scan Vert (Toutes les 5 minutes)
+                    if (now - last_green_check) > 300:
+                        scan_label = "Maillot Asse [VERT]"
+                        target_url = get_search_url("Maillot Asse", color_id=10)
+                        last_green_check = now
+                    # B. Scan International (Toutes les 20 minutes)
+                    elif (now - last_secondary_check) > 1200:
+                        sec_q = SECONDARY_QUERIES[cycle_count % len(SECONDARY_QUERIES)]
+                        scan_label = f"Inter '{sec_q}'"
+                        target_url = get_search_url(sec_q)
+                        if (cycle_count % len(SECONDARY_QUERIES)) == 0:
+                            last_secondary_check = now
+                    # C. Recherches Prioritaires normales ("Maillot Asse", etc.)
+                    else:
+                        query = PRIORITY_QUERIES[priority_query_index % len(PRIORITY_QUERIES)]
+                        priority_query_index += 1
+                        scan_label = f"Recherche '{query}'"
+                        target_url = get_search_url(query)
 
                     try:
-                        browser.close()
-                    except Exception:
-                        pass
+                        page.goto(target_url, wait_until='domcontentloaded', timeout=20000)
+                        items = extract_items_from_page(page)
+                        log(f"🔎 [Vinted-Search] Scan {scan_label} : {len(items)} annonces")
+                        if items:
+                            process_incoming_items_safe(items, scan_label)
+                    except Exception as e:
+                        log(f"⚠️ [Vinted-Search] Erreur locale : {e}")
+                        err_str = str(e).lower()
+                        if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
+                            log("🔄 [Vinted-Search] Recréation onglet suite à crash...")
+                            try: page.close()
+                            except: pass
+                            try:
+                                page = context.new_page()
+                                page.set_default_timeout(20000)
+                            except:
+                                break
 
-            except Exception as e:
-                log(f"🚨 [Vinted] Incident moteur Playwright : {e}. Redémarrage dans 10s...")
-                signal.alarm(0)
-                time.sleep(10)
+                    time.sleep(random.uniform(2.5, 3.5))
 
+                try: browser.close()
+                except: pass
+        except Exception as e:
+            log(f"🚨 [Vinted-Search] Incident navigateur : {e}. Redémarrage dans 8s...")
+            time.sleep(8)
+
+def run_bot():
+    """Superviseur DUAL-SNIPER : fait tourner Flux Foot et Recherches Texte en parallèle permanent"""
+    global shared_initial_cycle
+    log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER PARALLÈLE")
+    log("⚡ [Vinted] Flux Foot + Recherches Mots-Clés s'exécutent SIMULTANÉMENT")
+    log("📸 [Vinted] Support jusqu'à 10 photos HD par alerte Discord actif")
+
+    t_foot = threading.Thread(target=worker_football_stream, name="Thread-Football", daemon=True)
+    t_search = threading.Thread(target=worker_search_stream, name="Thread-Search", daemon=True)
+
+    t_foot.start()
+    t_search.start()
+
+    # Période de grâce de 6 secondes pour absorber les annonces déjà en ligne sans spam
+    time.sleep(6)
+    with state_lock:
+        shared_initial_cycle = False
+    log("✅ [Vinted] Initialisation terminée : Surveillance active en temps réel absolu !")
+
+    try:
+        while True:
+            time.sleep(30)
+            if not t_foot.is_alive():
+                log("⚠️ [Vinted] Relance du thread Football...")
+                t_foot = threading.Thread(target=worker_football_stream, name="Thread-Football", daemon=True)
+                t_foot.start()
+            if not t_search.is_alive():
+                log("⚠️ [Vinted] Relance du thread Search...")
+                t_search = threading.Thread(target=worker_search_stream, name="Thread-Search", daemon=True)
+                t_search.start()
     except KeyboardInterrupt:
         log("\n⛔ [Vinted] Arrêt du bot demandé")
     finally:
