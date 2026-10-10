@@ -685,13 +685,22 @@ def send_discord_alert(context, item):
                 resp.encoding = 'utf-8'
                 html = resp.text
 
-                # Récupération de toutes les photos HD (/f800/)
+                # Détection et exclusion formelle de l'avatar de profil du vendeur
+                avatar_sigs = set()
+                for av in re.findall(r'Image__circle[^>]*>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\']', html, re.DOTALL):
+                    sig = av.split('/')[-1].split('.')[0].split('?')[0]
+                    if sig: avatar_sigs.add(sig)
+                for sq in re.findall(r'images1\.vinted\.net/[^\"\'\s]+/(?:100x100|150x150|50x50|20x20)/([^\"\'\s\.\?]+)', html):
+                    avatar_sigs.add(sq)
+
+                # Récupération de toutes les photos HD (/f800/) de l'annonce en excluant l'avatar
                 raw_photos = re.findall(r'https://images1\.vinted\.net/[^\"\'\s]+\/f800\/[^\"\'\s]+', html)
                 scraped_photos = []
                 for p in raw_photos:
                     p_clean = p.split('"')[0].split("'")[0].split('\\')[0]
-                    if p_clean not in scraped_photos:
-                        scraped_photos.append(p_clean)
+                    if not any(sig in p_clean for sig in avatar_sigs):
+                        if p_clean not in scraped_photos:
+                            scraped_photos.append(p_clean)
                 if scraped_photos:
                     photos = scraped_photos
 
@@ -733,9 +742,9 @@ def send_discord_alert(context, item):
         if photos:
             embed1["image"] = {"url": photos[0]}
 
-        embeds = [embed1]
+        embeds_batch1 = [embed1]
         for photo_url_item in photos[1:10]:
-            embeds.append({"url": item_url, "image": {"url": photo_url_item}})
+            embeds_batch1.append({"url": item_url, "image": {"url": photo_url_item}})
 
         # TEXTE DE NOTIFICATION PUSH POUR MONTRE GARMIN / ÉCRAN VERROUILLÉ
         # Contient titre, prix, taille, marque ET l'extrait de description
@@ -750,15 +759,30 @@ def send_discord_alert(context, item):
         if desc_preview:
             notif_text += f"\n📝 {desc_preview}"
 
-        payload = {
+        payload1 = {
             "content": notif_text,
             "username": "Vinted ASSE Bot", 
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
-            "embeds": embeds
+            "embeds": embeds_batch1
         }
 
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
-        log(f"✅ [Vinted] Alerte envoyée #{item_id} ({len(photos)} photos, description Garmin incluse)")
+        requests.post(DISCORD_WEBHOOK_URL, json=payload1, timeout=8)
+
+        # Si l'annonce contient plus de 10 photos (jusqu'à 20 photos au total) :
+        # Envoi d'un 2ème lot silencieux (sans @everyone pour ne pas refaire vibrer la montre)
+        if len(photos) > 10:
+            embeds_batch2 = []
+            for photo_url_item in photos[10:20]:
+                embeds_batch2.append({"url": item_url, "image": {"url": photo_url_item}})
+            if embeds_batch2:
+                payload2 = {
+                    "username": "Vinted ASSE Bot",
+                    "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
+                    "embeds": embeds_batch2
+                }
+                requests.post(DISCORD_WEBHOOK_URL, json=payload2, timeout=6)
+
+        log(f"✅ [Vinted] Alerte envoyée #{item_id} ({min(len(photos), 20)} photos certifiées, description Garmin incluse)")
 
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
