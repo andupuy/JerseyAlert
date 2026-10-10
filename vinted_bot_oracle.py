@@ -672,9 +672,10 @@ def send_discord_alert(context, item):
                 log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
                 return
 
-        # Micro-fetch ultra-rapide HTTP (200-300ms) pour récupérer la description et les photos HD
+        # Micro-fetch ultra-rapide HTTP (200-300ms) pour récupérer description, photos HD et vendeur
         photos = [photo_url] if photo_url else []
         desc_clean = ""
+        seller_name = ""
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -684,6 +685,19 @@ def send_discord_alert(context, item):
             if resp.status_code == 200:
                 resp.encoding = 'utf-8'
                 html = resp.text
+
+                # Récupération du pseudo vendeur
+                m_user = re.search(r'\"login\":\"([^\"]+)\"', html)
+                if m_user:
+                    seller_name = clean_text(m_user.group(1))
+                if not seller_name:
+                    m_mem = re.search(r'href=[\"\']/member/\d+[^\"]*[\"\'][^>]*>.*?<span[^>]*>([^<]+)</span>', html, re.DOTALL)
+                    if m_mem:
+                        seller_name = clean_text(m_mem.group(1))
+                if not seller_name:
+                    m_av_alt = re.search(r'Image__circle[^>]*>.*?<img[^>]+alt=[\"\']([^\"\']+)[\"\']', html, re.DOTALL)
+                    if m_av_alt and m_av_alt.group(1).strip():
+                        seller_name = clean_text(m_av_alt.group(1))
 
                 # Détection et exclusion formelle de l'avatar de profil du vendeur
                 avatar_sigs = set()
@@ -726,6 +740,8 @@ def send_discord_alert(context, item):
 
         # Description formatée pour Discord embed
         description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
+        if seller_name:
+            description_text += f"\n👤 Vendeur: **{seller_name}**"
         if desc_clean:
             embed_desc_body = desc_clean[:400] + ("..." if len(desc_clean) > 400 else "")
             description_text += f"\n\n{embed_desc_body}"
