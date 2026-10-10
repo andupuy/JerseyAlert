@@ -14,6 +14,7 @@ import json
 import random
 import requests
 import signal
+import threading
 from urllib.parse import quote_plus
 from datetime import datetime
 try:
@@ -602,48 +603,104 @@ def extract_items_from_page(page):
         log(f"❌ Erreur extraction liste: {e}")
         return []
 
+def enrich_discord_alert_background(item_id, item_url, message_id, final_title, final_price, final_size, final_brand, final_status, initial_photo):
+    """En tâche de fond indépendante : récupère photos 2, 3, 4 et description sans ralentir la détection"""
+    if not message_id or not DISCORD_WEBHOOK_URL:
+        return
+    try:
+        import re
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'fr-FR,fr;q=0.9',
+        }
+        resp = requests.get(item_url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return
+
+        html = resp.text
+
+        # Récupération de toutes les photos haute résolution (/f800/)
+        raw_photos = re.findall(r'https://images1\.vinted\.net/[^\"\'\s]+\/f800\/[^\"\'\s]+', html)
+        photos = []
+        for p in raw_photos:
+            p_clean = p.split('"')[0].split("'")[0].split('\\')[0]
+            if p_clean not in photos:
+                photos.append(p_clean)
+
+        if not photos and initial_photo:
+            photos = [initial_photo]
+
+        # Récupération de la description
+        desc_raw = ""
+        m_json = re.search(r'\"description\":\"(.*?)\"', html)
+        if m_json:
+            try:
+                desc_raw = m_json.group(1).encode().decode('unicode-escape', errors='ignore')
+            except Exception:
+                desc_raw = m_json.group(1)
+        if not desc_raw:
+            m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
+            if m_dom:
+                desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
+
+        desc_clean = clean_text(desc_raw)
+        if len(desc_clean) > 350:
+            desc_clean = desc_clean[:350] + "..."
+
+        description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
+        if desc_clean:
+            description_text += f"\n\n{desc_clean}"
+
+        embed1 = {
+            "title": f"🔔 {final_title}",
+            "url": item_url,
+            "description": description_text,
+            "color": 0x09B83E,
+            "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
+            "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        }
+        if photos:
+            embed1["image"] = {"url": photos[0]}
+
+        embeds = [embed1]
+        for photo_url in photos[1:4]:
+            embeds.append({"url": item_url, "image": {"url": photo_url}})
+
+        # Mise à jour (PATCH) du message Discord pour ajouter les photos et la description
+        patch_url = f"{DISCORD_WEBHOOK_URL}/messages/{message_id}"
+        patch_resp = requests.patch(patch_url, json={"embeds": embeds}, timeout=8)
+        if patch_resp.status_code in [200, 204]:
+            log(f"📸 [Vinted] Alerte #{item_id} enrichie avec {len(photos)} photo(s)")
+        else:
+            log(f"⚠️ [Vinted] Échec PATCH Discord #{item_id} (Status {patch_resp.status_code})")
+    except Exception as e:
+        log(f"⚠️ [Vinted] Erreur enrichissement arrière-plan #{item_id}: {e}")
+
 def send_discord_alert(context, item):
-    """Envoie une alerte Discord intelligente (fallback liste)"""
+    """Envoie une alerte Discord instantanée (<0.2s) puis lance l'enrichissement photos en tâche de fond"""
     if not DISCORD_WEBHOOK_URL: return
 
-    # 1. On essaie d'avoir les détails riches (Photos + Desc)
-    # Mais on ne fait plus confiance au brand/size du scraping détail s'il échoue
-    # On garde les infos "liste" (item) comme base solide
-    
-    details = {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
     try:
-        detail_page = context.new_page()
-        detail_page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        details = scrape_item_details(detail_page, item['url'])
-        detail_page.close()
-    except Exception as e:
-        log(f"⚠️ Mode Simple (Détails échoués): {e}")
-
-    try:
-        # FUSION ET NETTOYAGE (V8.4 TOTAL CLEAN)
-        price_raw = item.get('price', 'N/A')
-        brand_raw = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
-        size_raw = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
-        status_raw = details['status'] if details['status'] not in ['N/A', 'Non spécifié'] else item.get('status', 'Non spécifié')
-        desc_raw = details['description']
-        
-        # Photos
-        photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
-        
         import re
 
-        # Nettoyage radical
+        price_raw = item.get('price', 'N/A')
+        brand_raw = item.get('brand', 'N/A')
+        size_raw = item.get('size', 'N/A')
+        status_raw = item.get('status', 'Non spécifié')
+        photo_url = item.get('photo', '')
+        item_id = item.get('id')
+        item_url = item.get('url', f"https://www.vinted.fr/items/{item_id}")
+
+        # Nettoyage radical du titre
         raw_title_val = clean_text(item.get('title'))
-        # Enlever les métadonnées Vinted collées au titre
         clean_title = re.sub(r',\s*(?:marque|brand|taille|size|taglia|talla|état|etat|condition)\s*:.*$', '', raw_title_val, flags=re.IGNORECASE)
-        clean_title = re.sub(r'\s*·.*$', '', clean_title)  # Enlève tout après le "·"
-        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)  # Enlève les prix
+        clean_title = re.sub(r'\s*·.*$', '', clean_title)
+        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)
         clean_title = clean_title.strip()
         final_title = clean_title if clean_title else "Maillot ASSE"
 
         final_brand = clean_text(brand_raw)
         final_price = clean_text(price_raw)
-        # Assainissement du prix si texte composite
         if '·' in final_price or 'incl' in final_price or len(final_price) > 20:
             p_match = re.search(r'(\d+[\d\s]*[.,]\d{2}\s*€|\d+\s*€)', final_price)
             if p_match:
@@ -651,13 +708,10 @@ def send_discord_alert(context, item):
 
         final_size = clean_text(size_raw)
         final_status = clean_text(status_raw)
-        final_desc = clean_text(desc_raw)
-        
-        # Fallback ultime pour la taille : extraction depuis le titre ou la description
+
+        # Fallback pour la taille si N/A depuis le titre
         if final_size == 'N/A':
             size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n]|\s*$)', raw_title_val, re.IGNORECASE)
-            if not size_search and final_desc:
-                size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n.]|\s*$)', final_desc, re.IGNORECASE)
             if size_search:
                 cand = size_search.group(1).strip().upper()
                 if cand and len(cand) <= 10:
@@ -665,52 +719,58 @@ def send_discord_alert(context, item):
 
         # Filtrage des tailles enfants et XS/S
         if FILTER_ADULT_ONLY:
-            is_excl, reason = is_excluded_size(final_size, raw_title_val, final_desc)
+            is_excl, reason = is_excluded_size(final_size, raw_title_val)
             if is_excl:
-                log(f"🚫 Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
+                log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
                 return
 
-        if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
-
-        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
-        
-        # Un dernier coup de balai sur l'ensemble du bloc au cas où
-        description_text = description_text.replace("  ", " ").strip()
+        # Description initiale propre
+        description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
 
         embed1 = {
             "title": f"🔔 {final_title}",
-            "url": item.get('url'),
+            "url": item_url,
             "description": description_text,
             "color": 0x09B83E,
-            "footer": {"text": f"Vinted Bot • ID: {item.get('id')}"},
+            "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
             "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
-        
-        if photos:
-            embed1["image"] = {"url": photos[0]}
 
-        embeds = [embed1]
-        for photo_url in photos[1:4]:
-            embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
+        if photo_url:
+            embed1["image"] = {"url": photo_url}
 
-        # EXTRAIT DE DESCRIPTION (COMPLÈTE jusqu'à 1000 caractères)
-        desc_preview = final_desc[:1000] if final_desc else "Pas de description"
-        if len(final_desc) > 1000:
-            desc_preview += "..."
-
-        # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
-        notif_text = f"""@everyone | {clean_title}
-💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}
-📝 {desc_preview}"""
+        # TEXTE DE NOTIFICATION PUSH (Pour montres et écrans verrouillés)
+        # 100% propre, sans liens d'achat parasites
+        notif_text = f"""@everyone | {final_title}
+💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}"""
 
         payload = {
             "content": notif_text,
             "username": "Vinted ASSE Bot", 
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
-            "embeds": embeds
+            "embeds": [embed1]
         }
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        log(f"✅ Alerte envoyée #{item.get('id')}")
+
+        # Envoi immédiat avec wait=true pour récupérer le message_id
+        post_url = f"{DISCORD_WEBHOOK_URL}?wait=true"
+        resp = requests.post(post_url, json=payload, timeout=8)
+        message_id = None
+        if resp.status_code in [200, 201]:
+            try:
+                message_id = resp.json().get('id')
+            except Exception:
+                pass
+            log(f"⚡ [Vinted] Alerte instantanée envoyée #{item_id}")
+        else:
+            log(f"✅ [Vinted] Alerte envoyée #{item_id} (Status {resp.status_code})")
+
+        # Lancement de l'enrichissement photos et description en tâche de fond (thread non-bloquant)
+        if message_id:
+            threading.Thread(
+                target=enrich_discord_alert_background,
+                args=(item_id, item_url, message_id, final_title, final_price, final_size, final_brand, final_status, photo_url),
+                daemon=True
+            ).start()
 
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
@@ -856,6 +916,17 @@ def run_bot():
                             priority_query_index += 1
                             scan_label = f"Recherche '{query}'"
                             target_url = get_search_url(query)
+                        # Nettoyage préventif de l'onglet tous les 60 scans pour purger la RAM Chromium (anti-crash)
+                        if cycle_count % 60 == 0:
+                            try:
+                                page.close()
+                            except Exception:
+                                pass
+                            try:
+                                page = context.new_page()
+                                page.set_default_timeout(20000)
+                            except Exception:
+                                pass
 
                         # Exécution du scan
                         try:
@@ -868,6 +939,19 @@ def run_bot():
                                 )
                         except Exception as e:
                             log(f"⚠️ [Vinted] Erreur locale sur {scan_label}: {e}")
+                            err_str = str(e).lower()
+                            if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
+                                log("🔄 [Vinted] Remplacement automatique de l'onglet suite à crash Chromium...")
+                                try:
+                                    page.close()
+                                except Exception:
+                                    pass
+                                try:
+                                    page = context.new_page()
+                                    page.set_default_timeout(20000)
+                                except Exception as e_new:
+                                    log(f"🚨 [Vinted] Redémarrage complet de la session suite au crash: {e_new}")
+                                    break
 
                         # Premier cycle terminé
                         is_initial_cycle = False
@@ -880,8 +964,8 @@ def run_bot():
                         # Désactivation watchdog
                         signal.alarm(0)
 
-                        # Pause aléatoire humaine anti-ban (3.5 à 5.5 secondes)
-                        delay = random.uniform(3.5, 5.5)
+                        # Pause aléatoire humaine anti-ban (2.5 à 3.5 secondes)
+                        delay = random.uniform(2.5, 3.5)
                         time.sleep(delay)
 
                     try:
