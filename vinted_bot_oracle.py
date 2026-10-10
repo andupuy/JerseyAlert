@@ -88,10 +88,31 @@ def remove_blacklisted_seller(username):
         return True
     return False
 
+def repair_mojibake(text):
+    """Répare les caractères accentués corrompus en UTF-8 / latin-1 (ex: Ã© -> é, Ã¨ -> è)"""
+    if not text:
+        return ""
+    mojibake_map = {
+        'Ã©': 'é', 'Ã¨': 'è', 'Ãª': 'ê', 'Ã«': 'ë',
+        'Ã ': 'à', 'Ã¢': 'â', 'Ã®': 'î', 'Ã¯': 'ï',
+        'Ã´': 'ô', 'Ã¶': 'ö', 'Ã¹': 'ù', 'Ã»': 'û',
+        'Ã¼': 'ü', 'Ã§': 'ç', 'Ã‰': 'É', 'Ãˆ': 'È',
+        'ÃŠ': 'Ê', 'Ã€': 'À', 'Ã‚': 'Â', 'ÃŽ': 'Î',
+        'Ã”': 'Ô', 'Ã™': 'Ù', 'Ã›': 'Û', 'Ã‡': 'Ç',
+        'cÅur': 'cœur', 'cÅ“ur': 'cœur', 'Å“': 'œ',
+        'Â°': '°', 'Â«': '«', 'Â»': '»', 'â€™': "'",
+        'â€“': '-', 'â€”': '-', 'â€¦': '...',
+        'Ãtienne': 'Étienne', 'Ãtat': 'État', 'Ã ': 'à '
+    }
+    for bad, good in mojibake_map.items():
+        text = text.replace(bad, good)
+    return text
+
 def clean_text(text):
-    """Nettoyage radical des parasites Vinted (Enlevé, Nouveau, etc)"""
+    """Nettoyage radical des parasites Vinted et réparation des accents"""
     if not text: return ""
     import re
+    text = repair_mojibake(text)
     # Supprime les badges publicitaires et parasites
     text = re.sub(r'(?i)enlevé\s*!?', '', text)
     text = re.sub(r'(?i)nouveau\s*!?', '', text)
@@ -617,6 +638,7 @@ def enrich_discord_alert_background(item_id, item_url, message_id, final_title, 
         if resp.status_code != 200:
             return
 
+        resp.encoding = 'utf-8'
         html = resp.text
 
         # Récupération de toutes les photos haute résolution (/f800/)
@@ -630,14 +652,18 @@ def enrich_discord_alert_background(item_id, item_url, message_id, final_title, 
         if not photos and initial_photo:
             photos = [initial_photo]
 
-        # Récupération de la description
+        # Récupération propre de la description (préservation des accents et emojis)
         desc_raw = ""
         m_json = re.search(r'\"description\":\"(.*?)\"', html)
         if m_json:
-            try:
-                desc_raw = m_json.group(1).encode().decode('unicode-escape', errors='ignore')
-            except Exception:
-                desc_raw = m_json.group(1)
+            raw_val = m_json.group(1)
+            def unescape_u(m):
+                try:
+                    return chr(int(m.group(1), 16))
+                except Exception:
+                    return m.group(0)
+            desc_raw = re.sub(r'\\u([0-9a-fA-F]{4})', unescape_u, raw_val)
+            desc_raw = desc_raw.replace('\\n', '\n').replace('\\r', '').replace('\\"', '"').replace('\\/', '/').replace('\\\\', '\\')
         if not desc_raw:
             m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
             if m_dom:
