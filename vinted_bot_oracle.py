@@ -173,6 +173,47 @@ def is_excluded_size(size_str, title_str="", desc_str=""):
 
     return False, "OK"
 
+def parse_price(price_str):
+    """Extrait la valeur numérique flottante d'un prix (ex: '35.00 €' -> 35.0)"""
+    if not price_str: return None
+    import re
+    m = re.search(r'(\d+[\d\s]*(?:[.,]\d+)?)', str(price_str))
+    if m:
+        num_str = m.group(1).replace(' ', '').replace(',', '.')
+        try: return float(num_str)
+        except ValueError: return None
+    return None
+
+def is_excluded_product(title_str="", desc_str="", price_str=""):
+    """
+    Filtre les articles indésirables :
+    1. Plafond de prix à 350 € max
+    2. Mugs, tasses, bols, chopes
+    3. Cartes Panini, stickers, vignettes, topps
+    """
+    import re
+    t = (title_str or "").lower()
+    d = (desc_str or "").lower()
+
+    # 1. Plafond de prix : max 350 €
+    pval = parse_price(price_str)
+    if pval is not None and pval > 350.0:
+        return True, f"Prix supérieur à 350€ ({pval:.2f}€)"
+
+    # 2. Mugs / Tasses / Bols
+    mug_pattern = r'\b(mug|mugs|tasse|tasses|bol|bols|chope|chopes)\b'
+    if re.search(mug_pattern, t):
+        return True, "Mug / Tasse"
+
+    # 3. Cartes Panini / Stickers / Vignettes / Trading cards
+    card_pattern = r'\b(panini|carte|cartes|sticker|stickers|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
+    if re.search(card_pattern, t):
+        return True, "Carte Panini / Sticker"
+    if 'panini' in d:
+        return True, "Mention Panini"
+
+    return False, "OK"
+
 def is_asse_jersey_match(title):
     """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
     if not title: return False
@@ -665,6 +706,12 @@ def send_discord_alert(context, item):
                 if cand and len(cand) <= 10:
                     final_size = cand
 
+        # Filtrage des produits indésirables (Mug, Panini, Prix > 350€)
+        is_excl, reason = is_excluded_product(final_title, '', final_price)
+        if is_excl:
+            log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
+            return
+
         # Filtrage des tailles enfants et XS/S
         if FILTER_ADULT_ONLY:
             is_excl, reason = is_excluded_size(final_size, raw_title_val)
@@ -735,6 +782,11 @@ def send_discord_alert(context, item):
                     if m_dom:
                         desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
                 desc_clean = clean_text(desc_raw)
+                if desc_clean:
+                    is_excl, reason = is_excluded_product(final_title, desc_clean, final_price)
+                    if is_excl:
+                        log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
+                        return
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
@@ -835,6 +887,13 @@ def process_incoming_items_safe(items, source_label="Flux"):
         new_found.sort(key=lambda x: x['id'])
         
         for item in new_found:
+            # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€)
+            is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
+            if is_excl:
+                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
+                continue
+
+            # 2. Filtrage des tailles enfants et XS/S
             if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
                 is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
                 if is_excl:
