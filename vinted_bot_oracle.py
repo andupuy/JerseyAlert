@@ -186,31 +186,34 @@ def parse_price(price_str):
 
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
-    Filtre les articles indésirables :
+    Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
     1. Plafond de prix à 350 € max
     2. Mugs, tasses, bols, chopes
     3. Cartes Panini, stickers, vignettes, topps
     """
     import re
     t = (title_str or "").lower()
-    d = (desc_str or "").lower()
 
-    # 1. Plafond de prix : max 350 €
+    # 1. Plafond de prix : max 350 € (strictement supérieur à 350€)
     pval = parse_price(price_str)
     if pval is not None and pval > 350.0:
         return True, f"Prix supérieur à 350€ ({pval:.2f}€)"
 
-    # 2. Mugs / Tasses / Bols
+    # 2. Mugs / Tasses / Bols / Chopes
     mug_pattern = r'\b(mug|mugs|tasse|tasses|bol|bols|chope|chopes)\b'
     if re.search(mug_pattern, t):
         return True, "Mug / Tasse"
 
-    # 3. Cartes Panini / Stickers / Vignettes / Trading cards
-    card_pattern = r'\b(panini|carte|cartes|sticker|stickers|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
+    # 3. Panini / Stickers / Vignettes / Topps / Trading cards
+    card_pattern = r'\b(panini|sticker|stickers|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
     if re.search(card_pattern, t):
-        return True, "Carte Panini / Sticker"
-    if 'panini' in d:
-        return True, "Mention Panini"
+        return True, "Panini / Sticker"
+
+    # 4. Cartes seules : si le titre concerne des cartes de collection (sans mention de maillot/jersey)
+    if re.search(r'\b(carte|cartes)\b', t):
+        # Exclut si pas de mention de vêtement, ou si spécifié carte de collection/panini
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t) or re.search(r'\b(carte[s]?\s+panini|carte[s]?\s+collector|carte[s]?\s+postale[s]?)\b', t):
+            return True, "Carte de collection"
 
     return False, "OK"
 
