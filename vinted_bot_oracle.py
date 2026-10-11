@@ -32,6 +32,7 @@ SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
+SEEN_IDS_FILE = "seen_ids_cache.json"
 BLACKLIST_FILE = "blacklisted_sellers.json"
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
@@ -270,6 +271,33 @@ def save_last_seen_id(item_id):
     """Sauvegarde le dernier ID vu"""
     with open(STATE_FILE, "w") as f:
         f.write(str(item_id))
+
+def load_seen_ids_cache():
+    """Charge l'historique persistant des IDs déjà traités pour éviter tout doublon après redémarrage"""
+    seen = set()
+    if os.path.exists(SEEN_IDS_FILE):
+        try:
+            with open(SEEN_IDS_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for x in data:
+                        try:
+                            seen.add(int(x))
+                        except (ValueError, TypeError):
+                            pass
+            log(f"💾 [Cache] {len(seen)} IDs déjà vus chargés depuis {SEEN_IDS_FILE}")
+        except Exception as e:
+            log(f"⚠️ Erreur chargement cache IDs vus: {e}")
+    return seen
+
+def save_seen_ids_cache(seen_set):
+    """Sauvegarde les 3000 derniers IDs vus sur disque"""
+    try:
+        recent_ids = sorted(list(seen_set), reverse=True)[:3000]
+        with open(SEEN_IDS_FILE, "w") as f:
+            json.dump(recent_ids, f)
+    except Exception as e:
+        log(f"⚠️ Erreur sauvegarde cache IDs vus: {e}")
 
 def scrape_item_details(page, item_url):
     """Va sur la page de l'article pour récupérer infos détaillées via API interne (V3.0 API Call)"""
@@ -865,29 +893,42 @@ def watchdog_handler(signum, frame):
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
 state_lock = threading.Lock()
-shared_seen_ids = set()
+shared_seen_ids = load_seen_ids_cache()
 shared_last_seen_id = load_last_seen_id()
-shared_initial_cycle = True
+if shared_seen_ids:
+    shared_last_seen_id = max(shared_last_seen_id, max(shared_seen_ids))
 
-def process_incoming_items_safe(items, source_label="Flux"):
+def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
     """Traite une liste d'articles récupérés de manière thread-safe (filtrage et alertes Discord)"""
-    global shared_seen_ids, shared_last_seen_id, shared_initial_cycle
+    global shared_seen_ids, shared_last_seen_id
     with state_lock:
         new_found = []
         for item in items:
-            if item['id'] not in shared_seen_ids and item['id'] > (shared_last_seen_id - 100000):
-                new_found.append(item)
-                shared_seen_ids.add(item['id'])
+            try:
+                item_id = int(item['id'])
+            except (ValueError, TypeError):
+                continue
+            item['id'] = item_id
+
+            if item_id not in shared_seen_ids:
+                if shared_last_seen_id == 0 or item_id > (shared_last_seen_id - 500000):
+                    new_found.append(item)
+                shared_seen_ids.add(item_id)
         
         if not new_found:
             return
         
-        if shared_initial_cycle:
-            shared_last_seen_id = max(shared_last_seen_id, max(x['id'] for x in new_found))
+        # Sauvegarde persistante sur disque pour résister aux redémarrages et redéploiements
+        save_seen_ids_cache(shared_seen_ids)
+
+        if is_initial:
+            shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
+            save_last_seen_id(shared_last_seen_id)
+            log(f"📥 [{source_label}] {len(new_found)} annonce(s) existante(s) absorbée(s) au démarrage.")
             return
         
         log(f"🆕 [Vinted] {len(new_found)} nouvel/nouveaux article(s) détecté(s) ({source_label}) !")
-        new_found.sort(key=lambda x: x['id'])
+        new_found.sort(key=lambda x: int(x['id']))
         
         for item in new_found:
             # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€)
@@ -906,18 +947,19 @@ def process_incoming_items_safe(items, source_label="Flux"):
                 log(f"🎯 MATCH {source_label} : '{item.get('title')}' ({item.get('price')})")
                 send_discord_alert(None, item)
         
-        shared_last_seen_id = max(shared_last_seen_id, max(x['id'] for x in new_found))
+        shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
         save_last_seen_id(shared_last_seen_id)
         
-        # Nettoyage cache IDs
-        if len(shared_seen_ids) > 3000:
+        # Nettoyage cache IDs si trop volumineux
+        if len(shared_seen_ids) > 5000:
             seen_ids_list = sorted(list(shared_seen_ids), reverse=True)
-            shared_seen_ids = set(seen_ids_list[:2000])
+            shared_seen_ids = set(seen_ids_list[:3000])
 
 def worker_football_stream():
     """Worker 1 dédié en permanence au Flux Football Direct (temps réel absolu)"""
     FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&order=newest_first"
     log("⚽ [Vinted-Foot] Lancement du thread Flux Football Direct")
+    is_initial_scan = True
 
     while True:
         paris_now = get_paris_time()
@@ -973,7 +1015,8 @@ def worker_football_stream():
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted-Foot] Scan Flux Direct : {len(items)} annonces")
                         if items:
-                            process_incoming_items_safe(items, "Flux Direct Foot")
+                            process_incoming_items_safe(items, "Flux Direct Foot", is_initial=is_initial_scan)
+                            is_initial_scan = False
                     except Exception as e:
                         log(f"⚠️ [Vinted-Foot] Erreur locale : {e}")
                         err_str = str(e).lower()
@@ -1001,6 +1044,7 @@ def worker_search_stream():
     priority_query_index = 0
     last_green_check = 0
     last_secondary_check = 0
+    initial_scans_remaining = len(PRIORITY_QUERIES)
 
     # Décalage de 1.5s pour désynchroniser les requêtes réseau
     time.sleep(1.5)
@@ -1082,7 +1126,10 @@ def worker_search_stream():
                         items = extract_items_from_page(page)
                         log(f"🔎 [Vinted-Search] Scan {scan_label} : {len(items)} annonces")
                         if items:
-                            process_incoming_items_safe(items, scan_label)
+                            is_initial = (initial_scans_remaining > 0)
+                            process_incoming_items_safe(items, scan_label, is_initial=is_initial)
+                            if initial_scans_remaining > 0:
+                                initial_scans_remaining -= 1
                     except Exception as e:
                         log(f"⚠️ [Vinted-Search] Erreur locale : {e}")
                         err_str = str(e).lower()
@@ -1106,10 +1153,9 @@ def worker_search_stream():
 
 def run_bot():
     """Superviseur DUAL-SNIPER : fait tourner Flux Foot et Recherches Texte en parallèle permanent"""
-    global shared_initial_cycle
     log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER PARALLÈLE")
     log("⚡ [Vinted] Flux Foot + Recherches Mots-Clés s'exécutent SIMULTANÉMENT")
-    log("📸 [Vinted] Support jusqu'à 10 photos HD par alerte Discord actif")
+    log("📸 [Vinted] Support jusqu'à 20 photos HD par alerte Discord actif")
 
     t_foot = threading.Thread(target=worker_football_stream, name="Thread-Football", daemon=True)
     t_search = threading.Thread(target=worker_search_stream, name="Thread-Search", daemon=True)
@@ -1117,11 +1163,7 @@ def run_bot():
     t_foot.start()
     t_search.start()
 
-    # Période de grâce de 6 secondes pour absorber les annonces déjà en ligne sans spam
-    time.sleep(6)
-    with state_lock:
-        shared_initial_cycle = False
-    log("✅ [Vinted] Initialisation terminée : Surveillance active en temps réel absolu !")
+    log("✅ [Vinted] Démarrage des threads terminé : Surveillance active en temps réel absolu !")
 
     try:
         while True:
