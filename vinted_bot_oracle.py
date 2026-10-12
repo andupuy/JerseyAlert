@@ -38,23 +38,20 @@ FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
 
-# Flags d'optimisation stricte Chromium (Plafond CPU < 0.5 vCPU et RAM < 1 Go)
+# Flags d'optimisation Chromium (Stabilité garantie, zéro crash, basse consommation)
 CHROMIUM_ARGS = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
     '--disable-software-rasterizer',
-    '--renderer-process-limit=1',
     '--disable-background-networking',
-    '--disable-renderer-backgrounding',
     '--disable-background-timer-throttling',
     '--disable-breakpad',
     '--disable-component-update',
     '--disable-extensions',
     '--disable-default-apps',
-    '--mute-audio',
-    '--js-flags=--max-old-space-size=256'
+    '--mute-audio'
 ]
 
 def load_blacklisted_sellers():
@@ -1038,8 +1035,8 @@ def worker_football_stream():
                         log("♻️ [Vinted-Foot] Recyclage préventif session Chromium...")
                         break
 
-                    # Purge préventive de l'onglet tous les 60 scans
-                    if cycle_count % 60 == 0:
+                    # Purge préventive de l'onglet tous les 30 scans
+                    if cycle_count % 30 == 0:
                         try: page.close()
                         except: pass
                         try:
@@ -1126,8 +1123,8 @@ def worker_search_stream():
                         log("♻️ [Vinted-Search] Recyclage préventif session Chromium...")
                         break
 
-                    # Purge préventive de l'onglet tous les 60 scans
-                    if cycle_count % 60 == 0:
+                    # Purge préventive de l'onglet tous les 30 scans
+                    if cycle_count % 30 == 0:
                         try: page.close()
                         except: pass
                         try:
