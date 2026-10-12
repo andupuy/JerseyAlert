@@ -191,9 +191,11 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     1. Plafond de prix à 350 € max
     2. Mugs, tasses, bols, chopes
     3. Cartes Panini, stickers, vignettes, topps
+    4. Magnets, magnettes, aimants
     """
     import re
     t = (title_str or "").lower()
+    d = (desc_str or "").lower()
 
     # 1. Plafond de prix : max 350 € (strictement supérieur à 350€)
     pval = parse_price(price_str)
@@ -204,17 +206,32 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     mug_pattern = r'\b(mug|mugs|tasse|tasses|bol|bols|chope|chopes)\b'
     if re.search(mug_pattern, t):
         return True, "Mug / Tasse"
+    if d and re.search(mug_pattern, d):
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
+            return True, "Mug / Tasse"
 
     # 3. Panini / Stickers / Vignettes / Topps / Trading cards
     card_pattern = r'\b(panini|sticker|stickers|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
     if re.search(card_pattern, t):
         return True, "Panini / Sticker"
+    if d and re.search(card_pattern, d):
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
+            return True, "Panini / Sticker"
 
     # 4. Cartes seules : si le titre concerne des cartes de collection (sans mention de maillot/jersey)
     if re.search(r'\b(carte|cartes)\b', t):
         # Exclut si pas de mention de vêtement, ou si spécifié carte de collection/panini
         if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t) or re.search(r'\b(carte[s]?\s+panini|carte[s]?\s+collector|carte[s]?\s+postale[s]?)\b', t):
             return True, "Carte de collection"
+
+    # 5. Magnets / Magnettes / Aimants
+    magnet_pattern = r'\b(magnets?|magnettes?|aimants?|aimant[ée]s?)\b'
+    if re.search(magnet_pattern, t):
+        return True, "Magnet / Aimant"
+    if d and re.search(magnet_pattern, d):
+        # Si le titre ne mentionne pas explicitement un maillot/vêtement de sport, ou si la description décrit des magnets
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble|surv[eê]tement|short)\b', t) or re.search(r'\b(lot\s+de\s+magnets?|magnets?\s+aimant[ée]s?|aimant\s+de\s+frigo)\b', d):
+            return True, "Magnet / Aimant"
 
     return False, "OK"
 
