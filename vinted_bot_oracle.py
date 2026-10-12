@@ -989,6 +989,16 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
             seen_ids_list = sorted(list(shared_seen_ids), reverse=True)
             shared_seen_ids = set(seen_ids_list[:3000])
 
+def safe_route_filter(route):
+    """Bloque les images/médias lourds sans crasher si la requête est annulée en vol"""
+    try:
+        if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
+            route.abort()
+        else:
+            route.continue_()
+    except Exception:
+        pass
+
 def worker_football_stream():
     """Worker 1 dédié en permanence au Flux Football Direct (temps réel absolu)"""
     FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&order=newest_first"
@@ -1014,7 +1024,7 @@ def worker_football_stream():
                     locale='fr-FR',
                     timezone_id='Europe/Paris'
                 )
-                context.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "stylesheet", "font", "media"] else r.continue_())
+                context.route("**/*", safe_route_filter)
 
                 page = context.new_page()
                 page.set_default_timeout(20000)
@@ -1102,7 +1112,7 @@ def worker_search_stream():
                     locale='fr-FR',
                     timezone_id='Europe/Paris'
                 )
-                context.route("**/*", lambda r: r.abort() if r.request.resource_type in ["image", "stylesheet", "font", "media"] else r.continue_())
+                context.route("**/*", safe_route_filter)
 
                 page = context.new_page()
                 page.set_default_timeout(20000)
