@@ -885,7 +885,7 @@ def send_discord_alert(context, item):
         requests.post(DISCORD_WEBHOOK_URL, json=payload1, timeout=8)
 
         # Si l'annonce contient plus de 10 photos (jusqu'à 20 photos au total) :
-        # Envoi d'un 2ème lot silencieux (sans @everyone pour ne pas refaire vibrer la montre)
+        # Envoi d'un 2ème lot 100% silencieux (flags: 4096 SUPPRESS_NOTIFICATIONS - aucune notif ni vibration)
         if len(photos) > 10:
             embeds_batch2 = []
             for photo_url_item in photos[10:20]:
@@ -894,7 +894,8 @@ def send_discord_alert(context, item):
                 payload2 = {
                     "username": "Vinted ASSE Bot",
                     "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
-                    "embeds": embeds_batch2
+                    "embeds": embeds_batch2,
+                    "flags": 4096
                 }
                 requests.post(DISCORD_WEBHOOK_URL, json=payload2, timeout=6)
 
