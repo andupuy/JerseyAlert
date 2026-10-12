@@ -38,6 +38,25 @@ FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
 
+# Flags d'optimisation stricte Chromium (Plafond CPU < 0.5 vCPU et RAM < 1 Go)
+CHROMIUM_ARGS = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--renderer-process-limit=1',
+    '--disable-background-networking',
+    '--disable-renderer-backgrounding',
+    '--disable-background-timer-throttling',
+    '--disable-breakpad',
+    '--disable-component-update',
+    '--disable-extensions',
+    '--disable-default-apps',
+    '--mute-audio',
+    '--js-flags=--max-old-space-size=256'
+]
+
 def load_blacklisted_sellers():
     """Charge la liste noire des vendeurs Vinted"""
     sellers = set()
@@ -990,7 +1009,7 @@ def worker_football_stream():
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
-                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                    args=CHROMIUM_ARGS
                 )
                 context = browser.new_context(
                     user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1048,7 +1067,7 @@ def worker_football_stream():
                             except:
                                 break
 
-                    time.sleep(random.uniform(2.5, 3.5))
+                    time.sleep(random.uniform(3.5, 4.5))
 
                 try: browser.close()
                 except: pass
@@ -1078,7 +1097,7 @@ def worker_search_stream():
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
-                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                    args=CHROMIUM_ARGS
                 )
                 context = browser.new_context(
                     user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1161,7 +1180,7 @@ def worker_search_stream():
                             except:
                                 break
 
-                    time.sleep(random.uniform(2.5, 3.5))
+                    time.sleep(random.uniform(3.5, 4.5))
 
                 try: browser.close()
                 except: pass
@@ -1171,7 +1190,11 @@ def worker_search_stream():
 
 def run_bot():
     """Superviseur DUAL-SNIPER : fait tourner Flux Foot et Recherches Texte en parallèle permanent"""
-    log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER PARALLÈLE")
+    try:
+        os.nice(10)  # Réduit la priorité CPU pour garantir un plafond bas
+    except Exception:
+        pass
+    log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER PARALLÈLE (Mode Éco CPU < 0.5 vCPU)")
     log("⚡ [Vinted] Flux Foot + Recherches Mots-Clés s'exécutent SIMULTANÉMENT")
     log("📸 [Vinted] Support jusqu'à 20 photos HD par alerte Discord actif")
 
