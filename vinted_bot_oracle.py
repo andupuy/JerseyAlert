@@ -14,6 +14,10 @@ import random
 import requests
 import signal
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # Configuration
@@ -145,6 +149,86 @@ def is_excluded_size(size_str, title_str="", desc_str=""):
 
     return False, "OK"
 
+def parse_price(price_str):
+    """Extrait la valeur numérique flottante d'un prix (ex: '35.00 €' -> 35.0)"""
+    if not price_str: return None
+    import re
+    m = re.search(r'(\d+[\d\s]*(?:[.,]\d+)?)', str(price_str))
+    if m:
+        num_str = m.group(1).replace(' ', '').replace(',', '.')
+        try: return float(num_str)
+        except ValueError: return None
+    return None
+
+def is_excluded_product(title_str="", desc_str="", price_str=""):
+    """
+    Filtre les articles indésirables :
+    1. Plafond de prix à 350 € max
+    2. Mugs, tasses, bols, chopes
+    3. Cartes Panini, stickers, vignettes, topps
+    4. Magnets, magnettes, aimants
+    5. Vestes, blousons, doudounes, parkas, coupe-vents
+    """
+    import re
+    t = (title_str or "").lower()
+    d = (desc_str or "").lower()
+
+    # 1. Plafond de prix : max 350 € (strictement supérieur à 350€)
+    pval = parse_price(price_str)
+    if pval is not None and pval > 350.0:
+        return True, f"Prix supérieur à 350€ ({pval:.2f}€)"
+
+    # 2. Mugs / Tasses / Bols
+    mug_pattern = r'\b(mug|mugs|tasse|tasses|bol|bols|chope|chopes)\b'
+    if re.search(mug_pattern, t):
+        return True, "Mug / Tasse"
+    if d and re.search(mug_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "Mug / Tasse"
+
+    # 3. Panini / Stickers / Vignettes / Topps / Trading cards
+    card_pattern = r'\b(panini|sticker|stickers|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
+    if re.search(card_pattern, t):
+        return True, "Panini / Sticker"
+    if d and re.search(card_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "Panini / Sticker"
+
+    # 4. Cartes seules : si le titre concerne des cartes de collection (sans mention de maillot/jersey)
+    if re.search(r'\b(carte|cartes)\b', t):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t) or re.search(r'\b(carte[s]?\s+panini|carte[s]?\s+collector|carte[s]?\s+postale[s]?)\b', t):
+            return True, "Carte de collection"
+
+    # 5. Magnets / Magnettes / Aimants
+    magnet_pattern = r'\b(magnets?|magnettes?|aimants?|aimant[ée]s?)\b'
+    if re.search(magnet_pattern, t):
+        return True, "Magnet / Aimant"
+    if d and re.search(magnet_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble|surv[eê]tement|short)\b', t) or re.search(r'\b(lot\s+de\s+magnets?|magnets?\s+aimant[ée]s?|aimant\s+de\s+frigo)\b', d):
+            return True, "Magnet / Aimant"
+
+    # 6. Vestes, blousons, doudounes, parkas, coupe-vents
+    jacket_pattern = r'\b(veste|vestes|blouson|blousons|doudoune|doudounes|parka|parkas|coupe[- ]vent|k[- ]?way|anorak)\b'
+    if re.search(jacket_pattern, t):
+        return True, "Veste / Blouson"
+    if d and re.search(jacket_pattern, d) and not re.search(r'\b(maillot|jersey)\b', t):
+        return True, "Veste / Blouson"
+
+    return False, "OK"
+
+def get_paris_time():
+    """Retourne l'heure courante exacte de Paris (été/hiver garanti)"""
+    if ZoneInfo:
+        try:
+            return datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            pass
+    import time
+    os.environ['TZ'] = 'Europe/Paris'
+    if hasattr(time, 'tzset'):
+        time.tzset()
+    return datetime.now()
+
 def is_asse_jersey_match(title):
     """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
     if not title: return False
@@ -160,8 +244,8 @@ def get_search_url(query, color_id=None):
     return url
 
 def log(message):
-    """Log avec timestamp"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Log avec timestamp heure de Paris"""
+    timestamp = get_paris_time().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{timestamp}] {message}", flush=True)
 
 def load_last_seen_id():
@@ -622,6 +706,12 @@ def send_discord_alert(context, item):
                 if cand and len(cand) <= 10:
                     final_size = cand
 
+        # Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
+        is_excl, reason = is_excluded_product(final_title, final_desc, final_price)
+        if is_excl:
+            log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
+            return
+
         # Filtrage des tailles enfants et XS/S
         if FILTER_ADULT_ONLY:
             is_excl, reason = is_excluded_size(final_size, raw_title_val, final_desc)
@@ -698,16 +788,13 @@ def run_bot():
 
     try:
         while True:
-            # 1. Gestion des heures (Europe/Paris - Automatique Été/Hiver)
-            import time
-            os.environ['TZ'] = 'Europe/Paris'
-            if hasattr(time, 'tzset'):
-                time.tzset()
-            current_hour = time.localtime().tm_hour
+            # 1. Gestion des heures (Europe/Paris garanti)
+            paris_now = get_paris_time()
+            current_hour = paris_now.hour
 
-            if current_hour >= 1 and current_hour < 7:
-                log(f"🌙 Mode Veille Silencieuse activé ({current_hour}h).")
-                time.sleep(600)
+            if 1 <= current_hour < 7:
+                log(f"🌙 Mode Veille Silencieuse activé ({paris_now.strftime('%H:%M:%S')} heure de Paris). Reprise automatique à 07:00.")
+                time.sleep(60)
                 continue
 
             # 2. DÉMARRAGE MOTEUR (Watchdog activé)
@@ -766,6 +853,13 @@ def run_bot():
                                         log(f"🆕 {len(new_direct)} nouveaux articles vus dans le flux '{label}' !")
                                         new_direct.sort(key=lambda x: x['id'])
                                         for item in new_direct:
+                                            # 1. Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
+                                            is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
+                                            if is_excl:
+                                                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
+                                                continue
+
+                                            # 2. Filtrage des tailles enfants et XS/S
                                             if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
                                                 is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
                                                 if is_excl:
@@ -843,6 +937,13 @@ def run_bot():
                                         log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
                                         new_found.sort(key=lambda x: x['id'])
                                         for item in new_found:
+                                            # 1. Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
+                                            is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
+                                            if is_excl:
+                                                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
+                                                continue
+
+                                            # 2. Filtrage des tailles enfants et XS/S
                                             if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
                                                 is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
                                                 if is_excl:
