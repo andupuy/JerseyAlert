@@ -208,6 +208,7 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     2. Mugs, tasses, bols, chopes
     3. Cartes Panini, stickers, vignettes, topps
     4. Magnets, magnettes, aimants
+    5. Vestes, blousons, doudounes, parkas, coupe-vents
     """
     import re
     t = (title_str or "").lower()
@@ -223,7 +224,7 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(mug_pattern, t):
         return True, "Mug / Tasse"
     if d and re.search(mug_pattern, d):
-        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
             return True, "Mug / Tasse"
 
     # 3. Panini / Stickers / Vignettes / Topps / Trading cards
@@ -231,13 +232,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(card_pattern, t):
         return True, "Panini / Sticker"
     if d and re.search(card_pattern, d):
-        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
             return True, "Panini / Sticker"
 
     # 4. Cartes seules : si le titre concerne des cartes de collection (sans mention de maillot/jersey)
     if re.search(r'\b(carte|cartes)\b', t):
-        # Exclut si pas de mention de vêtement, ou si spécifié carte de collection/panini
-        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t) or re.search(r'\b(carte[s]?\s+panini|carte[s]?\s+collector|carte[s]?\s+postale[s]?)\b', t):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t) or re.search(r'\b(carte[s]?\s+panini|carte[s]?\s+collector|carte[s]?\s+postale[s]?)\b', t):
             return True, "Carte de collection"
 
     # 5. Magnets / Magnettes / Aimants
@@ -245,9 +245,15 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(magnet_pattern, t):
         return True, "Magnet / Aimant"
     if d and re.search(magnet_pattern, d):
-        # Si le titre ne mentionne pas explicitement un maillot/vêtement de sport, ou si la description décrit des magnets
-        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble|surv[eê]tement|short)\b', t) or re.search(r'\b(lot\s+de\s+magnets?|magnets?\s+aimant[ée]s?|aimant\s+de\s+frigo)\b', d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble|surv[eê]tement|short)\b', t) or re.search(r'\b(lot\s+de\s+magnets?|magnets?\s+aimant[ée]s?|aimant\s+de\s+frigo)\b', d):
             return True, "Magnet / Aimant"
+
+    # 6. Vestes, blousons, doudounes, parkas, coupe-vents
+    jacket_pattern = r'\b(veste|vestes|blouson|blousons|doudoune|doudounes|parka|parkas|coupe[- ]vent|k[- ]?way|anorak)\b'
+    if re.search(jacket_pattern, t):
+        return True, "Veste / Blouson"
+    if d and re.search(jacket_pattern, d) and not re.search(r'\b(maillot|jersey)\b', t):
+        return True, "Veste / Blouson"
 
     return False, "OK"
 
@@ -999,16 +1005,21 @@ def safe_route_filter(route):
     except Exception:
         pass
 
-def worker_football_stream():
-    """Worker 1 dédié en permanence au Flux Football Direct (temps réel absolu)"""
+def worker_vip_stream():
+    """Moteur VIP : 1 seul processus Chromium en mémoire avec 2 onglets rapides synchronisés"""
     FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&order=newest_first"
-    log("⚽ [Vinted-Foot] Lancement du thread Flux Football Direct")
-    is_initial_scan = True
+    log("🚀 [Vinted-VIP] Lancement du moteur VIP Monomoteur 2 Onglets")
+
+    is_initial_foot = True
+    priority_query_index = 0
+    last_green_check = 0
+    last_secondary_check = 0
+    initial_scans_search_remaining = len(PRIORITY_QUERIES)
 
     while True:
         paris_now = get_paris_time()
         if 1 <= paris_now.hour < 7:
-            log(f"🌙 [Vinted-Foot] Veille de nuit ({paris_now.strftime('%H:%M:%S')}).")
+            log(f"🌙 [Vinted-VIP] Veille de nuit ({paris_now.strftime('%H:%M:%S')}).")
             time.sleep(60)
             continue
 
@@ -1026,8 +1037,11 @@ def worker_football_stream():
                 )
                 context.route("**/*", safe_route_filter)
 
-                page = context.new_page()
-                page.set_default_timeout(20000)
+                page_foot = context.new_page()
+                page_foot.set_default_timeout(20000)
+
+                page_search = context.new_page()
+                page_search.set_default_timeout(20000)
 
                 session_start_time = time.time()
                 cycle_count = 0
@@ -1042,123 +1056,57 @@ def worker_football_stream():
 
                     # Recyclage mémoire préventif toutes les 2h ou 1200 scans
                     if (now - session_start_time) > 7200 or cycle_count > 1200:
-                        log("♻️ [Vinted-Foot] Recyclage préventif session Chromium...")
+                        log("♻️ [Vinted-VIP] Recyclage préventif session Chromium...")
                         break
 
-                    # Purge préventive de l'onglet tous les 30 scans
+                    # Purge préventive des onglets tous les 30 scans
                     if cycle_count % 30 == 0:
-                        try: page.close()
+                        try: page_foot.close()
+                        except: pass
+                        try: page_search.close()
                         except: pass
                         try:
-                            page = context.new_page()
-                            page.set_default_timeout(20000)
+                            page_foot = context.new_page()
+                            page_foot.set_default_timeout(20000)
+                            page_search = context.new_page()
+                            page_search.set_default_timeout(20000)
                         except: pass
 
+                    # === ÉTAPE 1 : SCAN FLUX FOOTBALL DIRECT ===
                     try:
-                        page.goto(FOOTBALL_CATALOG_URL, wait_until='domcontentloaded', timeout=20000)
-                        items = extract_items_from_page(page)
-                        log(f"⚡ [Vinted-Foot] Scan Flux Direct : {len(items)} annonces")
-                        if items:
-                            process_incoming_items_safe(items, "Flux Direct Foot", is_initial=is_initial_scan)
-                            is_initial_scan = False
+                        page_foot.goto(FOOTBALL_CATALOG_URL, wait_until='domcontentloaded', timeout=20000)
+                        items_foot = extract_items_from_page(page_foot)
+                        log(f"⚡ [Vinted-Foot] Scan Flux Direct : {len(items_foot)} annonces")
+                        if items_foot:
+                            process_incoming_items_safe(items_foot, "Flux Direct Foot", is_initial=is_initial_foot)
+                            is_initial_foot = False
                     except Exception as e:
                         log(f"⚠️ [Vinted-Foot] Erreur locale : {e}")
                         err_str = str(e).lower()
                         if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
-                            log("🔄 [Vinted-Foot] Recréation onglet suite à crash...")
-                            try: page.close()
+                            try: page_foot.close()
                             except: pass
                             try:
-                                page = context.new_page()
-                                page.set_default_timeout(20000)
+                                page_foot = context.new_page()
+                                page_foot.set_default_timeout(20000)
                             except:
                                 break
 
-                    time.sleep(random.uniform(3.5, 4.5))
+                    # Micro-pause entre Foot et Recherche (1.8s à 2.4s)
+                    time.sleep(random.uniform(1.8, 2.4))
 
-                try: browser.close()
-                except: pass
-        except Exception as e:
-            log(f"🚨 [Vinted-Foot] Incident navigateur : {e}. Redémarrage dans 8s...")
-            time.sleep(8)
-
-def worker_search_stream():
-    """Worker 2 dédié aux recherches prioritaires texte en parallèle"""
-    log("🔎 [Vinted-Search] Lancement du thread Recherches Mots-Clés")
-    priority_query_index = 0
-    last_green_check = 0
-    last_secondary_check = 0
-    initial_scans_remaining = len(PRIORITY_QUERIES)
-
-    # Décalage de 1.5s pour désynchroniser les requêtes réseau
-    time.sleep(1.5)
-
-    while True:
-        paris_now = get_paris_time()
-        if 1 <= paris_now.hour < 7:
-            log(f"🌙 [Vinted-Search] Veille de nuit ({paris_now.strftime('%H:%M:%S')}).")
-            time.sleep(60)
-            continue
-
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=CHROMIUM_ARGS
-                )
-                context = browser.new_context(
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    viewport={'width': 1280, 'height': 720},
-                    locale='fr-FR',
-                    timezone_id='Europe/Paris'
-                )
-                context.route("**/*", safe_route_filter)
-
-                page = context.new_page()
-                page.set_default_timeout(20000)
-
-                session_start_time = time.time()
-                cycle_count = 0
-
-                while True:
-                    cycle_count += 1
-                    now = time.time()
-
-                    paris_now = get_paris_time()
-                    if 1 <= paris_now.hour < 7:
-                        break
-
-                    # Recyclage mémoire préventif
-                    if (now - session_start_time) > 7200 or cycle_count > 1200:
-                        log("♻️ [Vinted-Search] Recyclage préventif session Chromium...")
-                        break
-
-                    # Purge préventive de l'onglet tous les 30 scans
-                    if cycle_count % 30 == 0:
-                        try: page.close()
-                        except: pass
-                        try:
-                            page = context.new_page()
-                            page.set_default_timeout(20000)
-                        except: pass
-
-                    # Choix de la cible :
-                    scan_label = ""
-                    target_url = ""
-
-                    # A. Scan Vert (Toutes les 5 minutes)
-                    if (now - last_green_check) > 300:
+                    # === ÉTAPE 2 : SCAN RECHERCHES MOTS-CLÉS ===
+                    now_s = time.time()
+                    if (now_s - last_green_check) > 300:
                         scan_label = "Maillot Asse [VERT]"
                         target_url = get_search_url("Maillot Asse", color_id=10)
-                        last_green_check = now
-                    # B. Scan International (Toutes les 20 minutes)
-                    elif (now - last_secondary_check) > 1200:
+                        last_green_check = now_s
+                    elif (now_s - last_secondary_check) > 1200:
                         sec_q = SECONDARY_QUERIES[cycle_count % len(SECONDARY_QUERIES)]
                         scan_label = f"Inter '{sec_q}'"
                         target_url = get_search_url(sec_q)
                         if (cycle_count % len(SECONDARY_QUERIES)) == 0:
-                            last_secondary_check = now
-                    # C. Recherches Prioritaires normales ("Maillot Asse", etc.)
+                            last_secondary_check = now_s
                     else:
                         query = PRIORITY_QUERIES[priority_query_index % len(PRIORITY_QUERIES)]
                         priority_query_index += 1
@@ -1166,64 +1114,47 @@ def worker_search_stream():
                         target_url = get_search_url(query)
 
                     try:
-                        page.goto(target_url, wait_until='domcontentloaded', timeout=20000)
-                        items = extract_items_from_page(page)
-                        log(f"🔎 [Vinted-Search] Scan {scan_label} : {len(items)} annonces")
-                        if items:
-                            is_initial = (initial_scans_remaining > 0)
-                            process_incoming_items_safe(items, scan_label, is_initial=is_initial)
-                            if initial_scans_remaining > 0:
-                                initial_scans_remaining -= 1
+                        page_search.goto(target_url, wait_until='domcontentloaded', timeout=20000)
+                        items_search = extract_items_from_page(page_search)
+                        log(f"🔎 [Vinted-Search] Scan {scan_label} : {len(items_search)} annonces")
+                        if items_search:
+                            is_init_s = (initial_scans_search_remaining > 0)
+                            process_incoming_items_safe(items_search, scan_label, is_initial=is_init_s)
+                            if initial_scans_search_remaining > 0:
+                                initial_scans_search_remaining -= 1
                     except Exception as e:
                         log(f"⚠️ [Vinted-Search] Erreur locale : {e}")
                         err_str = str(e).lower()
                         if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
-                            log("🔄 [Vinted-Search] Recréation onglet suite à crash...")
-                            try: page.close()
+                            try: page_search.close()
                             except: pass
                             try:
-                                page = context.new_page()
-                                page.set_default_timeout(20000)
+                                page_search = context.new_page()
+                                page_search.set_default_timeout(20000)
                             except:
                                 break
 
-                    time.sleep(random.uniform(3.5, 4.5))
+                    # Micro-pause après Recherche (1.8s à 2.4s)
+                    time.sleep(random.uniform(1.8, 2.4))
 
                 try: browser.close()
                 except: pass
         except Exception as e:
-            log(f"🚨 [Vinted-Search] Incident navigateur : {e}. Redémarrage dans 8s...")
-            time.sleep(8)
+            log(f"🚨 [Vinted-VIP] Incident navigateur : {e}. Redémarrage dans 6s...")
+            time.sleep(6)
 
 def run_bot():
-    """Superviseur DUAL-SNIPER : fait tourner Flux Foot et Recherches Texte en parallèle permanent"""
+    """Superviseur VIP : Monomoteur 1 seul Chromium avec 2 onglets synchronisés (Foot & Recherches)"""
     try:
         os.nice(10)  # Réduit la priorité CPU pour garantir un plafond bas
     except Exception:
         pass
-    log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER PARALLÈLE (Mode Éco CPU < 0.5 vCPU)")
-    log("⚡ [Vinted] Flux Foot + Recherches Mots-Clés s'exécutent SIMULTANÉMENT")
-    log("📸 [Vinted] Support jusqu'à 20 photos HD par alerte Discord actif")
-
-    t_foot = threading.Thread(target=worker_football_stream, name="Thread-Football", daemon=True)
-    t_search = threading.Thread(target=worker_search_stream, name="Thread-Search", daemon=True)
-
-    t_foot.start()
-    t_search.start()
-
-    log("✅ [Vinted] Démarrage des threads terminé : Surveillance active en temps réel absolu !")
+    log("🚀 [Vinted] Démarrage du bot V14.0 VIP (1 seul Chromium, 2 Onglets synchronisés)")
+    log("⚡ [Vinted] Flux Foot & Recherches s'enchaînent toutes les 2 secondes (Temps réel pur)")
+    log("📸 [Vinted] Support jusqu'à 20 photos HD avec notifications silencieuses")
 
     try:
-        while True:
-            time.sleep(30)
-            if not t_foot.is_alive():
-                log("⚠️ [Vinted] Relance du thread Football...")
-                t_foot = threading.Thread(target=worker_football_stream, name="Thread-Football", daemon=True)
-                t_foot.start()
-            if not t_search.is_alive():
-                log("⚠️ [Vinted] Relance du thread Search...")
-                t_search = threading.Thread(target=worker_search_stream, name="Thread-Search", daemon=True)
-                t_search.start()
+        worker_vip_stream()
     except KeyboardInterrupt:
         log("\n⛔ [Vinted] Arrêt du bot demandé")
     finally:
