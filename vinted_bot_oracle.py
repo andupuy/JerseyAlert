@@ -1033,8 +1033,8 @@ def run_bot():
                 seen_ids = set(seen_ids_list[:1500])
 
             # 4. Sommeil
-            log(f"⏳ Cycle {datetime.now().strftime('%H:%M:%S')} terminé. Repos 10s...")
-            time.sleep(10)
+            log(f"⏳ Cycle {datetime.now().strftime('%H:%M:%S')} terminé. Repos 5s...")
+            time.sleep(5)
 
     except KeyboardInterrupt:
         log("\n⛔ Arrêt du bot demandé")
