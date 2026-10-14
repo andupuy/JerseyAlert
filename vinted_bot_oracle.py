@@ -417,9 +417,17 @@ def scrape_item_details(page, item_url):
                         const scripts = Array.from(document.querySelectorAll('script'));
                         for (const s of scripts) {
                             const txt = s.textContent || '';
+                            if (!dSeller && txt.includes('"user":')) {
+                                const mUser = txt.match(/["\\\\]+user["\\\\]+:\s*\{[^\}]*?["\\\\]+login["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
+                                if (mUser && mUser[1].trim()) {
+                                    dSeller = mUser[1].trim();
+                                }
+                            }
                             if (!dSeller && txt.includes('"login":')) {
                                 const mUser = txt.match(/["\\\\]+login["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
-                                if (mUser && mUser[1].trim()) dSeller = mUser[1].trim();
+                                if (mUser && mUser[1].trim() && !mUser[1].toLowerCase().includes('connect') && !mUser[1].toLowerCase().includes('inscri')) {
+                                    dSeller = mUser[1].trim();
+                                }
                             }
                             if (txt.includes('code') && (txt.includes('size') || txt.includes('brand') || txt.includes('status'))) {
                                 if (dSize === 'N/A') {
@@ -438,10 +446,15 @@ def scrape_item_details(page, item_url):
                         }
                     } catch (e) {}
 
-                    // Recherche dans les éléments DOM
+                    // Recherche dans les éléments DOM spécifiques au bloc profil vendeur
                     if (!dSeller) {
-                        const sellerLink = document.querySelector('a[href*="/member/"] span, .user-login, [data-testid*="seller-name"]');
-                        if (sellerLink && sellerLink.innerText) dSeller = sellerLink.innerText.trim();
+                        const sellerEl = document.querySelector('[data-testid*="seller"] a[href*="/member/"] span, [data-testid*="user-login"], .user-login, a[href^="/member/"]:not([href*="login"]) span');
+                        if (sellerEl && sellerEl.innerText) {
+                            const val = sellerEl.innerText.trim();
+                            if (!val.toLowerCase().includes('connect') && !val.toLowerCase().includes('inscri')) {
+                                dSeller = val;
+                            }
+                        }
                     }
 
                     if (dSize === 'N/A' || dBrand === 'N/A' || dStatus === 'N/A') {
@@ -784,7 +797,13 @@ def send_discord_alert(context, item):
                 log(f"🚫 Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
                 return
 
-        if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
+        # Validation stricte du vendeur (élimine les boutons parasites type "S'inscrire / Se connecter")
+        if final_seller:
+            seller_low = final_seller.lower()
+            if any(term in seller_low for term in ['connect', 'inscri', 'connexion', 'inscription', 'vinted', 'aide', 'mon compte']):
+                final_seller = ""
+            elif len(final_seller) > 30 or len(final_seller) < 2:
+                final_seller = ""
 
         description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}"
         if final_seller:
