@@ -836,6 +836,7 @@ def run_bot():
     seen_ids = set()
     last_secondary_check = 0
     last_green_check = 0
+    query_index = 0
     
     log("🚀 Phase d'initialisation rapide...")
     # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
@@ -936,87 +937,86 @@ def run_bot():
                         try: direct_page.close()
                         except: pass
 
-                    # Détermination des recherches
-                    current_cycle_queries = [] # On va remplir dynamiquement
+                    # Détermination de la requête texte pour ce cycle (Solution 4 : Rotation alternée)
                     now = time.time()
-                    
-                    # 1. Requêtes Prioritaires (Toujours)
-                    queries_to_run = [(q, None) for q in PRIORITY_QUERIES]
-                    
-                    # 2. Triple Scan Vert (Toutes les 5 min) sur les 3 prioritaires
+                    scan_label = ""
+                    query = ""
+                    color = None
+
+                    # 1. Triple Scan Vert (Toutes les 5 min)
                     if (now - last_green_check) > 300:
-                        log("☘️ Mode Triple Scan Vert (Priority + Filter 10)")
-                        for q in PRIORITY_QUERIES:
-                            queries_to_run.append((q, 10))
+                        query = "Maillot Asse"
+                        color = 10
+                        scan_label = "Maillot Asse [VERT]"
                         last_green_check = now
-                        
-                    # 3. Requêtes Secondaires (Toutes les 20 min)
-                    if (now - last_secondary_check) > 1200:
-                        log("🌍 Mode Cycle Complet (International)")
-                        for q in SECONDARY_QUERIES:
-                            queries_to_run.append((q, None))
+                    # 2. Requête Secondaire / Internationale (Toutes les 20 min)
+                    elif (now - last_secondary_check) > 1200:
+                        query = SECONDARY_QUERIES[query_index % len(SECONDARY_QUERIES)]
+                        color = None
+                        scan_label = f"Inter '{query}'"
+                        query_index += 1
                         last_secondary_check = now
+                    # 3. Requête Prioritaire en alternance ("Maillot Asse", "Maillot Saint-Etienne", etc.)
+                    else:
+                        query = PRIORITY_QUERIES[query_index % len(PRIORITY_QUERIES)]
+                        color = None
+                        scan_label = f"'{query}'"
+                        query_index += 1
 
-                    log(f"\n" + "🚀" + "="*50)
-                    log(f"⚡ Scan V9.3 : {len(queries_to_run)} requêtes")
-
-                    for query_data in queries_to_run:
-                        query, color = query_data
+                    try:
+                        # 1. Ouverture page NEUVE
+                        page = context.new_page()
+                        page.set_default_timeout(20000)
+                        
+                        # 2. Blocage ressources (RAM optimisée)
+                        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
+                        
+                        # 3. Navigation Ultra-Rapide (Commit mode)
+                        log(f"🔎 Check: {scan_label}")
                         try:
-                            # 1. Ouverture page NEUVE
-                            page = context.new_page()
-                            page.set_default_timeout(20000)
+                            page.goto(get_search_url(query, color), wait_until='commit', timeout=20000)
+                            # On attend explicitement un élément pour confirmer le chargement
+                            page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
                             
-                            # 2. Blocage ressources (RAM optimisée)
-                            page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
+                            items = extract_items_from_page(page)
                             
-                            # 3. Navigation Ultra-Rapide (Commit mode)
-                            log(f"🔎 Check: '{query}'{' [VERTE]' if color else ''}")
-                            try:
-                                page.goto(get_search_url(query, color), wait_until='commit', timeout=20000)
-                                # On attend explicitement un élément pour confirmer le chargement
-                                page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+                            if items:
+                                new_found = []
+                                for item in items:
+                                    if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
+                                        new_found.append(item)
+                                        seen_ids.add(item['id'])
                                 
-                                items = extract_items_from_page(page)
-                                
-                                if items:
-                                    new_found = []
-                                    for item in items:
-                                        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-                                            new_found.append(item)
-                                            seen_ids.add(item['id'])
-                                    
-                                    if is_initial_cycle:
-                                        if new_found:
-                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                    elif new_found:
-                                        log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
-                                        new_found.sort(key=lambda x: x['id'])
-                                        for item in new_found:
-                                            # 1. Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
-                                            is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
-                                            if is_excl:
-                                                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
-                                                continue
-
-                                            # 2. Filtrage des tailles enfants et XS/S
-                                            if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
-                                                is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
-                                                if is_excl:
-                                                    log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
-                                                    continue
-                                            if is_asse_jersey_match(item.get('title')):
-                                                log(f"🎯 MATCH : '{item.get('title')}'")
-                                                send_discord_alert(context, item)
-                                        
+                                if is_initial_cycle:
+                                    if new_found:
                                         last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                        save_last_seen_id(last_seen_id)
-                            finally:
-                                page.close()
+                                elif new_found:
+                                    log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
+                                    new_found.sort(key=lambda x: x['id'])
+                                    for item in new_found:
+                                        # 1. Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
+                                        is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
+                                        if is_excl:
+                                            log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
+                                            continue
 
-                            time.sleep(random.uniform(1, 2))
-                        except Exception as e:
-                            log(f"⚠️ Erreur locale sur '{query}': {e}")
+                                        # 2. Filtrage des tailles enfants et XS/S
+                                        if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
+                                            is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
+                                            if is_excl:
+                                                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
+                                                continue
+                                        if is_asse_jersey_match(item.get('title')):
+                                            log(f"🎯 MATCH : '{item.get('title')}'")
+                                            send_discord_alert(context, item)
+                                    
+                                    last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
+                                    save_last_seen_id(last_seen_id)
+                        finally:
+                            page.close()
+
+                    except Exception as e:
+                        log(f"⚠️ Erreur locale sur '{query}': {e}")
                     
                     browser.close()
                 
