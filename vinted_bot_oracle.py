@@ -310,15 +310,16 @@ def scrape_item_details(page, item_url):
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
 
         # Récupération de TOUTES les photos haute résolution (/f800/) depuis les scripts Next.js ou le DOM
+        # avec exclusion stricte de l'avatar du vendeur
         photos = page.evaluate("""() => {
             const photos = [];
-            // Détection des avatars vendeur
+            // Détection exhaustive des signatures d'avatar vendeur
             const avatarSigs = new Set();
-            document.querySelectorAll('.Image__circle img, [class*="avatar"] img').forEach(img => {
+            document.querySelectorAll('.Image__circle img, [class*="avatar"] img, a[href*="/member/"] img').forEach(img => {
                 const s = img.src || '';
                 const parts = s.split('/');
                 const last = parts[parts.length - 1].split('.')[0].split('?')[0];
-                if (last) avatarSigs.add(last);
+                if (last && last.length >= 4) avatarSigs.add(last);
             });
 
             const scripts = document.querySelectorAll('script');
@@ -343,7 +344,13 @@ def scrape_item_details(page, item_url):
             
             const imgs = Array.from(document.querySelectorAll('img'))
                                  .map(i => i.src || i.getAttribute('data-src') || '')
-                                 .filter(s => s && s.includes('vinted.net') && (s.includes('/f800/') || s.includes('/full/') || s.includes('/1500/')));
+                                 .filter(s => {
+                                     if (!s || !s.includes('vinted.net')) return false;
+                                     if (!s.includes('/f800/') && !s.includes('/full/') && !s.includes('/1500/')) return false;
+                                     let isAv = false;
+                                     avatarSigs.forEach(sig => { if (s.includes(sig)) isAv = true; });
+                                     return !isAv;
+                                 });
             return Array.from(new Set(imgs));
         }""")
         photos = list(dict.fromkeys(photos))
@@ -370,6 +377,7 @@ def scrape_item_details(page, item_url):
         brand = "N/A"
         size = "N/A"
         status = "N/A"
+        seller = ""
         
         if api_data and 'item' in api_data:
             item = api_data['item']
@@ -378,21 +386,28 @@ def scrape_item_details(page, item_url):
             description = item.get('description', '')
             brand = item.get('brand_title', 'N/A')
             size = item.get('size_title', 'N/A')
-            status = item.get('status', 'N/A') # Parfois c'est status_id, il faut mapper, mais essayons title
+            status = item.get('status', 'N/A')
             
-            # Si status est vide, parfois c'est pas envoyé
-            if status == 'N/A' and 'status' in item:
-                 # Vinted API change parfois
-                 pass
-            
+            # Récupération du pseudo vendeur depuis l'API
+            user_data = item.get('user', {})
+            if isinstance(user_data, dict):
+                seller = user_data.get('login', '') or user_data.get('username', '')
+                # Si l'utilisateur a une photo de profil, on s'assure d'exclure son URL des photos
+                user_photo = user_data.get('photo', {})
+                if isinstance(user_photo, dict):
+                    photo_url = user_photo.get('url', '')
+                    if photo_url:
+                        sig = photo_url.split('/')[-1].split('.')[0].split('?')[0]
+                        if sig and len(sig) >= 4:
+                            photos = [p for p in photos if sig not in p]
         else:
             log("⚠️ API Vinted muette ou erreur")
 
         # Si l'API n'a pas tout renvoyé ou a échoué, on extrait depuis les scripts / le DOM de la page
-        if not description or brand == 'N/A' or size == 'N/A' or status in ['N/A', 'Non spécifié']:
+        if not description or brand == 'N/A' or size == 'N/A' or status in ['N/A', 'Non spécifié'] or not seller:
             try:
                 dom_details = page.evaluate("""() => {
-                    let dBrand = 'N/A', dSize = 'N/A', dStatus = 'N/A', dDesc = '';
+                    let dBrand = 'N/A', dSize = 'N/A', dStatus = 'N/A', dDesc = '', dSeller = '';
                     
                     const descEl = document.querySelector('[itemprop="description"]');
                     if (descEl) dDesc = descEl.innerText.trim();
@@ -402,6 +417,10 @@ def scrape_item_details(page, item_url):
                         const scripts = Array.from(document.querySelectorAll('script'));
                         for (const s of scripts) {
                             const txt = s.textContent || '';
+                            if (!dSeller && txt.includes('"login":')) {
+                                const mUser = txt.match(/["\\\\]+login["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
+                                if (mUser && mUser[1].trim()) dSeller = mUser[1].trim();
+                            }
                             if (txt.includes('code') && (txt.includes('size') || txt.includes('brand') || txt.includes('status'))) {
                                 if (dSize === 'N/A') {
                                     const m = txt.match(/["\\\\]+code["\\\\]+:\s*["\\\\]+size["\\\\]+.*?["\\\\]+value["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
@@ -420,6 +439,11 @@ def scrape_item_details(page, item_url):
                     } catch (e) {}
 
                     // Recherche dans les éléments DOM
+                    if (!dSeller) {
+                        const sellerLink = document.querySelector('a[href*="/member/"] span, .user-login, [data-testid*="seller-name"]');
+                        if (sellerLink && sellerLink.innerText) dSeller = sellerLink.innerText.trim();
+                    }
+
                     if (dSize === 'N/A' || dBrand === 'N/A' || dStatus === 'N/A') {
                         const items = document.querySelectorAll('.details-list__item, [data-testid*="item-attributes"]');
                         items.forEach(el => {
@@ -434,7 +458,7 @@ def scrape_item_details(page, item_url):
                         });
                     }
 
-                    return { description: dDesc, brand: dBrand, size: dSize, status: dStatus };
+                    return { description: dDesc, brand: dBrand, size: dSize, status: dStatus, seller: dSeller };
                 }""")
                 if not description and dom_details.get('description'):
                     description = dom_details['description']
@@ -444,21 +468,24 @@ def scrape_item_details(page, item_url):
                     size = dom_details['size']
                 if status in ['N/A', 'Non spécifié'] and dom_details.get('status') not in ['N/A', 'Non spécifié']:
                     status = dom_details['status']
+                if not seller and dom_details.get('seller'):
+                    seller = dom_details['seller']
             except Exception as e:
                 log(f"⚠️ Erreur fallback DOM/Scripts item: {e}")
         
-        log(f"✅ Détails finaux: {brand} | {size} | {status}")
+        log(f"✅ Détails finaux: {brand} | {size} | {status} | Vendeur: {seller or 'N/A'}")
         
         return {
             "description": description,
             "photos": photos,
             "brand": brand,
             "size": size,
-            "status": status
+            "status": status,
+            "seller": seller
         }
     except Exception as e:
         log(f"⚠️ Erreur scraping détails (API Mode): {e}")
-        return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
+        return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A", "seller": ""}
 
 def fetch_direct_catalog_api(page, api_url):
     """Interroge directement l'API catalogue Vinted via fetch() dans le navigateur"""
@@ -731,6 +758,7 @@ def send_discord_alert(context, item):
 
         final_size = clean_text(size_raw)
         final_status = clean_text(status_raw)
+        final_seller = clean_text(details.get('seller', ''))
         final_desc = clean_text(desc_raw)
         
         # Fallback ultime pour la taille : extraction depuis le titre ou la description
@@ -758,7 +786,10 @@ def send_discord_alert(context, item):
 
         if len(final_desc) > 300: final_desc = final_desc[:300] + "..."
 
-        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}\n\n{final_desc}"
+        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}"
+        if final_seller:
+            description_text += f"\n👤 Vendeur: **{final_seller}**"
+        description_text += f"\n\n{final_desc}"
         
         # Un dernier coup de balai sur l'ensemble du bloc au cas où
         description_text = description_text.replace("  ", " ").strip()
