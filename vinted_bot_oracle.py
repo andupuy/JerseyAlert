@@ -85,10 +85,31 @@ def remove_blacklisted_seller(username):
         return True
     return False
 
+def repair_mojibake(text):
+    """Répare les caractères accentués corrompus en UTF-8 / latin-1 (ex: Ã© -> é, Ã¨ -> è)"""
+    if not text:
+        return ""
+    mojibake_map = {
+        'Ã©': 'é', 'Ã¨': 'è', 'Ãª': 'ê', 'Ã«': 'ë',
+        'Ã ': 'à', 'Ã¢': 'â', 'Ã®': 'î', 'Ã¯': 'ï',
+        'Ã´': 'ô', 'Ã¶': 'ö', 'Ã¹': 'ù', 'Ã»': 'û',
+        'Ã¼': 'ü', 'Ã§': 'ç', 'Ã‰': 'É', 'Ãˆ': 'È',
+        'ÃŠ': 'Ê', 'Ã€': 'À', 'Ã‚': 'Â', 'ÃŽ': 'Î',
+        'Ã”': 'Ô', 'Ã™': 'Ù', 'Ã›': 'Û', 'Ã‡': 'Ç',
+        'cÅur': 'cœur', 'cÅ“ur': 'cœur', 'Å“': 'œ',
+        'Â°': '°', 'Â«': '«', 'Â»': '»', 'â€™': "'",
+        'â€“': '-', 'â€”': '-', 'â€¦': '...',
+        'Ãtienne': 'Étienne', 'Ãtat': 'État', 'Ã ': 'à '
+    }
+    for bad, good in mojibake_map.items():
+        text = text.replace(bad, good)
+    return text
+
 def clean_text(text):
-    """Nettoyage radical des parasites Vinted (Enlevé, Nouveau, etc)"""
+    """Nettoyage radical des parasites Vinted et réparation des accents"""
     if not text: return ""
     import re
+    text = repair_mojibake(text)
     # Supprime les badges publicitaires et parasites
     text = re.sub(r'(?i)enlevé\s*!?', '', text)
     text = re.sub(r'(?i)nouveau\s*!?', '', text)
@@ -291,6 +312,15 @@ def scrape_item_details(page, item_url):
         # Récupération de TOUTES les photos haute résolution (/f800/) depuis les scripts Next.js ou le DOM
         photos = page.evaluate("""() => {
             const photos = [];
+            // Détection des avatars vendeur
+            const avatarSigs = new Set();
+            document.querySelectorAll('.Image__circle img, [class*="avatar"] img').forEach(img => {
+                const s = img.src || '';
+                const parts = s.split('/');
+                const last = parts[parts.length - 1].split('.')[0].split('?')[0];
+                if (last) avatarSigs.add(last);
+            });
+
             const scripts = document.querySelectorAll('script');
             scripts.forEach(s => {
                 const txt = s.textContent || '';
@@ -298,7 +328,14 @@ def scrape_item_details(page, item_url):
                 for (let i = 1; i < parts.length; i++) {
                     const urlPart = parts[i].split('"')[0].split('\\\\')[0];
                     if (urlPart.includes('/f800/')) {
-                        photos.push('https://images1.vinted.net/' + urlPart);
+                        const fullUrl = 'https://images1.vinted.net/' + urlPart;
+                        let isAvatar = false;
+                        avatarSigs.forEach(sig => {
+                            if (fullUrl.includes(sig)) isAvatar = true;
+                        });
+                        if (!isAvatar) {
+                            photos.push(fullUrl);
+                        }
                     }
                 }
             });
@@ -726,21 +763,24 @@ def send_discord_alert(context, item):
         # Un dernier coup de balai sur l'ensemble du bloc au cas où
         description_text = description_text.replace("  ", " ").strip()
 
+        item_url = item.get('url', f"https://www.vinted.fr/items/{item.get('id')}")
+        item_id = item.get('id')
+
         embed1 = {
             "title": f"🔔 {final_title}",
-            "url": item.get('url'),
+            "url": item_url,
             "description": description_text,
             "color": 0x09B83E,
-            "footer": {"text": f"Vinted Bot • ID: {item.get('id')}"},
+            "footer": {"text": f"Vinted Bot • ID: {item_id}"},
             "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
         
         if photos:
             embed1["image"] = {"url": photos[0]}
 
-        embeds = [embed1]
-        for photo_url in photos[1:4]:
-            embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
+        embeds_batch1 = [embed1]
+        for photo_url in photos[1:10]:
+            embeds_batch1.append({"url": item_url, "image": {"url": photo_url}})
 
         # EXTRAIT DE DESCRIPTION (COMPLÈTE jusqu'à 1000 caractères)
         desc_preview = final_desc[:1000] if final_desc else "Pas de description"
@@ -752,14 +792,30 @@ def send_discord_alert(context, item):
 💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}
 📝 {desc_preview}"""
 
-        payload = {
+        payload1 = {
             "content": notif_text,
             "username": "Vinted ASSE Bot", 
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
-            "embeds": embeds
+            "embeds": embeds_batch1
         }
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        log(f"✅ Alerte envoyée #{item.get('id')}")
+        requests.post(DISCORD_WEBHOOK_URL, json=payload1, timeout=10)
+
+        # Si l'annonce contient plus de 10 photos (jusqu'à 20 photos au total) :
+        # Envoi d'un 2ème lot 100% silencieux (flags: 4096 SUPPRESS_NOTIFICATIONS - aucune notif ni vibration)
+        if len(photos) > 10:
+            embeds_batch2 = []
+            for photo_url_item in photos[10:20]:
+                embeds_batch2.append({"url": item_url, "image": {"url": photo_url_item}})
+            if embeds_batch2:
+                payload2 = {
+                    "username": "Vinted ASSE Bot",
+                    "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
+                    "embeds": embeds_batch2,
+                    "flags": 4096
+                }
+                requests.post(DISCORD_WEBHOOK_URL, json=payload2, timeout=6)
+
+        log(f"✅ Alerte envoyée #{item_id} ({min(len(photos), 20)} photos certifiées)")
 
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
