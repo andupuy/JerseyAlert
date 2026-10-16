@@ -9,6 +9,11 @@ Vinted Bot optimisé pour Oracle Cloud
 
 import os
 import sys
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 import time
 import random
 import requests
@@ -311,7 +316,7 @@ def scrape_item_details(page, item_url):
 
         # Récupération de TOUTES les photos haute résolution (/f800/) depuis les scripts Next.js ou le DOM
         # avec exclusion stricte de l'avatar du vendeur
-        photos = page.evaluate("""() => {
+        photos = page.evaluate(r"""() => {
             const photos = [];
             // Détection exhaustive des signatures d'avatar vendeur
             const avatarSigs = new Set();
@@ -406,7 +411,7 @@ def scrape_item_details(page, item_url):
         # Si l'API n'a pas tout renvoyé ou a échoué, on extrait depuis les scripts / le DOM de la page
         if not description or brand == 'N/A' or size == 'N/A' or status in ['N/A', 'Non spécifié'] or not seller:
             try:
-                dom_details = page.evaluate("""() => {
+                dom_details = page.evaluate(r"""() => {
                     let dBrand = 'N/A', dSize = 'N/A', dStatus = 'N/A', dDesc = '', dSeller = '';
                     
                     const descEl = document.querySelector('[itemprop="description"]');
@@ -563,7 +568,7 @@ def extract_items_from_page(page):
         page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
         time.sleep(random.uniform(1, 2))
         
-        items = page.evaluate("""
+        items = page.evaluate(r"""
             () => {
                 const items = [];
                 const itemElements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
