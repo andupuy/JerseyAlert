@@ -582,7 +582,6 @@ def extract_items_from_page(page):
     """Extrait les articles avec Parsing Intelligent du Titre (V5.0)"""
     try:
         page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-        time.sleep(0.4)
         
         items = page.evaluate("""
             () => {
@@ -979,10 +978,15 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
         new_found.sort(key=lambda x: int(x['id']))
         
         for item in new_found:
-            # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€)
-            is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
+            t_titre = item.get('title', 'Sans titre')
+            t_prix = item.get('price', 'N/A')
+            t_taille = item.get('size', 'N/A')
+            log(f"🆕 [Vinted] Détecté #{item['id']} : '{t_titre}' ({t_prix} | {t_taille}) [{source_label}]")
+
+            # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€, Vestes)
+            is_excl, reason = is_excluded_product(t_titre, '', t_prix)
             if is_excl:
-                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
+                log(f"🚫 Article ignoré dès la liste ({reason}) : '{t_titre}' ({t_prix})")
                 continue
 
             # 2. Filtrage des tailles enfants et XS/S
@@ -1004,12 +1008,16 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
             shared_seen_ids = set(seen_ids_list[:3000])
 
 def safe_route_filter(route):
-    """Bloque les images/médias lourds sans crasher si la requête est annulée en vol"""
+    """Bloque les images/médias lourds et les trackers publicitaires pour accélérer le chargement"""
     try:
         if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
             route.abort()
-        else:
-            route.continue_()
+            return
+        url_low = route.request.url.lower()
+        if any(trk in url_low for trk in ["google-analytics", "doubleclick", "facebook", "criteo", "datadog", "braze", "hotjar"]):
+            route.abort()
+            return
+        route.continue_()
     except Exception:
         pass
 
@@ -1088,7 +1096,7 @@ def worker_football_stream():
                             except:
                                 break
 
-                    time.sleep(random.uniform(3.5, 4.5))
+                    time.sleep(random.uniform(1.8, 2.5))
 
                 try: browser.close()
                 except: pass
@@ -1201,7 +1209,7 @@ def worker_search_stream():
                             except:
                                 break
 
-                    time.sleep(random.uniform(3.5, 4.5))
+                    time.sleep(random.uniform(2.0, 3.0))
 
                 try: browser.close()
                 except: pass
