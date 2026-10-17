@@ -1023,19 +1023,15 @@ def safe_route_filter(route):
 
 def worker_turbo_sniper():
     """Moteur Turbo Sniper : Priorité 80% au Flux Football Direct (temps réel pur) + 20% Filet de Sécurité Mots-clés alternés"""
-    FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&order=newest_first"
+    # Flux combiné Temps Réel : Maillots (3267) + Hauts & T-shirts de sport (584)
+    FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&catalog_ids[]=584&order=newest_first"
     
+    # Filet de Sécurité resserré (rotation ultra-rapide en ~1 min 30)
     SAFETY_QUERIES = [
-        ("Maillot Asse [VERT]", get_search_url("Maillot Asse", color_id=10)),
         ("Maillot Asse", get_search_url("Maillot Asse")),
         ("Maillot Saint-Etienne", get_search_url("Maillot Saint-Etienne")),
         ("Maillot St Etienne", get_search_url("Maillot St Etienne")),
         ("Jersey Asse", get_search_url("Jersey Asse")),
-        ("Jersey Saint-Etienne", get_search_url("Jersey Saint-Etienne")),
-        ("Ensemble Asse", get_search_url("Ensemble Asse")),
-        ("Inter 'Maglia Asse'", get_search_url("Maglia Asse")),
-        ("Inter 'Camiseta Asse'", get_search_url("Camiseta Asse")),
-        ("Inter 'Trikot Asse'", get_search_url("Trikot Asse")),
     ]
 
     log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité Foot Temps Réel + Filet Sécurité Alterné)")
