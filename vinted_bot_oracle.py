@@ -189,18 +189,8 @@ def is_excluded_size(size_str, title_str="", desc_str=""):
     if re.match(r'^(XS\s*/\s*S|S\s*/\s*XS)$', s):
         return True, f"Taille XS/S ({size_str})"
 
-    # Tailles numériques équivalentes à XS/S (32, 34, 36)
     if re.match(r'^(32|34|36)(?:\s*/\s*(?:XS|S))?$', s) or re.match(r'^(?:XS|S)\s*/\s*(32|34|36)$', s):
         return True, f"Taille numérique XS/S ({size_str})"
-
-    # 6. Vestes, blousons, doudounes, parkas, coupe-vents
-    jacket_pattern = r'\b(veste|vestes|blouson|blousons|doudoune|doudounes|parka|parkas|coupe[- ]vent|k[- ]?way|anorak)\b'
-    if re.search(jacket_pattern, t):
-        if not re.search(r'\b(maillot|jersey)\b', t):
-            return True, "Veste / Blouson"
-    if d and re.search(jacket_pattern, d):
-        if not re.search(r'\b(maillot|jersey)\b', t):
-            return True, "Veste / Blouson"
 
     return False, "OK"
 
