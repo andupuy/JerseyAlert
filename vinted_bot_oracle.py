@@ -707,19 +707,19 @@ def extract_items_from_page(page):
     """Extrait les articles avec Parsing Intelligent du Titre (V5.0 Ultra-Rapide)"""
     try:
         try:
-            page.wait_for_selector('div[data-testid*="item"], div[class*="feed-grid__item"]', timeout=2000)
+            page.wait_for_selector('div[class*="feed-grid__item"], [data-testid="grid-item"]', timeout=2000)
         except Exception:
             pass
         
         items = page.evaluate("""
             () => {
                 const items = [];
-                const itemElements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
-                const maxToExtract = 48; // Buffer de sécurité blindé pour les heures de pointe
-                const count = Math.min(itemElements.length, maxToExtract);
+                const gridItems = document.querySelectorAll('div[class*="feed-grid__item"], [data-testid="grid-item"]');
+                const maxToExtract = 48; // Buffer de sécurité blindé pour les heures de pointe (48 vraies annonces)
+                const count = Math.min(gridItems.length, maxToExtract);
                 
                 for (let idx = 0; idx < count; idx++) {
-                    const el = itemElements[idx];
+                    const el = gridItems[idx];
                     try {
                         const link = el.querySelector('a');
                         if (!link) continue;
