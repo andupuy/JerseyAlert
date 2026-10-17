@@ -454,6 +454,13 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         }
         .btn-clear:hover { background: rgba(239, 68, 68, 0.35); color: #fff; }
 
+        .btn-copy {
+            background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);
+            padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; cursor: pointer;
+            transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px;
+        }
+        .btn-copy:hover { background: rgba(59, 130, 246, 0.35); color: #fff; }
+
         .terminal-logs {
             padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
             font-size: 0.73rem; line-height: 1.45; color: #10b981; overflow-y: auto; flex: 1; white-space: pre-wrap; word-break: break-all;
@@ -546,6 +553,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         <div class="terminal-header">
             <span id="terminalTitle">📡 Flux de logs complet (Temps réel)</span>
             <div class="terminal-header-right">
+                <button id="btnCopyLogs" class="btn-copy" onclick="copyCurrentLogs()" title="Copier le texte sélectionné ou l'intégralité du journal">
+                    📋 Copier
+                </button>
                 <button id="btnClearErrors" class="btn-clear" onclick="clearErrorsHistory()">
                     🧹 Vider l'historique
                 </button>
@@ -575,6 +585,29 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         let cachedFullLogs = "";
         let cachedErrorLogs = "";
         let cachedSellers = [];
+        let isUserInteracting = false;
+
+        function hasUserSelection() {
+            const sel = window.getSelection();
+            if (!sel || sel.isCollapsed) return false;
+            const box = document.getElementById("logsBox");
+            return box && box.contains(sel.anchorNode);
+        }
+
+        window.addEventListener("DOMContentLoaded", () => {
+            const box = document.getElementById("logsBox");
+            if (box) {
+                box.addEventListener("mousedown", () => { isUserInteracting = true; });
+            }
+            window.addEventListener("mouseup", () => {
+                setTimeout(() => {
+                    isUserInteracting = hasUserSelection();
+                }, 300);
+            });
+            document.addEventListener("selectionchange", () => {
+                isUserInteracting = hasUserSelection();
+            });
+        });
 
         function showToast(msg, bg="#22c55e") {
             const t = document.getElementById("toast");
@@ -582,6 +615,33 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             t.style.background = bg;
             t.style.opacity = "1";
             setTimeout(() => { t.style.opacity = "0"; }, 2500);
+        }
+
+        async function copyCurrentLogs() {
+            const sel = window.getSelection();
+            let textToCopy = "";
+            if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) {
+                textToCopy = sel.toString();
+            } else {
+                const box = document.getElementById("logsBox");
+                textToCopy = box ? box.innerText : "";
+            }
+            if (!textToCopy) {
+                showToast("Rien à copier", "#f59e0b");
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+                showToast("📋 Copié dans le presse-papier !");
+            } catch(e) {
+                const ta = document.createElement("textarea");
+                ta.value = textToCopy;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                document.body.removeChild(ta);
+                showToast("📋 Copié dans le presse-papier !");
+            }
         }
 
         function switchTab(tab) {
@@ -651,10 +711,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 
                 if (activeTab === "all") {
                     const box = document.getElementById("logsBox");
-                    const wasBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 60;
-                    box.innerText = text;
-                    if (wasBottom) {
-                        box.scrollTop = box.scrollHeight;
+                    if (!hasUserSelection() && !isUserInteracting) {
+                        if (box.innerText !== text) {
+                            const wasBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 60;
+                            box.innerText = text;
+                            if (wasBottom) {
+                                box.scrollTop = box.scrollHeight;
+                            }
+                        }
                     }
                 }
                 const now = new Date();
@@ -679,10 +743,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
                 if (activeTab === "errors") {
                     const box = document.getElementById("logsBox");
-                    const wasBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 60;
-                    box.innerText = data.errors;
-                    if (wasBottom) {
-                        box.scrollTop = box.scrollHeight;
+                    if (!hasUserSelection() && !isUserInteracting) {
+                        if (box.innerText !== data.errors) {
+                            const wasBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 60;
+                            box.innerText = data.errors;
+                            if (wasBottom) {
+                                box.scrollTop = box.scrollHeight;
+                            }
+                        }
                     }
                 }
             } catch(e) {}
