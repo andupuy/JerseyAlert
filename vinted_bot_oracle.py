@@ -38,6 +38,7 @@ SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 SEEN_IDS_FILE = "seen_ids_cache.json"
+ALERTED_IDS_FILE = "alerted_ids_cache.json"
 BLACKLIST_FILE = "blacklisted_sellers.json"
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
@@ -345,6 +346,66 @@ def save_seen_ids_cache(seen_set):
             json.dump(recent_ids, f)
     except Exception as e:
         log(f"⚠️ Erreur sauvegarde cache IDs vus: {e}")
+
+def load_alerted_ids_cache():
+    """Charge la liste des IDs ayant déjà reçu une alerte Discord (garantie absolue anti-doublon)"""
+    alerted = set()
+    if os.path.exists(ALERTED_IDS_FILE):
+        try:
+            with open(ALERTED_IDS_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for x in data:
+                        try:
+                            alerted.add(int(x))
+                        except (ValueError, TypeError):
+                            pass
+            log(f"💾 [Cache Alertes] {len(alerted)} annonces déjà alertées chargées depuis {ALERTED_IDS_FILE}")
+        except Exception as e:
+            log(f"⚠️ Erreur chargement cache alertes: {e}")
+    return alerted
+
+def save_alerted_ids_cache(alerted_set):
+    """Sauvegarde les 3000 derniers IDs alertés sur disque pour résister aux redémarrages"""
+    try:
+        recent_ids = sorted(list(alerted_set), reverse=True)[:3000]
+        with open(ALERTED_IDS_FILE, "w") as f:
+            json.dump(recent_ids, f)
+    except Exception as e:
+        log(f"⚠️ Erreur sauvegarde cache alertes: {e}")
+
+def fetch_item_description(item_url):
+    """Récupère rapidement la description d'une annonce via une mini-requête HTTP (< 0.3s)"""
+    if not item_url:
+        return ""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'fr-FR,fr;q=0.9',
+        }
+        resp = requests.get(item_url, headers=headers, timeout=4)
+        if resp.status_code == 200:
+            resp.encoding = 'utf-8'
+            html = resp.text
+            desc_raw = ""
+            m_json = re.search(r'\"description\":\"(.*?)\"', html)
+            if m_json:
+                raw_val = m_json.group(1)
+                def unescape_u(m):
+                    try:
+                        return chr(int(m.group(1), 16))
+                    except Exception:
+                        return m.group(0)
+                desc_raw = re.sub(r'\\u([0-9a-fA-F]{4})', unescape_u, raw_val)
+                desc_raw = desc_raw.replace('\\n', '\n').replace('\\r', '').replace('\\"', '"').replace('\\/', '/').replace('\\\\', '\\')
+            if not desc_raw:
+                m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
+                if m_dom:
+                    desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
+            return clean_text(desc_raw)
+    except Exception as e:
+        log(f"⚠️ [Vinted] Erreur micro-fetch description: {e}")
+    return ""
 
 def scrape_item_details(page, item_url):
     """Va sur la page de l'article pour récupérer infos détaillées via API interne (V3.0 API Call)"""
@@ -746,6 +807,22 @@ def send_discord_alert(context, item):
     """Envoie une alerte Discord ultra-rapide (~0.3s) avec description Garmin et jusqu'à 10 photos HD dès le 1er envoi"""
     if not DISCORD_WEBHOOK_URL: return
 
+    global alerted_ids
+    raw_id = item.get('id')
+    try:
+        int_id = int(raw_id)
+    except (ValueError, TypeError):
+        int_id = raw_id
+
+    # VERROU ABSOLU ANTI-DOUBLON (Empêche strictement 2 alertes pour le même item ID)
+    with state_lock:
+        if int_id and int_id in alerted_ids:
+            log(f"🛡️ [Anti-Doublon Absolu] Alerte déjà envoyée pour #{int_id}, envoi bloqué !")
+            return
+        if int_id:
+            alerted_ids.add(int_id)
+            save_alerted_ids_cache(alerted_ids)
+
     try:
         import re
 
@@ -754,7 +831,7 @@ def send_discord_alert(context, item):
         size_raw = item.get('size', 'N/A')
         status_raw = item.get('status', 'Non spécifié')
         photo_url = item.get('photo', '')
-        item_id = item.get('id')
+        item_id = int_id
         item_url = item.get('url', f"https://www.vinted.fr/items/{item_id}")
 
         # Nettoyage radical du titre
@@ -940,16 +1017,20 @@ def watchdog_handler(signum, frame):
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
 state_lock = threading.Lock()
-shared_seen_ids = load_seen_ids_cache()
+flux_seen_ids = load_seen_ids_cache()
+filet_seen_ids = set()
+alerted_ids = load_alerted_ids_cache()
 shared_last_seen_id = load_last_seen_id()
-if shared_seen_ids:
-    shared_last_seen_id = max(shared_last_seen_id, max(shared_seen_ids))
+if flux_seen_ids:
+    shared_last_seen_id = max(shared_last_seen_id, max(flux_seen_ids))
 
 def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
     """Traite une liste d'articles récupérés de manière thread-safe (filtrage et alertes Discord)"""
-    global shared_seen_ids, shared_last_seen_id
+    global flux_seen_ids, filet_seen_ids, alerted_ids, shared_last_seen_id
     with state_lock:
         new_found = []
+        is_filet = "Filet" in source_label
+
         for item in items:
             try:
                 item_id = int(item['id'])
@@ -957,20 +1038,33 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 continue
             item['id'] = item_id
 
-            if item_id not in shared_seen_ids:
-                if shared_last_seen_id == 0 or item_id > (shared_last_seen_id - 500000):
+            # 1. Protection absolue : si déjà alerté sur Discord, on ignore immédiatement (zéro doublon)
+            if item_id in alerted_ids:
+                continue
+
+            if is_filet:
+                # Filet de sécurité : cache dédié pour ne pas être pollué par le flux général
+                if item_id not in filet_seen_ids:
                     new_found.append(item)
-                shared_seen_ids.add(item_id)
+                    filet_seen_ids.add(item_id)
+            else:
+                # Flux général
+                if item_id not in flux_seen_ids:
+                    if shared_last_seen_id == 0 or item_id > (shared_last_seen_id - 500000):
+                        new_found.append(item)
+                    flux_seen_ids.add(item_id)
         
         if not new_found:
             return
         
-        # Sauvegarde persistante sur disque pour résister aux redémarrages et redéploiements
-        save_seen_ids_cache(shared_seen_ids)
+        # Sauvegarde persistante des IDs vus du flux sur disque
+        if not is_filet:
+            save_seen_ids_cache(flux_seen_ids)
 
         if is_initial:
-            shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
-            save_last_seen_id(shared_last_seen_id)
+            if not is_filet:
+                shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
+                save_last_seen_id(shared_last_seen_id)
             log(f"📥 [{source_label}] {len(new_found)} annonce(s) existante(s) absorbée(s) au démarrage.")
             return
         
@@ -981,7 +1075,13 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
             t_titre = item.get('title', 'Sans titre')
             t_prix = item.get('price', 'N/A')
             t_taille = item.get('size', 'N/A')
-            log(f"🆕 [Vinted] Détecté #{item['id']} : '{t_titre}' ({t_prix} | {t_taille}) [{source_label}]")
+            item_id = item['id']
+            item_url = item.get('url', f"https://www.vinted.fr/items/{item_id}")
+            log(f"🆕 [Vinted] Détecté #{item_id} : '{t_titre}' ({t_prix} | {t_taille}) [{source_label}]")
+
+            # Double vérification anti-doublon (au cas où alerté entre-temps)
+            if item_id in alerted_ids:
+                continue
 
             # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€, Vestes)
             is_excl, reason = is_excluded_product(t_titre, '', t_prix)
@@ -995,17 +1095,40 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 if is_excl:
                     log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
                     continue
-            if is_asse_jersey_match(item.get('title')):
-                log(f"🎯 MATCH {source_label} : '{item.get('title')}' ({item.get('price')})")
+
+            # 3. Correspondance ASSE
+            matched = False
+            # Test direct sur le titre (ultra-rapide pour Flux et Filet)
+            if is_asse_jersey_match(t_titre):
+                matched = True
+                log(f"🎯 MATCH {source_label} : '{t_titre}' ({t_prix})")
+            elif is_filet:
+                # Si l'annonce vient du Filet et que le titre est générique (ex: 'Maillot de foot'),
+                # on vérifie la description car Vinted l'a retournée suite à la recherche ASSE
+                desc = fetch_item_description(item_url)
+                if desc:
+                    is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
+                    if is_excl_d:
+                        log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
+                        continue
+                    if is_asse_jersey_match(desc):
+                        matched = True
+                        log(f"🎯 MATCH {source_label} (Confirmé dans la description) : '{t_titre}' ({t_prix})")
+
+            if matched:
                 send_discord_alert(None, item)
         
-        shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
-        save_last_seen_id(shared_last_seen_id)
+        if not is_filet and new_found:
+            shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
+            save_last_seen_id(shared_last_seen_id)
         
         # Nettoyage cache IDs si trop volumineux
-        if len(shared_seen_ids) > 5000:
-            seen_ids_list = sorted(list(shared_seen_ids), reverse=True)
-            shared_seen_ids = set(seen_ids_list[:3000])
+        if len(flux_seen_ids) > 5000:
+            seen_ids_list = sorted(list(flux_seen_ids), reverse=True)
+            flux_seen_ids = set(seen_ids_list[:3000])
+        if len(filet_seen_ids) > 2000:
+            filet_ids_list = sorted(list(filet_seen_ids), reverse=True)
+            filet_seen_ids = set(filet_ids_list[:1000])
 
 def safe_route_filter(route):
     """Bloque les images/médias lourds et les trackers publicitaires pour accélérer le chargement"""
