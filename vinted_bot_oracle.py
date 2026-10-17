@@ -56,6 +56,7 @@ CHROMIUM_ARGS = [
     '--disable-component-update',
     '--disable-extensions',
     '--disable-default-apps',
+    '--disable-blink-features=AutomationControlled',
     '--mute-audio'
 ]
 
@@ -1214,13 +1215,7 @@ def run_bot():
         os.nice(10)  # Réduit la priorité CPU pour garantir un plafond bas
     except Exception:
         pass
-    try:
-        import subprocess
-        log("🚀 Lancement du sous-processus LeBonCoin Bot indépendant...")
-        subprocess.Popen([sys.executable, "leboncoin_bot.py"])
-    except Exception as e:
-        log(f"⚠️ Erreur démarrage LeBonCoin: {e}")
-    log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER PARALLÈLE (Mode Éco CPU < 0.5 vCPU)")
+    log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER 100% VINTED EXCLUSIF")
     log("⚡ [Vinted] Flux Foot + Recherches Mots-Clés s'exécutent SIMULTANÉMENT")
     log("📸 [Vinted] Support jusqu'à 20 photos HD par alerte Discord actif")
 
