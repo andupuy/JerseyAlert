@@ -1131,8 +1131,8 @@ def worker_turbo_sniper():
                         if hasattr(signal, "SIGALRM"):
                             signal.alarm(0)
 
-                    # Pause ultra-courte entre chaque scan (1.8s à 2.4s)
-                    time.sleep(random.uniform(1.8, 2.4))
+                    # Pause optimisée entre chaque scan (1.0s à 1.4s pour cadence ~4.5s)
+                    time.sleep(random.uniform(1.0, 1.4))
 
                 try: browser.close()
                 except: pass
