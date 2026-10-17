@@ -1027,19 +1027,29 @@ def send_discord_alert(context, item):
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
-        # Description formatée pour Discord embed
+        # Description formatée pour Discord embed avec bouton d'achat direct
         description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
         if seller_name:
             description_text += f"\n👤 Vendeur: **{seller_name}**"
+
+        description_text += f"\n\n🛒 **[⚡ ACHETER SUR VINTED (CLIQUEZ ICI) ⚡]({item_url})**"
+
         if desc_clean:
-            embed_desc_body = desc_clean[:400] + ("..." if len(desc_clean) > 400 else "")
-            description_text += f"\n\n{embed_desc_body}"
+            embed_desc_body = desc_clean[:350] + ("..." if len(desc_clean) > 350 else "")
+            description_text += f"\n\n📝 *Description :*\n{embed_desc_body}"
 
         embed1 = {
             "title": f"🔔 {final_title}",
             "url": item_url,
             "description": description_text,
             "color": 0x09B83E,
+            "fields": [
+                {
+                    "name": "⚡ Accès Rapide",
+                    "value": f"👉 **[⚡ OUVRIR ET ACHETER IMMÉDIATEMENT ⚡]({item_url})**",
+                    "inline": False
+                }
+            ],
             "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
             "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
@@ -1068,7 +1078,20 @@ def send_discord_alert(context, item):
             "content": notif_text,
             "username": "Vinted ASSE Bot", 
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
-            "embeds": embeds_batch1
+            "embeds": embeds_batch1,
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "style": 5,
+                            "label": "⚡ Acheter sur Vinted",
+                            "url": item_url
+                        }
+                    ]
+                }
+            ]
         }
 
         requests.post(DISCORD_WEBHOOK_URL, json=payload1, timeout=8)
