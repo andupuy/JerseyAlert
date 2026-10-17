@@ -41,6 +41,7 @@ STATE_FILE = "last_seen_id.txt"
 SEEN_IDS_FILE = "seen_ids_cache.json"
 ALERTED_IDS_FILE = "alerted_ids_cache.json"
 FILET_SEEN_IDS_FILE = "filet_seen_ids_cache.json"
+ERRORS_LOG_FILE = os.environ.get("ERRORS_LOG_FILE", "/root/vinted_errors.log" if os.path.exists("/root/JerseyAlert") else "vinted_errors.log")
 BLACKLIST_FILE = "blacklisted_sellers.json"
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
@@ -303,9 +304,17 @@ def get_search_url(query, color_id=None):
     return url
 
 def log(message):
-    """Log avec timestamp heure de Paris"""
+    """Log avec timestamp heure de Paris et persistance automatique des erreurs"""
     timestamp = get_paris_time().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{timestamp}] {message}", flush=True)
+    formatted = f"[{timestamp}] {message}"
+    print(formatted, flush=True)
+
+    if any(k in message for k in ["⚠️", "🚨", "❌", "Erreur", "erreur", "Error", "error", "Timeout", "timeout", "WATCHDOG", "Incident", "incident"]):
+        try:
+            with open(ERRORS_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(formatted + "\n")
+        except Exception:
+            pass
 
 def load_last_seen_id():
     """Charge le dernier ID vu depuis le fichier"""

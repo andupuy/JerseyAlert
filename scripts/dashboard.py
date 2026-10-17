@@ -16,6 +16,11 @@ AUTH_USER = os.environ.get("DASHBOARD_USER", "admin")
 AUTH_PASS = os.environ.get("DASHBOARD_PASS", "asse2026")
 AUTH_HEADER = "Basic " + base64.b64encode(f"{AUTH_USER}:{AUTH_PASS}".encode()).decode()
 
+ERRORS_LOG_FILE = os.environ.get(
+    "ERRORS_LOG_FILE",
+    "/root/vinted_errors.log" if os.path.exists("/root") else "vinted_errors.log"
+)
+
 # In-memory caches to handle multi-device / multi-client connections seamlessly without CPU overload
 cache_lock = threading.Lock()
 logs_cache = {
@@ -113,6 +118,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/api/start":
             subprocess.run(["systemctl", "start", "vinted-bot"], timeout=10)
             self.send_json_response({"success": True, "message": "Bot démarré !"})
+        elif parsed.path == "/api/clear-errors":
+            try:
+                now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+                with open(ERRORS_LOG_FILE, "w", encoding="utf-8") as f:
+                    f.write(f"[{now_str}] 🧹 Historique des erreurs réinitialisé par l'utilisateur.\n")
+                with cache_lock:
+                    logs_cache["timestamp"] = 0
+                self.send_json_response({"success": True, "message": "Historique des erreurs réinitialisé !"})
+            except Exception as e:
+                self.send_json_response({"success": False, "message": f"Erreur: {e}"})
         else:
             self.send_response(404)
             self.end_headers()
@@ -188,7 +203,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             if now - logs_cache["timestamp"] < 2.0 and logs_cache["full"]:
                 return logs_cache
 
-        # Re-fetch from journalctl
+        # Re-fetch from journalctl and persistent file
         full_logs, error_logs, error_count = self.fetch_logs_and_errors()
         with cache_lock:
             logs_cache["timestamp"] = now
@@ -199,6 +214,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
     def fetch_logs_and_errors(self):
         try:
+            # 1. Fetch live stream
             res = subprocess.run(
                 ["journalctl", "-u", "vinted-bot", "-n", "150", "--no-pager"],
                 capture_output=True, text=True, timeout=5
@@ -206,14 +222,42 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             raw_text = res.stdout
             lines = raw_text.splitlines()
 
-            # Filter error and warning lines
-            filtered = []
+            # 2. Sync any newly appeared errors/warnings into persistent log file
+            new_errs = []
             for line in lines:
                 if ERROR_PATTERNS.search(line):
-                    filtered.append(line)
+                    new_errs.append(line)
 
-            error_text = "\n".join(filtered) if filtered else "✅ Aucun avertissement ni incident détecté dans les 150 derniers logs. Tout roule parfaitement !"
-            return raw_text, error_text, len(filtered)
+            if new_errs and os.path.exists(ERRORS_LOG_FILE):
+                try:
+                    # Read tail of existing file to avoid duplicates
+                    with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                        existing_tail = set(f.read().splitlines()[-100:])
+                    to_append = [e for e in new_errs if e not in existing_tail]
+                    if to_append:
+                        with open(ERRORS_LOG_FILE, "a", encoding="utf-8") as f:
+                            for e in to_append:
+                                f.write(e + "\n")
+                except Exception:
+                    pass
+
+            # 3. Read full persistent error history
+            if os.path.exists(ERRORS_LOG_FILE):
+                with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                    stored_lines = [l.strip() for l in f if l.strip()]
+            else:
+                stored_lines = []
+
+            # Count only actual errors (ignore user reset notification line if alone)
+            real_errors = [l for l in stored_lines if "🧹 Historique des erreurs réinitialisé" not in l]
+            error_count = len(real_errors)
+
+            if stored_lines:
+                error_text = "\n".join(stored_lines)
+            else:
+                error_text = "✅ Aucun avertissement ni incident enregistré dans l'historique. Tout roule parfaitement !"
+
+            return raw_text, error_text, error_count
         except Exception as e:
             err = f"Erreur lecture logs: {e}"
             return err, err, 0
@@ -274,7 +318,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             background: #1e293b; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
         .pill-count {
-            padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; font-weight: 700;
+            padding: 1px 7px; border-radius: 10px; font-size: 0.7rem; font-weight: 700;
         }
         .pill-zero { background: #334155; color: #94a3b8; }
         .pill-warn { background: var(--amber); color: #000; animation: pulse 2s infinite; }
@@ -292,6 +336,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             background: #0d131f; padding: 8px 12px; font-size: 0.75rem; color: var(--muted);
             display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border);
         }
+        .terminal-header-right {
+            display: flex; align-items: center; gap: 10px;
+        }
+        .btn-clear {
+            background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4);
+            padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; cursor: pointer;
+            transition: all 0.2s; display: none; align-items: center; gap: 4px;
+        }
+        .btn-clear:hover { background: rgba(239, 68, 68, 0.35); color: #fff; }
+
         .terminal-logs {
             padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
             font-size: 0.73rem; line-height: 1.45; color: #10b981; overflow-y: auto; flex: 1; white-space: pre-wrap; word-break: break-all;
@@ -336,14 +390,19 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             📡 Flux complet
         </button>
         <button id="tabErrors" class="tab-btn" onclick="switchTab('errors')">
-            ⚠️ Erreurs & Alertes <span id="errorBadge" class="pill-count pill-zero">0</span>
+            ⚠️ Historique Erreurs <span id="errorBadge" class="pill-count pill-zero">0</span>
         </button>
     </div>
 
     <div class="terminal-container">
         <div class="terminal-header">
             <span id="terminalTitle">📡 Flux de logs complet (Temps réel)</span>
-            <span id="lastUpdate">Màj ...</span>
+            <div class="terminal-header-right">
+                <button id="btnClearErrors" class="btn-clear" onclick="clearErrorsHistory()">
+                    🧹 Vider l'historique
+                </button>
+                <span id="lastUpdate">Màj ...</span>
+            </div>
         </div>
         <div id="logsBox" class="terminal-logs">Chargement des logs...</div>
     </div>
@@ -370,6 +429,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             const tabErrors = document.getElementById("tabErrors");
             const box = document.getElementById("logsBox");
             const title = document.getElementById("terminalTitle");
+            const btnClear = document.getElementById("btnClearErrors");
 
             if (tab === "all") {
                 tabAll.className = "tab-btn active";
@@ -377,12 +437,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 box.className = "terminal-logs";
                 box.innerText = cachedFullLogs || "Chargement du flux complet...";
                 title.innerText = "📡 Flux de logs complet (Temps réel)";
+                btnClear.style.display = "none";
             } else {
                 tabAll.className = "tab-btn";
                 tabErrors.className = "tab-btn active";
                 box.className = "terminal-logs errors-view";
-                box.innerText = cachedErrorLogs || "Chargement des alertes...";
-                title.innerText = "⚠️ Erreurs & Incidents filtrés";
+                box.innerText = cachedErrorLogs || "Chargement de l'historique...";
+                title.innerText = "⚠️ Historique persistant des erreurs et alertes";
+                btnClear.style.display = "inline-flex";
             }
             box.scrollTop = box.scrollHeight;
         }
@@ -454,9 +516,21 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         }
 
         async function refreshAll() {
-            // Adaptive polling: if page is hidden (background tab), do not waste VPS resources
             if (document.hidden) return;
             await Promise.all([fetchLogs(), fetchErrors()]);
+        }
+
+        async function clearErrorsHistory() {
+            if (!confirm("Voulez-vous vraiment effacer l'historique persistant des erreurs et alertes ?")) return;
+            showToast("Réinitialisation...", "#f59e0b");
+            try {
+                const res = await fetch("/api/clear-errors", { method: "POST" });
+                const data = await res.json();
+                showToast(data.message || "Historique réinitialisé !");
+                await fetchErrors();
+            } catch(e) {
+                showToast("Erreur lors de la réinitialisation", "#ef4444");
+            }
         }
 
         async function restartBot() {
