@@ -9,6 +9,7 @@ Vinted Bot optimisé pour Oracle Cloud
 
 import os
 import sys
+import re
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -39,6 +40,7 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
 SEEN_IDS_FILE = "seen_ids_cache.json"
 ALERTED_IDS_FILE = "alerted_ids_cache.json"
+FILET_SEEN_IDS_FILE = "filet_seen_ids_cache.json"
 BLACKLIST_FILE = "blacklisted_sellers.json"
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
@@ -373,6 +375,33 @@ def save_alerted_ids_cache(alerted_set):
             json.dump(recent_ids, f)
     except Exception as e:
         log(f"⚠️ Erreur sauvegarde cache alertes: {e}")
+
+def load_filet_seen_ids_cache():
+    """Charge l'historique des IDs déjà vus par le Filet de sécurité"""
+    seen = set()
+    if os.path.exists(FILET_SEEN_IDS_FILE):
+        try:
+            with open(FILET_SEEN_IDS_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for x in data:
+                        try:
+                            seen.add(int(x))
+                        except (ValueError, TypeError):
+                            pass
+            log(f"💾 [Cache Filet] {len(seen)} IDs déjà vus chargés depuis {FILET_SEEN_IDS_FILE}")
+        except Exception as e:
+            log(f"⚠️ Erreur chargement cache Filet: {e}")
+    return seen
+
+def save_filet_seen_ids_cache(seen_set):
+    """Sauvegarde les 3000 derniers IDs vus par le Filet sur disque"""
+    try:
+        recent_ids = sorted(list(seen_set), reverse=True)[:3000]
+        with open(FILET_SEEN_IDS_FILE, "w") as f:
+            json.dump(recent_ids, f)
+    except Exception as e:
+        log(f"⚠️ Erreur sauvegarde cache Filet: {e}")
 
 def fetch_item_description(item_url):
     """Récupère rapidement la description d'une annonce via une mini-requête HTTP (< 0.3s)"""
@@ -1016,21 +1045,51 @@ def watchdog_handler(signum, frame):
     print(f"[{timestamp}] 🚨 WATCHDOG: Bot figé depuis trop longtemps ! Redémarrage forcé...", flush=True)
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
-state_lock = threading.Lock()
+state_lock = threading.RLock()
 flux_seen_ids = load_seen_ids_cache()
-filet_seen_ids = set()
+filet_seen_ids = load_filet_seen_ids_cache()
 alerted_ids = load_alerted_ids_cache()
+initialized_sources = set()
 shared_last_seen_id = load_last_seen_id()
 if flux_seen_ids:
     shared_last_seen_id = max(shared_last_seen_id, max(flux_seen_ids))
 
 def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
     """Traite une liste d'articles récupérés de manière thread-safe (filtrage et alertes Discord)"""
-    global flux_seen_ids, filet_seen_ids, alerted_ids, shared_last_seen_id
+    global flux_seen_ids, filet_seen_ids, alerted_ids, shared_last_seen_id, initialized_sources
     with state_lock:
-        new_found = []
         is_filet = "Filet" in source_label
 
+        # Absorption automatique de l'historique lors du premier passage de chaque source
+        if source_label not in initialized_sources or is_initial:
+            initialized_sources.add(source_label)
+            count_absorbed = 0
+            for item in items:
+                try:
+                    i_id = int(item['id'])
+                except (ValueError, TypeError):
+                    continue
+                if is_filet:
+                    if i_id not in filet_seen_ids:
+                        filet_seen_ids.add(i_id)
+                        count_absorbed += 1
+                else:
+                    if i_id not in flux_seen_ids:
+                        flux_seen_ids.add(i_id)
+                        count_absorbed += 1
+            if is_filet:
+                save_filet_seen_ids_cache(filet_seen_ids)
+            else:
+                save_seen_ids_cache(flux_seen_ids)
+                if items:
+                    try:
+                        shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in items if str(x.get('id', '')).isdigit()))
+                        save_last_seen_id(shared_last_seen_id)
+                    except: pass
+            log(f"📥 [{source_label}] {count_absorbed} annonce(s) existante(s) absorbée(s) à l'initialisation.")
+            return
+
+        new_found = []
         for item in items:
             try:
                 item_id = int(item['id'])
@@ -1043,9 +1102,11 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 continue
 
             if is_filet:
-                # Filet de sécurité : cache dédié pour ne pas être pollué par le flux général
+                # Filet de sécurité : cache dédié
                 if item_id not in filet_seen_ids:
-                    new_found.append(item)
+                    # Protection stricte contre les annonces anciennes de fond de catalogue
+                    if shared_last_seen_id == 0 or item_id > (shared_last_seen_id - 500000):
+                        new_found.append(item)
                     filet_seen_ids.add(item_id)
             else:
                 # Flux général
@@ -1057,17 +1118,12 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
         if not new_found:
             return
         
-        # Sauvegarde persistante des IDs vus du flux sur disque
-        if not is_filet:
+        # Sauvegarde persistante des IDs vus
+        if is_filet:
+            save_filet_seen_ids_cache(filet_seen_ids)
+        else:
             save_seen_ids_cache(flux_seen_ids)
 
-        if is_initial:
-            if not is_filet:
-                shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
-                save_last_seen_id(shared_last_seen_id)
-            log(f"📥 [{source_label}] {len(new_found)} annonce(s) existante(s) absorbée(s) au démarrage.")
-            return
-        
         log(f"🆕 [Vinted] {len(new_found)} nouvel/nouveaux article(s) détecté(s) ({source_label}) !")
         new_found.sort(key=lambda x: int(x['id']))
         
@@ -1126,9 +1182,9 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
         if len(flux_seen_ids) > 5000:
             seen_ids_list = sorted(list(flux_seen_ids), reverse=True)
             flux_seen_ids = set(seen_ids_list[:3000])
-        if len(filet_seen_ids) > 2000:
+        if len(filet_seen_ids) > 5000:
             filet_ids_list = sorted(list(filet_seen_ids), reverse=True)
-            filet_seen_ids = set(filet_ids_list[:1000])
+            filet_seen_ids = set(filet_ids_list[:3000])
 
 def safe_route_filter(route):
     """Bloque les images/médias lourds et les trackers publicitaires pour accélérer le chargement"""
@@ -1149,12 +1205,11 @@ def worker_turbo_sniper():
     # Flux combiné Temps Réel : Maillots (3267) + Hauts & T-shirts de sport (584)
     FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&catalog_ids[]=584&order=newest_first"
     
-    # Filet de Sécurité resserré (rotation ultra-rapide en ~1 min 30)
+    # Filet de Sécurité resserré (rotation ultra-rapide en ~1 min)
     SAFETY_QUERIES = [
         ("Maillot Asse", get_search_url("Maillot Asse")),
         ("Maillot Saint-Etienne", get_search_url("Maillot Saint-Etienne")),
         ("Maillot St Etienne", get_search_url("Maillot St Etienne")),
-        ("Jersey Asse", get_search_url("Jersey Asse")),
     ]
 
     log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité Foot Temps Réel + Filet Sécurité Alterné)")
