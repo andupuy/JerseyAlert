@@ -704,17 +704,13 @@ def fetch_direct_catalog_api(page, api_url):
         return []
 
 def extract_items_from_page(page):
-    """Extrait les articles avec Parsing Intelligent du Titre (V5.0 Ultra-Rapide)"""
+    """Extrait les articles avec Parsing Intelligent du Titre (V5.0 Ultra-Rapide Flash)"""
     try:
-        try:
-            page.wait_for_selector('div[class*="feed-grid__item"], [data-testid="grid-item"]', timeout=2000)
-        except Exception:
-            pass
-        
         items = page.evaluate("""
             () => {
                 const items = [];
                 const gridItems = document.querySelectorAll('div[class*="feed-grid__item"], [data-testid="grid-item"]');
+                if (!gridItems || gridItems.length === 0) return [];
                 const maxToExtract = 48; // Buffer de sécurité blindé pour les heures de pointe (48 vraies annonces)
                 const count = Math.min(gridItems.length, maxToExtract);
                 
@@ -1348,7 +1344,7 @@ def worker_turbo_sniper():
                             signal.signal(signal.SIGALRM, watchdog_handler)
                             signal.alarm(120)
 
-                        page.goto(target_url, wait_until='domcontentloaded', timeout=12000)
+                        page.goto(target_url, wait_until='commit', timeout=8000)
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted] Scan {scan_label} : {len(items)} annonces")
                         if items:
@@ -1364,15 +1360,15 @@ def worker_turbo_sniper():
                             except: pass
                             try:
                                 page = context.new_page()
-                                page.set_default_timeout(12000)
+                                page.set_default_timeout(8000)
                             except:
                                 break
                     finally:
                         if hasattr(signal, "SIGALRM"):
                             signal.alarm(0)
 
-                    # Pause optimisée ultra-réactive (0.6s à 1.0s avec jitter pour cadence ~2.2s - 2.5s)
-                    time.sleep(random.uniform(0.6, 1.0))
+                    # Pause équilibrée anti-détection (1.2s à 1.8s avec jitter, cycle global ~2.0s)
+                    time.sleep(random.uniform(1.2, 1.8))
 
                 try: browser.close()
                 except: pass
