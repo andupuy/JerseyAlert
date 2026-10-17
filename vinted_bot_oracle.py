@@ -704,23 +704,29 @@ def fetch_direct_catalog_api(page, api_url):
         return []
 
 def extract_items_from_page(page):
-    """Extrait les articles avec Parsing Intelligent du Titre (V5.0)"""
+    """Extrait les articles avec Parsing Intelligent du Titre (V5.0 Ultra-Rapide)"""
     try:
-        page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
+        try:
+            page.wait_for_selector('div[data-testid*="item"], div[class*="feed-grid__item"]', timeout=2000)
+        except Exception:
+            pass
         
         items = page.evaluate("""
             () => {
                 const items = [];
                 const itemElements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
+                const maxToExtract = 48; // Buffer de sécurité blindé pour les heures de pointe
+                const count = Math.min(itemElements.length, maxToExtract);
                 
-                itemElements.forEach((el) => {
+                for (let idx = 0; idx < count; idx++) {
+                    const el = itemElements[idx];
                     try {
                         const link = el.querySelector('a');
-                        if (!link) return;
+                        if (!link) continue;
                         
                         const url = link.href;
                         const idMatch = url.match(/items\\/(\\d+)/);
-                        if (!idMatch) return;
+                        if (!idMatch) continue;
                         const itemId = parseInt(idMatch[1]);
                         
                         // RECUPERATION DU TITRE COMPLET (contient souvent marque, taille, état)
@@ -867,7 +873,7 @@ def extract_items_from_page(page):
                     } catch (e) {
                          // Silent
                     }
-                });
+                }
                 return items;
             }
         """)
@@ -1301,7 +1307,7 @@ def worker_turbo_sniper():
                 context.route("**/*", safe_route_filter)
 
                 page = context.new_page()
-                page.set_default_timeout(20000)
+                page.set_default_timeout(12000)
 
                 session_start_time = time.time()
                 cycle_count = 0
@@ -1319,13 +1325,13 @@ def worker_turbo_sniper():
                         log("♻️ [Vinted] Recyclage préventif session Chromium...")
                         break
 
-                    # Purge préventive de l'onglet tous les 40 scans
-                    if cycle_count % 40 == 0:
+                    # Purge préventive de l'onglet tous les 120 scans (~5 minutes)
+                    if cycle_count % 120 == 0:
                         try: page.close()
                         except: pass
                         try:
                             page = context.new_page()
-                            page.set_default_timeout(20000)
+                            page.set_default_timeout(12000)
                         except: pass
 
                     # Choix de la cible : 4 scans Foot pour 1 scan Filet de sécurité
@@ -1342,7 +1348,7 @@ def worker_turbo_sniper():
                             signal.signal(signal.SIGALRM, watchdog_handler)
                             signal.alarm(120)
 
-                        page.goto(target_url, wait_until='domcontentloaded', timeout=22000)
+                        page.goto(target_url, wait_until='domcontentloaded', timeout=12000)
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted] Scan {scan_label} : {len(items)} annonces")
                         if items:
@@ -1358,15 +1364,15 @@ def worker_turbo_sniper():
                             except: pass
                             try:
                                 page = context.new_page()
-                                page.set_default_timeout(20000)
+                                page.set_default_timeout(12000)
                             except:
                                 break
                     finally:
                         if hasattr(signal, "SIGALRM"):
                             signal.alarm(0)
 
-                    # Pause optimisée entre chaque scan (1.0s à 1.4s pour cadence ~4.5s)
-                    time.sleep(random.uniform(1.0, 1.4))
+                    # Pause optimisée ultra-réactive (0.6s à 1.0s avec jitter pour cadence ~2.2s - 2.5s)
+                    time.sleep(random.uniform(0.6, 1.0))
 
                 try: browser.close()
                 except: pass
