@@ -21,7 +21,7 @@ import requests
 import signal
 import threading
 from urllib.parse import quote_plus
-from datetime import datetime
+from datetime import datetime, timezone
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -882,7 +882,7 @@ def send_discord_alert(context, item):
             "description": description_text,
             "color": 0x09B83E,
             "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
-            "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
 
         if photos:
