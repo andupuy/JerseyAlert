@@ -184,7 +184,7 @@ def run_bot():
                 time.tzset()
             current_hour = time.localtime().tm_hour
 
-            if current_hour >= 1 and current_hour < 7:
+            if os.environ.get("ENABLE_NIGHT_MODE", "false").lower() == "true" and (current_hour >= 1 and current_hour < 7):
                 log(f"🌙 Mode Veille Silencieuse activé ({current_hour}h).")
                 time.sleep(600)
                 continue

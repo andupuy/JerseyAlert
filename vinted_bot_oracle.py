@@ -15,9 +15,12 @@ try:
 except ImportError:
     pass
 import time
+import json
 import random
 import requests
 import signal
+import threading
+from urllib.parse import quote_plus
 from datetime import datetime
 try:
     from zoneinfo import ZoneInfo
@@ -34,10 +37,27 @@ SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 STATE_FILE = "last_seen_id.txt"
+SEEN_IDS_FILE = "seen_ids_cache.json"
 BLACKLIST_FILE = "blacklisted_sellers.json"
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
+
+# Flags d'optimisation Chromium (Stabilité garantie, zéro crash, basse consommation)
+CHROMIUM_ARGS = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-breakpad',
+    '--disable-component-update',
+    '--disable-extensions',
+    '--disable-default-apps',
+    '--mute-audio'
+]
 
 def load_blacklisted_sellers():
     """Charge la liste noire des vendeurs Vinted"""
@@ -173,6 +193,15 @@ def is_excluded_size(size_str, title_str="", desc_str=""):
     if re.match(r'^(32|34|36)(?:\s*/\s*(?:XS|S))?$', s) or re.match(r'^(?:XS|S)\s*/\s*(32|34|36)$', s):
         return True, f"Taille numérique XS/S ({size_str})"
 
+    # 6. Vestes, blousons, doudounes, parkas, coupe-vents
+    jacket_pattern = r'\b(veste|vestes|blouson|blousons|doudoune|doudounes|parka|parkas|coupe[- ]vent|k[- ]?way|anorak)\b'
+    if re.search(jacket_pattern, t):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Veste / Blouson"
+    if d and re.search(jacket_pattern, d):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Veste / Blouson"
+
     return False, "OK"
 
 def parse_price(price_str):
@@ -188,12 +217,11 @@ def parse_price(price_str):
 
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
-    Filtre les articles indésirables :
+    Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
     1. Plafond de prix à 350 € max
     2. Mugs, tasses, bols, chopes
     3. Cartes Panini, stickers, vignettes, topps
     4. Magnets, magnettes, aimants
-    5. Vestes, blousons, doudounes, parkas, coupe-vents
     """
     import re
     t = (title_str or "").lower()
@@ -204,12 +232,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if pval is not None and pval > 350.0:
         return True, f"Prix supérieur à 350€ ({pval:.2f}€)"
 
-    # 2. Mugs / Tasses / Bols
+    # 2. Mugs / Tasses / Bols / Chopes
     mug_pattern = r'\b(mug|mugs|tasse|tasses|bol|bols|chope|chopes)\b'
     if re.search(mug_pattern, t):
         return True, "Mug / Tasse"
     if d and re.search(mug_pattern, d):
-        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
             return True, "Mug / Tasse"
 
     # 3. Panini / Stickers / Vignettes / Topps / Trading cards
@@ -217,12 +245,13 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(card_pattern, t):
         return True, "Panini / Sticker"
     if d and re.search(card_pattern, d):
-        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
             return True, "Panini / Sticker"
 
     # 4. Cartes seules : si le titre concerne des cartes de collection (sans mention de maillot/jersey)
     if re.search(r'\b(carte|cartes)\b', t):
-        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t) or re.search(r'\b(carte[s]?\s+panini|carte[s]?\s+collector|carte[s]?\s+postale[s]?)\b', t):
+        # Exclut si pas de mention de vêtement, ou si spécifié carte de collection/panini
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t) or re.search(r'\b(carte[s]?\s+panini|carte[s]?\s+collector|carte[s]?\s+postale[s]?)\b', t):
             return True, "Carte de collection"
 
     # 5. Magnets / Magnettes / Aimants
@@ -230,17 +259,35 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(magnet_pattern, t):
         return True, "Magnet / Aimant"
     if d and re.search(magnet_pattern, d):
-        if not re.search(r'\b(maillot|jersey|tenue|ensemble|surv[eê]tement|short)\b', t) or re.search(r'\b(lot\s+de\s+magnets?|magnets?\s+aimant[ée]s?|aimant\s+de\s+frigo)\b', d):
+        # Si le titre ne mentionne pas explicitement un maillot/vêtement de sport, ou si la description décrit des magnets
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble|surv[eê]tement|short)\b', t) or re.search(r'\b(lot\s+de\s+magnets?|magnets?\s+aimant[ée]s?|aimant\s+de\s+frigo)\b', d):
             return True, "Magnet / Aimant"
 
     # 6. Vestes, blousons, doudounes, parkas, coupe-vents
     jacket_pattern = r'\b(veste|vestes|blouson|blousons|doudoune|doudounes|parka|parkas|coupe[- ]vent|k[- ]?way|anorak)\b'
     if re.search(jacket_pattern, t):
-        return True, "Veste / Blouson"
-    if d and re.search(jacket_pattern, d) and not re.search(r'\b(maillot|jersey)\b', t):
-        return True, "Veste / Blouson"
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Veste / Blouson"
+    if d and re.search(jacket_pattern, d):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Veste / Blouson"
 
     return False, "OK"
+
+def is_asse_jersey_match(title):
+    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
+    if not title: return False
+    import re
+    title_low = title.lower()
+    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
+    return bool(re.search(team_pattern, title_low))
+
+def get_api_search_url(query, color_id=None):
+    """Génère l'URL d'API directe Vinted pour une recherche texte"""
+    url = f"https://www.vinted.fr/api/v2/catalog/items?search_text={quote_plus(query)}&order=newest_first&page=1&per_page=48"
+    if color_id:
+        url += f"&color_ids[]={color_id}"
+    return url
 
 def get_paris_time():
     """Retourne l'heure courante exacte de Paris (été/hiver garanti)"""
@@ -254,14 +301,6 @@ def get_paris_time():
     if hasattr(time, 'tzset'):
         time.tzset()
     return datetime.now()
-
-def is_asse_jersey_match(title):
-    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
-    if not title: return False
-    import re
-    title_low = title.lower()
-    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
-    return bool(re.search(team_pattern, title_low))
 
 def get_search_url(query, color_id=None):
     url = f"https://www.vinted.fr/catalog?search_text={query.replace(' ', '+')}&order=newest_first"
@@ -289,6 +328,33 @@ def save_last_seen_id(item_id):
     with open(STATE_FILE, "w") as f:
         f.write(str(item_id))
 
+def load_seen_ids_cache():
+    """Charge l'historique persistant des IDs déjà traités pour éviter tout doublon après redémarrage"""
+    seen = set()
+    if os.path.exists(SEEN_IDS_FILE):
+        try:
+            with open(SEEN_IDS_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for x in data:
+                        try:
+                            seen.add(int(x))
+                        except (ValueError, TypeError):
+                            pass
+            log(f"💾 [Cache] {len(seen)} IDs déjà vus chargés depuis {SEEN_IDS_FILE}")
+        except Exception as e:
+            log(f"⚠️ Erreur chargement cache IDs vus: {e}")
+    return seen
+
+def save_seen_ids_cache(seen_set):
+    """Sauvegarde les 3000 derniers IDs vus sur disque"""
+    try:
+        recent_ids = sorted(list(seen_set), reverse=True)[:3000]
+        with open(SEEN_IDS_FILE, "w") as f:
+            json.dump(recent_ids, f)
+    except Exception as e:
+        log(f"⚠️ Erreur sauvegarde cache IDs vus: {e}")
+
 def scrape_item_details(page, item_url):
     """Va sur la page de l'article pour récupérer infos détaillées via API interne (V3.0 API Call)"""
     try:
@@ -315,18 +381,8 @@ def scrape_item_details(page, item_url):
         page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
 
         # Récupération de TOUTES les photos haute résolution (/f800/) depuis les scripts Next.js ou le DOM
-        # avec exclusion stricte de l'avatar du vendeur
-        photos = page.evaluate(r"""() => {
+        photos = page.evaluate("""() => {
             const photos = [];
-            // Détection exhaustive des signatures d'avatar vendeur
-            const avatarSigs = new Set();
-            document.querySelectorAll('.Image__circle img, [class*="avatar"] img, a[href*="/member/"] img').forEach(img => {
-                const s = img.src || '';
-                const parts = s.split('/');
-                const last = parts[parts.length - 1].split('.')[0].split('?')[0];
-                if (last && last.length >= 4) avatarSigs.add(last);
-            });
-
             const scripts = document.querySelectorAll('script');
             scripts.forEach(s => {
                 const txt = s.textContent || '';
@@ -334,14 +390,7 @@ def scrape_item_details(page, item_url):
                 for (let i = 1; i < parts.length; i++) {
                     const urlPart = parts[i].split('"')[0].split('\\\\')[0];
                     if (urlPart.includes('/f800/')) {
-                        const fullUrl = 'https://images1.vinted.net/' + urlPart;
-                        let isAvatar = false;
-                        avatarSigs.forEach(sig => {
-                            if (fullUrl.includes(sig)) isAvatar = true;
-                        });
-                        if (!isAvatar) {
-                            photos.push(fullUrl);
-                        }
+                        photos.push('https://images1.vinted.net/' + urlPart);
                     }
                 }
             });
@@ -349,13 +398,7 @@ def scrape_item_details(page, item_url):
             
             const imgs = Array.from(document.querySelectorAll('img'))
                                  .map(i => i.src || i.getAttribute('data-src') || '')
-                                 .filter(s => {
-                                     if (!s || !s.includes('vinted.net')) return false;
-                                     if (!s.includes('/f800/') && !s.includes('/full/') && !s.includes('/1500/')) return false;
-                                     let isAv = false;
-                                     avatarSigs.forEach(sig => { if (s.includes(sig)) isAv = true; });
-                                     return !isAv;
-                                 });
+                                 .filter(s => s && s.includes('vinted.net') && (s.includes('/f800/') || s.includes('/full/') || s.includes('/1500/')));
             return Array.from(new Set(imgs));
         }""")
         photos = list(dict.fromkeys(photos))
@@ -382,7 +425,6 @@ def scrape_item_details(page, item_url):
         brand = "N/A"
         size = "N/A"
         status = "N/A"
-        seller = ""
         
         if api_data and 'item' in api_data:
             item = api_data['item']
@@ -391,28 +433,21 @@ def scrape_item_details(page, item_url):
             description = item.get('description', '')
             brand = item.get('brand_title', 'N/A')
             size = item.get('size_title', 'N/A')
-            status = item.get('status', 'N/A')
+            status = item.get('status', 'N/A') # Parfois c'est status_id, il faut mapper, mais essayons title
             
-            # Récupération du pseudo vendeur depuis l'API
-            user_data = item.get('user', {})
-            if isinstance(user_data, dict):
-                seller = user_data.get('login', '') or user_data.get('username', '')
-                # Si l'utilisateur a une photo de profil, on s'assure d'exclure son URL des photos
-                user_photo = user_data.get('photo', {})
-                if isinstance(user_photo, dict):
-                    photo_url = user_photo.get('url', '')
-                    if photo_url:
-                        sig = photo_url.split('/')[-1].split('.')[0].split('?')[0]
-                        if sig and len(sig) >= 4:
-                            photos = [p for p in photos if sig not in p]
+            # Si status est vide, parfois c'est pas envoyé
+            if status == 'N/A' and 'status' in item:
+                 # Vinted API change parfois
+                 pass
+            
         else:
             log("⚠️ API Vinted muette ou erreur")
 
         # Si l'API n'a pas tout renvoyé ou a échoué, on extrait depuis les scripts / le DOM de la page
-        if not description or brand == 'N/A' or size == 'N/A' or status in ['N/A', 'Non spécifié'] or not seller:
+        if not description or brand == 'N/A' or size == 'N/A' or status in ['N/A', 'Non spécifié']:
             try:
-                dom_details = page.evaluate(r"""() => {
-                    let dBrand = 'N/A', dSize = 'N/A', dStatus = 'N/A', dDesc = '', dSeller = '';
+                dom_details = page.evaluate("""() => {
+                    let dBrand = 'N/A', dSize = 'N/A', dStatus = 'N/A', dDesc = '';
                     
                     const descEl = document.querySelector('[itemprop="description"]');
                     if (descEl) dDesc = descEl.innerText.trim();
@@ -422,18 +457,6 @@ def scrape_item_details(page, item_url):
                         const scripts = Array.from(document.querySelectorAll('script'));
                         for (const s of scripts) {
                             const txt = s.textContent || '';
-                            if (!dSeller && txt.includes('"user":')) {
-                                const mUser = txt.match(/["\\\\]+user["\\\\]+:\s*\{[^\}]*?["\\\\]+login["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
-                                if (mUser && mUser[1].trim()) {
-                                    dSeller = mUser[1].trim();
-                                }
-                            }
-                            if (!dSeller && txt.includes('"login":')) {
-                                const mUser = txt.match(/["\\\\]+login["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
-                                if (mUser && mUser[1].trim() && !mUser[1].toLowerCase().includes('connect') && !mUser[1].toLowerCase().includes('inscri')) {
-                                    dSeller = mUser[1].trim();
-                                }
-                            }
                             if (txt.includes('code') && (txt.includes('size') || txt.includes('brand') || txt.includes('status'))) {
                                 if (dSize === 'N/A') {
                                     const m = txt.match(/["\\\\]+code["\\\\]+:\s*["\\\\]+size["\\\\]+.*?["\\\\]+value["\\\\]+:\s*["\\\\]+([^"\\\\]+)["\\\\]+/);
@@ -451,17 +474,7 @@ def scrape_item_details(page, item_url):
                         }
                     } catch (e) {}
 
-                    // Recherche dans les éléments DOM spécifiques au bloc profil vendeur
-                    if (!dSeller) {
-                        const sellerEl = document.querySelector('[data-testid*="seller"] a[href*="/member/"] span, [data-testid*="user-login"], .user-login, a[href^="/member/"]:not([href*="login"]) span');
-                        if (sellerEl && sellerEl.innerText) {
-                            const val = sellerEl.innerText.trim();
-                            if (!val.toLowerCase().includes('connect') && !val.toLowerCase().includes('inscri')) {
-                                dSeller = val;
-                            }
-                        }
-                    }
-
+                    // Recherche dans les éléments DOM
                     if (dSize === 'N/A' || dBrand === 'N/A' || dStatus === 'N/A') {
                         const items = document.querySelectorAll('.details-list__item, [data-testid*="item-attributes"]');
                         items.forEach(el => {
@@ -476,7 +489,7 @@ def scrape_item_details(page, item_url):
                         });
                     }
 
-                    return { description: dDesc, brand: dBrand, size: dSize, status: dStatus, seller: dSeller };
+                    return { description: dDesc, brand: dBrand, size: dSize, status: dStatus };
                 }""")
                 if not description and dom_details.get('description'):
                     description = dom_details['description']
@@ -486,24 +499,21 @@ def scrape_item_details(page, item_url):
                     size = dom_details['size']
                 if status in ['N/A', 'Non spécifié'] and dom_details.get('status') not in ['N/A', 'Non spécifié']:
                     status = dom_details['status']
-                if not seller and dom_details.get('seller'):
-                    seller = dom_details['seller']
             except Exception as e:
                 log(f"⚠️ Erreur fallback DOM/Scripts item: {e}")
         
-        log(f"✅ Détails finaux: {brand} | {size} | {status} | Vendeur: {seller or 'N/A'}")
+        log(f"✅ Détails finaux: {brand} | {size} | {status}")
         
         return {
             "description": description,
             "photos": photos,
             "brand": brand,
             "size": size,
-            "status": status,
-            "seller": seller
+            "status": status
         }
     except Exception as e:
         log(f"⚠️ Erreur scraping détails (API Mode): {e}")
-        return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A", "seller": ""}
+        return {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
 
 def fetch_direct_catalog_api(page, api_url):
     """Interroge directement l'API catalogue Vinted via fetch() dans le navigateur"""
@@ -513,13 +523,28 @@ def fetch_direct_catalog_api(page, api_url):
                 const res = await fetch('{api_url}', {{
                     headers: {{ 'Accept': 'application/json, text/plain, */*' }}
                 }});
+                if (res.status === 429) return {{ rate_limited: true, status: 429 }};
+                if (res.status === 401 || res.status === 403) return {{ auth_error: true, status: res.status }};
                 if (res.ok) return await res.json();
                 return null;
             }} catch(e) {{
                 return null;
             }}
         }}""")
-        if not data or 'items' not in data:
+        if not data:
+            return []
+        
+        if isinstance(data, dict):
+            if data.get('rate_limited'):
+                log("⚠️ Vinted Rate Limit (429) détecté ! Pause de sécurité de 90s...")
+                time.sleep(90)
+                return []
+            if data.get('auth_error'):
+                log(f"⚠️ Erreur statut Vinted ({data.get('status')}). Pause courte...")
+                time.sleep(5)
+                return []
+
+        if 'items' not in data:
             return []
         
         items = []
@@ -566,9 +591,9 @@ def extract_items_from_page(page):
     """Extrait les articles avec Parsing Intelligent du Titre (V5.0)"""
     try:
         page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-        time.sleep(random.uniform(1, 2))
+        time.sleep(0.4)
         
-        items = page.evaluate(r"""
+        items = page.evaluate("""
             () => {
                 const items = [];
                 const itemElements = document.querySelectorAll('div[data-testid*="item"], div[class*="feed-grid__item"]');
@@ -728,47 +753,30 @@ def extract_items_from_page(page):
         return []
 
 def send_discord_alert(context, item):
-    """Envoie une alerte Discord intelligente (fallback liste)"""
+    """Envoie une alerte Discord ultra-rapide (~0.3s) avec description Garmin et jusqu'à 10 photos HD dès le 1er envoi"""
     if not DISCORD_WEBHOOK_URL: return
 
-    # 1. On essaie d'avoir les détails riches (Photos + Desc)
-    # Mais on ne fait plus confiance au brand/size du scraping détail s'il échoue
-    # On garde les infos "liste" (item) comme base solide
-    
-    details = {"description": "", "photos": [], "brand": "N/A", "size": "N/A", "status": "N/A"}
     try:
-        detail_page = context.new_page()
-        detail_page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        details = scrape_item_details(detail_page, item['url'])
-        detail_page.close()
-    except Exception as e:
-        log(f"⚠️ Mode Simple (Détails échoués): {e}")
-
-    try:
-        # FUSION ET NETTOYAGE (V8.4 TOTAL CLEAN)
-        price_raw = item.get('price', 'N/A')
-        brand_raw = details['brand'] if details['brand'] != 'N/A' else item.get('brand', 'N/A')
-        size_raw = details['size'] if details['size'] != 'N/A' else item.get('size', 'N/A')
-        status_raw = details['status'] if details['status'] not in ['N/A', 'Non spécifié'] else item.get('status', 'Non spécifié')
-        desc_raw = details['description']
-        
-        # Photos
-        photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
-        
         import re
 
-        # Nettoyage radical
+        price_raw = item.get('price', 'N/A')
+        brand_raw = item.get('brand', 'N/A')
+        size_raw = item.get('size', 'N/A')
+        status_raw = item.get('status', 'Non spécifié')
+        photo_url = item.get('photo', '')
+        item_id = item.get('id')
+        item_url = item.get('url', f"https://www.vinted.fr/items/{item_id}")
+
+        # Nettoyage radical du titre
         raw_title_val = clean_text(item.get('title'))
-        # Enlever les métadonnées Vinted collées au titre
         clean_title = re.sub(r',\s*(?:marque|brand|taille|size|taglia|talla|état|etat|condition)\s*:.*$', '', raw_title_val, flags=re.IGNORECASE)
-        clean_title = re.sub(r'\s*·.*$', '', clean_title)  # Enlève tout après le "·"
-        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)  # Enlève les prix
+        clean_title = re.sub(r'\s*·.*$', '', clean_title)
+        clean_title = re.sub(r'\d+[,\.]\d+\s*€.*$', '', clean_title)
         clean_title = clean_title.strip()
         final_title = clean_title if clean_title else "Maillot ASSE"
 
         final_brand = clean_text(brand_raw)
         final_price = clean_text(price_raw)
-        # Assainissement du prix si texte composite
         if '·' in final_price or 'incl' in final_price or len(final_price) > 20:
             p_match = re.search(r'(\d+[\d\s]*[.,]\d{2}\s*€|\d+\s*€)', final_price)
             if p_match:
@@ -776,76 +784,135 @@ def send_discord_alert(context, item):
 
         final_size = clean_text(size_raw)
         final_status = clean_text(status_raw)
-        final_seller = clean_text(details.get('seller', ''))
-        final_desc = clean_text(desc_raw)
-        
-        # Fallback ultime pour la taille : extraction depuis le titre ou la description
+
+        # Fallback pour la taille si N/A depuis le titre
         if final_size == 'N/A':
             size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n]|\s*$)', raw_title_val, re.IGNORECASE)
-            if not size_search and final_desc:
-                size_search = re.search(r'\btaille\s*[:\s]\s*([XSLM0-9/ ]+?)(?:\s+[a-z]{3,}|\s*[,;·\n.]|\s*$)', final_desc, re.IGNORECASE)
             if size_search:
                 cand = size_search.group(1).strip().upper()
                 if cand and len(cand) <= 10:
                     final_size = cand
 
-        # Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
-        is_excl, reason = is_excluded_product(final_title, final_desc, final_price)
+        # Filtrage des produits indésirables (Mug, Panini, Prix > 350€)
+        is_excl, reason = is_excluded_product(final_title, '', final_price)
         if is_excl:
             log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
             return
 
         # Filtrage des tailles enfants et XS/S
         if FILTER_ADULT_ONLY:
-            is_excl, reason = is_excluded_size(final_size, raw_title_val, final_desc)
+            is_excl, reason = is_excluded_size(final_size, raw_title_val)
             if is_excl:
-                log(f"🚫 Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
+                log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
                 return
 
-        # Validation stricte du vendeur (élimine les boutons parasites type "S'inscrire / Se connecter")
-        if final_seller:
-            seller_low = final_seller.lower()
-            if any(term in seller_low for term in ['connect', 'inscri', 'connexion', 'inscription', 'vinted', 'aide', 'mon compte']):
-                final_seller = ""
-            elif len(final_seller) > 30 or len(final_seller) < 2:
-                final_seller = ""
+        # Micro-fetch ultra-rapide HTTP (200-300ms) pour récupérer description, photos HD et vendeur
+        photos = [photo_url] if photo_url else []
+        desc_clean = ""
+        seller_name = ""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'fr-FR,fr;q=0.9',
+            }
+            resp = requests.get(item_url, headers=headers, timeout=4)
+            if resp.status_code == 200:
+                resp.encoding = 'utf-8'
+                html = resp.text
 
-        description_text = f"**{final_price}** | Taille: **{final_size}**\nMarque: **{final_brand}**\nÉtat: {final_status}"
-        if final_seller:
-            description_text += f"\n👤 Vendeur: **{final_seller}**"
-        description_text += f"\n\n{final_desc}"
-        
-        # Un dernier coup de balai sur l'ensemble du bloc au cas où
-        description_text = description_text.replace("  ", " ").strip()
+                # Récupération du pseudo vendeur
+                m_user = re.search(r'\"login\":\"([^\"]+)\"', html)
+                if m_user:
+                    seller_name = clean_text(m_user.group(1))
+                if not seller_name:
+                    m_mem = re.search(r'href=[\"\']/member/\d+[^\"]*[\"\'][^>]*>.*?<span[^>]*>([^<]+)</span>', html, re.DOTALL)
+                    if m_mem:
+                        seller_name = clean_text(m_mem.group(1))
+                if not seller_name:
+                    m_av_alt = re.search(r'Image__circle[^>]*>.*?<img[^>]+alt=[\"\']([^\"\']+)[\"\']', html, re.DOTALL)
+                    if m_av_alt and m_av_alt.group(1).strip():
+                        seller_name = clean_text(m_av_alt.group(1))
 
-        item_url = item.get('url', f"https://www.vinted.fr/items/{item.get('id')}")
-        item_id = item.get('id')
+                # Détection et exclusion formelle de l'avatar de profil du vendeur
+                avatar_sigs = set()
+                for av in re.findall(r'Image__circle[^>]*>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\']', html, re.DOTALL):
+                    sig = av.split('/')[-1].split('.')[0].split('?')[0]
+                    if sig: avatar_sigs.add(sig)
+                for sq in re.findall(r'images1\.vinted\.net/[^\"\'\s]+/(?:100x100|150x150|50x50|20x20)/([^\"\'\s\.\?]+)', html):
+                    avatar_sigs.add(sq)
+
+                # Récupération de toutes les photos HD (/f800/) de l'annonce en excluant l'avatar
+                raw_photos = re.findall(r'https://images1\.vinted\.net/[^\"\'\s]+\/f800\/[^\"\'\s]+', html)
+                scraped_photos = []
+                for p in raw_photos:
+                    p_clean = p.split('"')[0].split("'")[0].split('\\')[0]
+                    if not any(sig in p_clean for sig in avatar_sigs):
+                        if p_clean not in scraped_photos:
+                            scraped_photos.append(p_clean)
+                if scraped_photos:
+                    photos = scraped_photos
+
+                # Récupération propre de la description (préservation des accents et emojis)
+                desc_raw = ""
+                m_json = re.search(r'\"description\":\"(.*?)\"', html)
+                if m_json:
+                    raw_val = m_json.group(1)
+                    def unescape_u(m):
+                        try:
+                            return chr(int(m.group(1), 16))
+                        except Exception:
+                            return m.group(0)
+                    desc_raw = re.sub(r'\\u([0-9a-fA-F]{4})', unescape_u, raw_val)
+                    desc_raw = desc_raw.replace('\\n', '\n').replace('\\r', '').replace('\\"', '"').replace('\\/', '/').replace('\\\\', '\\')
+                if not desc_raw:
+                    m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
+                    if m_dom:
+                        desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
+                desc_clean = clean_text(desc_raw)
+                if desc_clean:
+                    is_excl, reason = is_excluded_product(final_title, desc_clean, final_price)
+                    if is_excl:
+                        log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
+                        return
+        except Exception as e:
+            log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
+
+        # Description formatée pour Discord embed
+        description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
+        if seller_name:
+            description_text += f"\n👤 Vendeur: **{seller_name}**"
+        if desc_clean:
+            embed_desc_body = desc_clean[:400] + ("..." if len(desc_clean) > 400 else "")
+            description_text += f"\n\n{embed_desc_body}"
 
         embed1 = {
             "title": f"🔔 {final_title}",
             "url": item_url,
             "description": description_text,
             "color": 0x09B83E,
-            "footer": {"text": f"Vinted Bot • ID: {item_id}"},
+            "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
             "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
-        
+
         if photos:
             embed1["image"] = {"url": photos[0]}
 
         embeds_batch1 = [embed1]
-        for photo_url in photos[1:10]:
-            embeds_batch1.append({"url": item_url, "image": {"url": photo_url}})
+        for photo_url_item in photos[1:10]:
+            embeds_batch1.append({"url": item_url, "image": {"url": photo_url_item}})
 
-        # EXTRAIT DE DESCRIPTION (COMPLÈTE jusqu'à 1000 caractères)
-        desc_preview = final_desc[:1000] if final_desc else "Pas de description"
-        if len(final_desc) > 1000:
-            desc_preview += "..."
+        # TEXTE DE NOTIFICATION PUSH POUR MONTRE GARMIN / ÉCRAN VERROUILLÉ
+        # Contient titre, prix, taille, marque ET l'extrait de description
+        desc_preview = ""
+        if desc_clean:
+            desc_preview = desc_clean[:250].strip()
+            if len(desc_clean) > 250:
+                desc_preview += "..."
 
-        # TEXTE DE NOTIFICATION (Pour montres et écrans verrouillés)
-        notif_text = f"""@everyone | {clean_title}
-💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}
-📝 {desc_preview}"""
+        notif_text = f"""@everyone | {final_title}
+💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}"""
+        if desc_preview:
+            notif_text += f"\n📝 {desc_preview}"
 
         payload1 = {
             "content": notif_text,
@@ -853,7 +920,8 @@ def send_discord_alert(context, item):
             "avatar_url": "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png", 
             "embeds": embeds_batch1
         }
-        requests.post(DISCORD_WEBHOOK_URL, json=payload1, timeout=10)
+
+        requests.post(DISCORD_WEBHOOK_URL, json=payload1, timeout=8)
 
         # Si l'annonce contient plus de 10 photos (jusqu'à 20 photos au total) :
         # Envoi d'un 2ème lot 100% silencieux (flags: 4096 SUPPRESS_NOTIFICATIONS - aucune notif ni vibration)
@@ -870,7 +938,7 @@ def send_discord_alert(context, item):
                 }
                 requests.post(DISCORD_WEBHOOK_URL, json=payload2, timeout=6)
 
-        log(f"✅ Alerte envoyée #{item_id} ({min(len(photos), 20)} photos certifiées)")
+        log(f"✅ [Vinted] Alerte envoyée #{item_id} ({min(len(photos), 20)} photos certifiées, description Garmin incluse)")
 
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
@@ -881,234 +949,314 @@ def watchdog_handler(signum, frame):
     print(f"[{timestamp}] 🚨 WATCHDOG: Bot figé depuis trop longtemps ! Redémarrage forcé...", flush=True)
     os._exit(1) # Sortie brutale pour forcer Railway à relancer
 
-def run_bot():
-    """Boucle principale du bot V10.5 SNIPER"""
-    log("🚀 Démarrage du bot V10.5 SNIPER")
-    
-    log(f"⚡ Mode Sniper : Réactivité maximale + International toutes les 20 min")
-    
-    # Initialisation
-    seen_ids = set()
-    last_secondary_check = 0
+state_lock = threading.Lock()
+shared_seen_ids = load_seen_ids_cache()
+shared_last_seen_id = load_last_seen_id()
+if shared_seen_ids:
+    shared_last_seen_id = max(shared_last_seen_id, max(shared_seen_ids))
+
+def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
+    """Traite une liste d'articles récupérés de manière thread-safe (filtrage et alertes Discord)"""
+    global shared_seen_ids, shared_last_seen_id
+    with state_lock:
+        new_found = []
+        for item in items:
+            try:
+                item_id = int(item['id'])
+            except (ValueError, TypeError):
+                continue
+            item['id'] = item_id
+
+            if item_id not in shared_seen_ids:
+                if shared_last_seen_id == 0 or item_id > (shared_last_seen_id - 500000):
+                    new_found.append(item)
+                shared_seen_ids.add(item_id)
+        
+        if not new_found:
+            return
+        
+        # Sauvegarde persistante sur disque pour résister aux redémarrages et redéploiements
+        save_seen_ids_cache(shared_seen_ids)
+
+        if is_initial:
+            shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
+            save_last_seen_id(shared_last_seen_id)
+            log(f"📥 [{source_label}] {len(new_found)} annonce(s) existante(s) absorbée(s) au démarrage.")
+            return
+        
+        log(f"🆕 [Vinted] {len(new_found)} nouvel/nouveaux article(s) détecté(s) ({source_label}) !")
+        new_found.sort(key=lambda x: int(x['id']))
+        
+        for item in new_found:
+            # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€)
+            is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
+            if is_excl:
+                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
+                continue
+
+            # 2. Filtrage des tailles enfants et XS/S
+            if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
+                is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
+                if is_excl:
+                    log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
+                    continue
+            if is_asse_jersey_match(item.get('title')):
+                log(f"🎯 MATCH {source_label} : '{item.get('title')}' ({item.get('price')})")
+                send_discord_alert(None, item)
+        
+        shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in new_found))
+        save_last_seen_id(shared_last_seen_id)
+        
+        # Nettoyage cache IDs si trop volumineux
+        if len(shared_seen_ids) > 5000:
+            seen_ids_list = sorted(list(shared_seen_ids), reverse=True)
+            shared_seen_ids = set(seen_ids_list[:3000])
+
+def safe_route_filter(route):
+    """Bloque les images/médias lourds sans crasher si la requête est annulée en vol"""
+    try:
+        if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
+            route.abort()
+        else:
+            route.continue_()
+    except Exception:
+        pass
+
+def worker_football_stream():
+    """Worker 1 dédié en permanence au Flux Football Direct (temps réel absolu)"""
+    FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&order=newest_first"
+    log("⚽ [Vinted-Foot] Lancement du thread Flux Football Direct")
+    is_initial_scan = True
+
+    while True:
+        paris_now = get_paris_time()
+        if os.environ.get("ENABLE_NIGHT_MODE", "false").lower() == "true" and 1 <= paris_now.hour < 7:
+            log(f"🌙 [Vinted-Foot] Veille de nuit ({paris_now.strftime('%H:%M:%S')}).")
+            time.sleep(60)
+            continue
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=CHROMIUM_ARGS
+                )
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 720},
+                    locale='fr-FR',
+                    timezone_id='Europe/Paris'
+                )
+                context.route("**/*", safe_route_filter)
+
+                page = context.new_page()
+                page.set_default_timeout(20000)
+
+                session_start_time = time.time()
+                cycle_count = 0
+
+                while True:
+                    cycle_count += 1
+                    now = time.time()
+
+                    paris_now = get_paris_time()
+                    if os.environ.get("ENABLE_NIGHT_MODE", "false").lower() == "true" and 1 <= paris_now.hour < 7:
+                        break
+
+                    # Recyclage mémoire préventif toutes les 2h ou 1200 scans
+                    if (now - session_start_time) > 7200 or cycle_count > 1200:
+                        log("♻️ [Vinted-Foot] Recyclage préventif session Chromium...")
+                        break
+
+                    # Purge préventive de l'onglet tous les 30 scans
+                    if cycle_count % 30 == 0:
+                        try: page.close()
+                        except: pass
+                        try:
+                            page = context.new_page()
+                            page.set_default_timeout(20000)
+                        except: pass
+
+                    try:
+                        page.goto(FOOTBALL_CATALOG_URL, wait_until='domcontentloaded', timeout=20000)
+                        items = extract_items_from_page(page)
+                        log(f"⚡ [Vinted-Foot] Scan Flux Direct : {len(items)} annonces")
+                        if items:
+                            process_incoming_items_safe(items, "Flux Direct Foot", is_initial=is_initial_scan)
+                            is_initial_scan = False
+                    except Exception as e:
+                        log(f"⚠️ [Vinted-Foot] Erreur locale : {e}")
+                        err_str = str(e).lower()
+                        if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
+                            log("🔄 [Vinted-Foot] Recréation onglet suite à crash...")
+                            try: page.close()
+                            except: pass
+                            try:
+                                page = context.new_page()
+                                page.set_default_timeout(20000)
+                            except:
+                                break
+
+                    time.sleep(random.uniform(3.5, 4.5))
+
+                try: browser.close()
+                except: pass
+        except Exception as e:
+            log(f"🚨 [Vinted-Foot] Incident navigateur : {e}. Redémarrage dans 8s...")
+            time.sleep(8)
+
+def worker_search_stream():
+    """Worker 2 dédié aux recherches prioritaires texte en parallèle"""
+    log("🔎 [Vinted-Search] Lancement du thread Recherches Mots-Clés")
+    priority_query_index = 0
     last_green_check = 0
-    query_index = 0
-    
-    log("🚀 Phase d'initialisation rapide...")
-    # On laisse le premier cycle remplir les IDs normalement sans rien envoyer
-    is_initial_cycle = True
-    last_seen_id = load_last_seen_id() # Load last_seen_id here
+    last_secondary_check = 0
+    initial_scans_remaining = len(PRIORITY_QUERIES)
+
+    # Décalage de 1.5s pour désynchroniser les requêtes réseau
+    time.sleep(1.5)
+
+    while True:
+        paris_now = get_paris_time()
+        if os.environ.get("ENABLE_NIGHT_MODE", "false").lower() == "true" and 1 <= paris_now.hour < 7:
+            log(f"🌙 [Vinted-Search] Veille de nuit ({paris_now.strftime('%H:%M:%S')}).")
+            time.sleep(60)
+            continue
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=CHROMIUM_ARGS
+                )
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1280, 'height': 720},
+                    locale='fr-FR',
+                    timezone_id='Europe/Paris'
+                )
+                context.route("**/*", safe_route_filter)
+
+                page = context.new_page()
+                page.set_default_timeout(20000)
+
+                session_start_time = time.time()
+                cycle_count = 0
+
+                while True:
+                    cycle_count += 1
+                    now = time.time()
+
+                    paris_now = get_paris_time()
+                    if os.environ.get("ENABLE_NIGHT_MODE", "false").lower() == "true" and 1 <= paris_now.hour < 7:
+                        break
+
+                    # Recyclage mémoire préventif
+                    if (now - session_start_time) > 7200 or cycle_count > 1200:
+                        log("♻️ [Vinted-Search] Recyclage préventif session Chromium...")
+                        break
+
+                    # Purge préventive de l'onglet tous les 30 scans
+                    if cycle_count % 30 == 0:
+                        try: page.close()
+                        except: pass
+                        try:
+                            page = context.new_page()
+                            page.set_default_timeout(20000)
+                        except: pass
+
+                    # Choix de la cible :
+                    scan_label = ""
+                    target_url = ""
+
+                    # A. Scan Vert (Toutes les 5 minutes)
+                    if (now - last_green_check) > 300:
+                        scan_label = "Maillot Asse [VERT]"
+                        target_url = get_search_url("Maillot Asse", color_id=10)
+                        last_green_check = now
+                    # B. Scan International (Toutes les 20 minutes)
+                    elif (now - last_secondary_check) > 1200:
+                        sec_q = SECONDARY_QUERIES[cycle_count % len(SECONDARY_QUERIES)]
+                        scan_label = f"Inter '{sec_q}'"
+                        target_url = get_search_url(sec_q)
+                        if (cycle_count % len(SECONDARY_QUERIES)) == 0:
+                            last_secondary_check = now
+                    # C. Recherches Prioritaires normales ("Maillot Asse", etc.)
+                    else:
+                        query = PRIORITY_QUERIES[priority_query_index % len(PRIORITY_QUERIES)]
+                        priority_query_index += 1
+                        scan_label = f"Recherche '{query}'"
+                        target_url = get_search_url(query)
+
+                    try:
+                        page.goto(target_url, wait_until='domcontentloaded', timeout=20000)
+                        items = extract_items_from_page(page)
+                        log(f"🔎 [Vinted-Search] Scan {scan_label} : {len(items)} annonces")
+                        if items:
+                            is_initial = (initial_scans_remaining > 0)
+                            process_incoming_items_safe(items, scan_label, is_initial=is_initial)
+                            if initial_scans_remaining > 0:
+                                initial_scans_remaining -= 1
+                    except Exception as e:
+                        log(f"⚠️ [Vinted-Search] Erreur locale : {e}")
+                        err_str = str(e).lower()
+                        if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
+                            log("🔄 [Vinted-Search] Recréation onglet suite à crash...")
+                            try: page.close()
+                            except: pass
+                            try:
+                                page = context.new_page()
+                                page.set_default_timeout(20000)
+                            except:
+                                break
+
+                    time.sleep(random.uniform(3.5, 4.5))
+
+                try: browser.close()
+                except: pass
+        except Exception as e:
+            log(f"🚨 [Vinted-Search] Incident navigateur : {e}. Redémarrage dans 8s...")
+            time.sleep(8)
+
+def run_bot():
+    """Superviseur DUAL-SNIPER : fait tourner Flux Foot et Recherches Texte en parallèle permanent"""
+    try:
+        os.nice(10)  # Réduit la priorité CPU pour garantir un plafond bas
+    except Exception:
+        pass
+    try:
+        import subprocess
+        log("🚀 Lancement du sous-processus LeBonCoin Bot indépendant...")
+        subprocess.Popen([sys.executable, "leboncoin_bot.py"])
+    except Exception as e:
+        log(f"⚠️ Erreur démarrage LeBonCoin: {e}")
+    log("🚀 [Vinted] Démarrage du bot V13.0 DUAL-SNIPER PARALLÈLE (Mode Éco CPU < 0.5 vCPU)")
+    log("⚡ [Vinted] Flux Foot + Recherches Mots-Clés s'exécutent SIMULTANÉMENT")
+    log("📸 [Vinted] Support jusqu'à 20 photos HD par alerte Discord actif")
+
+    t_foot = threading.Thread(target=worker_football_stream, name="Thread-Football", daemon=True)
+    t_search = threading.Thread(target=worker_search_stream, name="Thread-Search", daemon=True)
+
+    t_foot.start()
+    t_search.start()
+
+    log("✅ [Vinted] Démarrage des threads terminé : Surveillance active en temps réel absolu !")
 
     try:
         while True:
-            # 1. Gestion des heures (Europe/Paris garanti)
-            paris_now = get_paris_time()
-            current_hour = paris_now.hour
-
-            if 1 <= current_hour < 7:
-                log(f"🌙 Mode Veille Silencieuse activé ({paris_now.strftime('%H:%M:%S')} heure de Paris). Reprise automatique à 07:00.")
-                time.sleep(60)
-                continue
-
-            # 2. DÉMARRAGE MOTEUR (Watchdog activé)
-            try:
-                # On arme le Watchdog pour 3 minutes (180s)
-                signal.signal(signal.SIGALRM, watchdog_handler)
-                signal.alarm(180) 
-
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(
-                        headless=True,
-                        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-                    )
-                    context = browser.new_context(
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        viewport={'width': 1280, 'height': 720},
-                        locale='fr-FR',
-                        timezone_id='Europe/Paris'
-                    )
-
-                    # OPTIMISATION (ÉCONOMIE D'ÉNERGIE) : Bloquer images/CSS/Polices
-                    def block_aggressively(route):
-                        if route.request.resource_type in ["image", "stylesheet", "font", "media"]:
-                            route.abort()
-                        else:
-                            route.continue_()
-                    
-                    context.route("**/*", block_aggressively)
-
-                    # 0. SCAN FLUX DIRECT (Page d'accueil / Catégorie Football & Verts)
-                    log("⚡ Scan Flux Direct (Catalogue Football / Nuances de Vert)...")
-                    direct_endpoints = [
-                        ("Maillots Foot Verts", "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&color_ids=16&color_ids=10&color_ids=28&order=newest_first&page=1&per_page=96"),
-                        ("Tous Maillots Foot", "https://www.vinted.fr/api/v2/catalog/items?catalog_ids=3267&order=newest_first&page=1&per_page=96")
-                    ]
-                    try:
-                        direct_page = context.new_page()
-                        direct_page.set_default_timeout(20000)
-                        direct_page.goto("https://www.vinted.fr/", wait_until='commit', timeout=15000)
-                        
-                        for label, endpoint_url in direct_endpoints:
-                            try:
-                                log(f"🔎 Direct API: '{label}'")
-                                direct_items = fetch_direct_catalog_api(direct_page, endpoint_url)
-                                if direct_items:
-                                    new_direct = []
-                                    for item in direct_items:
-                                        if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-                                            new_direct.append(item)
-                                            seen_ids.add(item['id'])
-                                    
-                                    if is_initial_cycle:
-                                        if new_direct:
-                                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_direct))
-                                    elif new_direct:
-                                        log(f"🆕 {len(new_direct)} nouveaux articles vus dans le flux '{label}' !")
-                                        new_direct.sort(key=lambda x: x['id'])
-                                        for item in new_direct:
-                                            # 1. Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
-                                            is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
-                                            if is_excl:
-                                                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
-                                                continue
-
-                                            # 2. Filtrage des tailles enfants et XS/S
-                                            if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
-                                                is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
-                                                if is_excl:
-                                                    log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
-                                                    continue
-                                            if is_asse_jersey_match(item.get('title')):
-                                                log(f"🎯 MATCH FLUX DIRECT : '{item.get('title')}'")
-                                                send_discord_alert(context, item)
-                                        
-                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_direct))
-                                        save_last_seen_id(last_seen_id)
-                            except Exception as e:
-                                log(f"⚠️ Erreur locale sur flux '{label}': {e}")
-                            time.sleep(random.uniform(1, 2))
-                    except Exception as e:
-                        log(f"⚠️ Erreur ouverture page flux direct: {e}")
-                    finally:
-                        try: direct_page.close()
-                        except: pass
-
-                    # Détermination de la requête texte pour ce cycle (Solution 4 : Rotation alternée)
-                    now = time.time()
-                    scan_label = ""
-                    query = ""
-                    color = None
-
-                    # 1. Triple Scan Vert (Toutes les 5 min)
-                    if (now - last_green_check) > 300:
-                        query = "Maillot Asse"
-                        color = 10
-                        scan_label = "Maillot Asse [VERT]"
-                        last_green_check = now
-                    # 2. Requête Secondaire / Internationale (Toutes les 20 min)
-                    elif (now - last_secondary_check) > 1200:
-                        query = SECONDARY_QUERIES[query_index % len(SECONDARY_QUERIES)]
-                        color = None
-                        scan_label = f"Inter '{query}'"
-                        query_index += 1
-                        last_secondary_check = now
-                    # 3. Requête Prioritaire en alternance ("Maillot Asse", "Maillot Saint-Etienne", etc.)
-                    else:
-                        query = PRIORITY_QUERIES[query_index % len(PRIORITY_QUERIES)]
-                        color = None
-                        scan_label = f"'{query}'"
-                        query_index += 1
-
-                    try:
-                        # 1. Ouverture page NEUVE
-                        page = context.new_page()
-                        page.set_default_timeout(20000)
-                        
-                        # 2. Blocage ressources (RAM optimisée)
-                        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
-                        
-                        # 3. Navigation Ultra-Rapide (Commit mode)
-                        log(f"🔎 Check: {scan_label}")
-                        try:
-                            page.goto(get_search_url(query, color), wait_until='commit', timeout=20000)
-                            # On attend explicitement un élément pour confirmer le chargement
-                            page.wait_for_selector('div[data-testid*="item"]', timeout=10000)
-                            
-                            items = extract_items_from_page(page)
-                            
-                            if items:
-                                new_found = []
-                                for item in items:
-                                    if item['id'] not in seen_ids and item['id'] > (last_seen_id - 100000):
-                                        new_found.append(item)
-                                        seen_ids.add(item['id'])
-                                
-                                if is_initial_cycle:
-                                    if new_found:
-                                        last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                elif new_found:
-                                    log(f"🆕 {len(new_found)} nouvelles pépites détectées !")
-                                    new_found.sort(key=lambda x: x['id'])
-                                    for item in new_found:
-                                        # 1. Filtrage des produits indésirables (Mug, Panini, Magnets, Vestes, Prix > 350€)
-                                        is_excl, reason = is_excluded_product(item.get('title', ''), '', item.get('price', ''))
-                                        if is_excl:
-                                            log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' ({item.get('price')})")
-                                            continue
-
-                                        # 2. Filtrage des tailles enfants et XS/S
-                                        if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':
-                                            is_excl, reason = is_excluded_size(item['size'], item.get('title', ''))
-                                            if is_excl:
-                                                log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
-                                                continue
-                                        if is_asse_jersey_match(item.get('title')):
-                                            log(f"🎯 MATCH : '{item.get('title')}'")
-                                            send_discord_alert(context, item)
-                                    
-                                    last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                    save_last_seen_id(last_seen_id)
-                        finally:
-                            page.close()
-
-                    except Exception as e:
-                        log(f"⚠️ Erreur locale sur '{query}': {e}")
-                    
-                    browser.close()
-                
-                # Désactivation du Watchdog après succès du cycle
-                signal.alarm(0)
-            except Exception as e:
-                log(f"🚨 Bug moteur Playwright : {e}. Redémarrage au prochain cycle.")
-                signal.alarm(0)
-
-            # 3. Entretien du Cache
-            is_initial_cycle = False
-            if len(seen_ids) > 2000:
-                seen_ids_list = sorted(list(seen_ids), reverse=True)
-                seen_ids = set(seen_ids_list[:1500])
-
-            # 4. Sommeil
-            log(f"⏳ Cycle {datetime.now().strftime('%H:%M:%S')} terminé. Repos 5s...")
-            time.sleep(5)
-
+            time.sleep(30)
+            if not t_foot.is_alive():
+                log("⚠️ [Vinted] Relance du thread Football...")
+                t_foot = threading.Thread(target=worker_football_stream, name="Thread-Football", daemon=True)
+                t_foot.start()
+            if not t_search.is_alive():
+                log("⚠️ [Vinted] Relance du thread Search...")
+                t_search = threading.Thread(target=worker_search_stream, name="Thread-Search", daemon=True)
+                t_search.start()
     except KeyboardInterrupt:
-        log("\n⛔ Arrêt du bot demandé")
+        log("\n⛔ [Vinted] Arrêt du bot demandé")
     finally:
-        log("👋 Bot éteint proprement")
+        log("👋 [Vinted] Bot éteint proprement")
 
 if __name__ == "__main__":
-    import subprocess
-    try:
-        log("🚀 Lancement du sous-processus LeBonCoin Bot indépendant...")
-        subprocess.Popen([sys.executable, "leboncoin_bot.py"], env=os.environ.copy())
-    except Exception as e:
-        log(f"⚠️ Erreur démarrage sous-processus LeBonCoin: {e}")
-        try:
-            import threading, leboncoin_bot
-            log("🚀 Lancement du thread LeBonCoin Bot en secours...")
-            lbc_thread = threading.Thread(target=leboncoin_bot.run_bot, name="LeBonCoinThread", daemon=True)
-            lbc_thread.start()
-        except Exception as e2:
-            log(f"⚠️ Erreur démarrage thread LeBonCoin: {e2}")
-
     run_bot()
