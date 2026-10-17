@@ -1104,6 +1104,10 @@ def worker_turbo_sniper():
                         scan_label = "Flux Direct Foot"
 
                     try:
+                        if hasattr(signal, "SIGALRM"):
+                            signal.signal(signal.SIGALRM, watchdog_handler)
+                            signal.alarm(120)
+
                         page.goto(target_url, wait_until='domcontentloaded', timeout=15000)
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted] Scan {scan_label} : {len(items)} annonces")
@@ -1114,8 +1118,8 @@ def worker_turbo_sniper():
                     except Exception as e:
                         log(f"⚠️ [Vinted] Erreur locale : {e}")
                         err_str = str(e).lower()
-                        if "crash" in err_str or "closed" in err_str or "destroyed" in err_str:
-                            log("🔄 [Vinted] Recréation onglet suite à crash...")
+                        if any(k in err_str for k in ["crash", "closed", "destroyed", "timeout"]):
+                            log("🔄 [Vinted] Recréation immédiate de l'onglet suite à incident/timeout...")
                             try: page.close()
                             except: pass
                             try:
@@ -1123,6 +1127,9 @@ def worker_turbo_sniper():
                                 page.set_default_timeout(20000)
                             except:
                                 break
+                    finally:
+                        if hasattr(signal, "SIGALRM"):
+                            signal.alarm(0)
 
                     # Pause ultra-courte entre chaque scan (1.8s à 2.4s)
                     time.sleep(random.uniform(1.8, 2.4))
