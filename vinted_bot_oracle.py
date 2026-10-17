@@ -459,7 +459,7 @@ def scrape_item_details(page, item_url):
         # (Optimisation: on suppose qu'on a déjà les cookies de la recherche précédente)
         
         # Pour être sûr, on va quand même sur la page de l'item (ça génère les cookies spécifiques item)
-        page.goto(item_url, wait_until='domcontentloaded', timeout=15000)
+        page.goto(item_url, wait_until='domcontentloaded', timeout=22000)
 
         # Récupération de TOUTES les photos haute résolution (/f800/) depuis les scripts Next.js ou le DOM
         photos = page.evaluate("""() => {
@@ -1282,7 +1282,7 @@ def worker_turbo_sniper():
                             signal.signal(signal.SIGALRM, watchdog_handler)
                             signal.alarm(120)
 
-                        page.goto(target_url, wait_until='domcontentloaded', timeout=15000)
+                        page.goto(target_url, wait_until='domcontentloaded', timeout=22000)
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted] Scan {scan_label} : {len(items)} annonces")
                         if items:
