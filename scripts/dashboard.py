@@ -48,8 +48,8 @@ ERROR_PATTERNS = re.compile(
 )
 
 IGNORE_PATTERNS = re.compile(
-    r"(write EPIPE|emitErrorNT|emitErrorCloseNT|Unhandled 'error' event|SyntaxWarning|errno: -32|syscall: 'write')",
-    re.UNICODE
+    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections)",
+    re.IGNORECASE
 )
 
 def normalize_seller_name(username):
