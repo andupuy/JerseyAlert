@@ -42,7 +42,7 @@ SEEN_IDS_FILE = "seen_ids_cache.json"
 ALERTED_IDS_FILE = "alerted_ids_cache.json"
 FILET_SEEN_IDS_FILE = "filet_seen_ids_cache.json"
 ERRORS_LOG_FILE = os.environ.get("ERRORS_LOG_FILE", "/root/vinted_errors.log" if os.path.exists("/root/JerseyAlert") else "vinted_errors.log")
-BLACKLIST_FILE = "blacklisted_sellers.json"
+BLACKLIST_FILE = os.environ.get("BLACKLIST_FILE", "/root/JerseyAlert/blacklisted_sellers.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_sellers.json")
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
@@ -64,21 +64,36 @@ CHROMIUM_ARGS = [
     '--mute-audio'
 ]
 
+def normalize_seller_name(username):
+    """Nettoie et normalise le pseudo vendeur (retire @, espaces, et extrait le pseudo si URL fournie)"""
+    if not username:
+        return ""
+    cleaned = str(username).strip().lower().replace("@", "")
+    if "vinted." in cleaned and "/member/" in cleaned:
+        part = cleaned.split("/member/")[1].split("?")[0].split("/")[0]
+        if "-" in part:
+            return part.split("-", 1)[1]
+        return part
+    return cleaned
+
 def load_blacklisted_sellers():
     """Charge la liste noire des vendeurs Vinted"""
     sellers = set()
     env_blocked = os.environ.get("BLOCKED_SELLERS", "")
     if env_blocked:
         for s in env_blocked.split(","):
-            if s.strip():
-                sellers.add(s.strip().lower().replace("@", ""))
+            norm = normalize_seller_name(s)
+            if norm:
+                sellers.add(norm)
                 
     if os.path.exists(BLACKLIST_FILE):
         try:
-            with open(BLACKLIST_FILE, "r") as f:
+            with open(BLACKLIST_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for s in data:
-                    sellers.add(str(s).strip().lower().replace("@", ""))
+                    norm = normalize_seller_name(s)
+                    if norm:
+                        sellers.add(norm)
         except Exception:
             pass
     return sellers
@@ -86,16 +101,27 @@ def load_blacklisted_sellers():
 def save_blacklisted_sellers(sellers_set):
     """Sauvegarde la liste noire des vendeurs Vinted"""
     try:
-        with open(BLACKLIST_FILE, "w") as f:
-            json.dump(sorted(list(sellers_set)), f, indent=2)
+        norm_list = sorted(list({normalize_seller_name(s) for s in sellers_set if normalize_seller_name(s)}))
+        with open(BLACKLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(norm_list, f, indent=2, ensure_ascii=False)
     except Exception as e:
         log(f"⚠️ Erreur sauvegarde blacklist: {e}")
 
+def is_seller_blacklisted(username):
+    """Vérifie si un vendeur est sur liste noire"""
+    if not username:
+        return False
+    norm = normalize_seller_name(username)
+    if not norm:
+        return False
+    blocked = load_blacklisted_sellers()
+    return norm in blocked
+
 def add_blacklisted_seller(username):
     """Ajoute un vendeur à la liste noire"""
-    cleaned = username.strip().lower().replace("@", "")
-    if "vinted." in cleaned and "/member/" in cleaned:
-        cleaned = cleaned.split("/member/")[1].split("?")[0].split("-")[-1]
+    cleaned = normalize_seller_name(username)
+    if not cleaned:
+        return ""
     sellers = load_blacklisted_sellers()
     sellers.add(cleaned)
     save_blacklisted_sellers(sellers)
@@ -104,9 +130,9 @@ def add_blacklisted_seller(username):
 
 def remove_blacklisted_seller(username):
     """Retire un vendeur de la liste noire"""
-    cleaned = username.strip().lower().replace("@", "")
-    if "vinted." in cleaned and "/member/" in cleaned:
-        cleaned = cleaned.split("/member/")[1].split("?")[0].split("-")[-1]
+    cleaned = normalize_seller_name(username)
+    if not cleaned:
+        return False
     sellers = load_blacklisted_sellers()
     if cleaned in sellers:
         sellers.remove(cleaned)
@@ -817,6 +843,14 @@ def extract_items_from_page(page):
 
                         const imgEl = el.querySelector('img');
                         const photo = imgEl?.src || '';
+
+                        let seller = '';
+                        const userLink = el.querySelector('a[href*="/member/"]');
+                        if (userLink) {
+                            const uMatch = userLink.href.match(/\/member\/\d+-?([^\/?#]+)?/);
+                            if (uMatch && uMatch[1]) seller = uMatch[1];
+                            else seller = userLink.innerText.trim();
+                        }
                         
                         items.push({
                             id: itemId,
@@ -826,7 +860,8 @@ def extract_items_from_page(page):
                             brand: brand,
                             status: status,
                             url: url,
-                            photo: photo
+                            photo: photo,
+                            seller: seller
                         });
 
                     } catch (e) {
@@ -911,10 +946,15 @@ def send_discord_alert(context, item):
                 log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
                 return
 
+        # Filtrage vendeur bloqué préalable
+        if item.get('seller') and is_seller_blacklisted(item['seller']):
+            log(f"🚫 [Vinted] Alerte bloquée : vendeur '{item['seller']}' dans la liste noire !")
+            return
+
         # Micro-fetch ultra-rapide HTTP (200-300ms) pour récupérer description, photos HD et vendeur
         photos = [photo_url] if photo_url else []
         desc_clean = ""
-        seller_name = ""
+        seller_name = item.get('seller', '')
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -937,6 +977,11 @@ def send_discord_alert(context, item):
                     m_av_alt = re.search(r'Image__circle[^>]*>.*?<img[^>]+alt=[\"\']([^\"\']+)[\"\']', html, re.DOTALL)
                     if m_av_alt and m_av_alt.group(1).strip():
                         seller_name = clean_text(m_av_alt.group(1))
+
+                # Blocage immédiat si le vendeur est sur liste noire
+                if seller_name and is_seller_blacklisted(seller_name):
+                    log(f"🚫 [Vinted] Alerte bloquée : vendeur '{seller_name}' dans la liste noire !")
+                    return
 
                 # Détection et exclusion formelle de l'avatar de profil du vendeur
                 avatar_sigs = set()
@@ -1146,6 +1191,12 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
 
             # Double vérification anti-doublon (au cas où alerté entre-temps)
             if item_id in alerted_ids:
+                continue
+
+            # Vérification vendeur bloqué dès la liste
+            seller_val = item.get('seller')
+            if seller_val and is_seller_blacklisted(seller_val):
+                log(f"🚫 Article ignoré dès la liste (Vendeur bloqué @{seller_val}) : '{t_titre}'")
                 continue
 
             # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€, Vestes)

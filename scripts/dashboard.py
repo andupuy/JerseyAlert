@@ -24,6 +24,10 @@ RESET_TIMESTAMP_FILE = os.environ.get(
     "RESET_TIMESTAMP_FILE",
     "/root/.last_errors_reset" if os.path.exists("/root") else ".last_errors_reset"
 )
+BLACKLIST_FILE = os.environ.get(
+    "BLACKLIST_FILE",
+    "/root/JerseyAlert/blacklisted_sellers.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_sellers.json"
+)
 
 # In-memory caches to handle multi-device / multi-client connections seamlessly without CPU overload
 cache_lock = threading.Lock()
@@ -47,6 +51,40 @@ IGNORE_PATTERNS = re.compile(
     r"(write EPIPE|emitErrorNT|emitErrorCloseNT|Unhandled 'error' event|SyntaxWarning|errno: -32|syscall: 'write')",
     re.UNICODE
 )
+
+def normalize_seller_name(username):
+    """Nettoie et normalise le pseudo vendeur (retire @, espaces, et extrait le pseudo si URL fournie)"""
+    if not username:
+        return ""
+    cleaned = str(username).strip().lower().replace("@", "")
+    if "vinted." in cleaned and "/member/" in cleaned:
+        part = cleaned.split("/member/")[1].split("?")[0].split("/")[0]
+        if "-" in part:
+            return part.split("-", 1)[1]
+        return part
+    return cleaned
+
+def get_blacklisted_sellers():
+    """Charge la liste des vendeurs bloqués"""
+    if os.path.exists(BLACKLIST_FILE):
+        try:
+            with open(BLACKLIST_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return sorted(list({normalize_seller_name(s) for s in data if normalize_seller_name(s)}))
+        except Exception:
+            pass
+    return []
+
+def save_blacklisted_sellers(sellers_list):
+    """Sauvegarde la liste des vendeurs bloqués"""
+    clean_list = sorted(list({normalize_seller_name(s) for s in sellers_list if normalize_seller_name(s)}))
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(BLACKLIST_FILE)), exist_ok=True)
+        with open(BLACKLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(clean_list, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Erreur sauvegarde blacklist: {e}")
+    return clean_list
 
 class ThreadedTCPServer(ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
@@ -84,12 +122,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(content)
         elif parsed.path == "/api/status":
             data = self.get_cached_status()
-            content = json.dumps(data).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
+            self.send_json_response(data)
         elif parsed.path == "/api/logs":
             logs_data = self.get_cached_logs()
             content = logs_data["full"].encode("utf-8")
@@ -100,15 +133,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(content)
         elif parsed.path == "/api/errors":
             logs_data = self.get_cached_logs()
-            content = json.dumps({
+            self.send_json_response({
                 "errors": logs_data["errors"],
                 "count": logs_data["error_count"]
-            }).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
+            })
+        elif parsed.path == "/api/blacklist":
+            sellers = get_blacklisted_sellers()
+            self.send_json_response({
+                "sellers": sellers,
+                "count": len(sellers)
+            })
         else:
             self.send_response(404)
             self.end_headers()
@@ -140,6 +174,52 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json_response({"success": True, "message": "Historique des erreurs réinitialisé !"})
             except Exception as e:
                 self.send_json_response({"success": False, "message": f"Erreur: {e}"})
+        elif parsed.path == "/api/blacklist/add":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = urllib.parse.parse_qs(body)
+                data = {k: v[0] for k, v in data.items()}
+            seller_raw = data.get("seller", "")
+            clean_name = normalize_seller_name(seller_raw)
+            if clean_name:
+                current = get_blacklisted_sellers()
+                if clean_name not in current:
+                    current.append(clean_name)
+                    save_blacklisted_sellers(current)
+                self.send_json_response({
+                    "success": True,
+                    "message": f"Vendeur '@{clean_name}' bloqué avec succès !",
+                    "sellers": sorted(current),
+                    "count": len(current)
+                })
+            else:
+                self.send_json_response({"success": False, "message": "Pseudo de vendeur invalide."})
+        elif parsed.path == "/api/blacklist/remove":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = urllib.parse.parse_qs(body)
+                data = {k: v[0] for k, v in data.items()}
+            seller_raw = data.get("seller", "")
+            clean_name = normalize_seller_name(seller_raw)
+            if clean_name:
+                current = get_blacklisted_sellers()
+                if clean_name in current:
+                    current.remove(clean_name)
+                    save_blacklisted_sellers(current)
+                self.send_json_response({
+                    "success": True,
+                    "message": f"Vendeur '@{clean_name}' débloqué !",
+                    "sellers": sorted(current),
+                    "count": len(current)
+                })
+            else:
+                self.send_json_response({"success": False, "message": "Pseudo de vendeur invalide."})
         else:
             self.send_response(404)
             self.end_headers()
@@ -311,8 +391,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             --green: #22c55e;
             --green-glow: rgba(34, 197, 94, 0.15);
             --red: #ef4444;
+            --red-glow: rgba(239, 68, 68, 0.15);
             --amber: #f59e0b;
-            --amber-glow: rgba(245, 158, 11, 0.15);
             --blue: #3b82f6;
             --terminal-bg: #030712;
         }
@@ -343,8 +423,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             display: flex; gap: 6px; margin-bottom: 8px; background: var(--card); padding: 4px; border-radius: 10px; border: 1px solid var(--card-border);
         }
         .tab-btn {
-            flex: 1; padding: 8px 12px; font-size: 0.82rem; font-weight: 600; background: transparent; color: var(--muted);
-            border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+            flex: 1; padding: 8px 10px; font-size: 0.8rem; font-weight: 600; background: transparent; color: var(--muted);
+            border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;
         }
         .tab-btn.active {
             background: #1e293b; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
@@ -353,12 +433,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             padding: 1px 7px; border-radius: 10px; font-size: 0.7rem; font-weight: 700;
         }
         .pill-zero { background: #334155; color: #94a3b8; }
-        .pill-warn { background: var(--amber); color: #000; animation: pulse 2s infinite; }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
+        .pill-warn { background: var(--amber); color: #000; }
+        .pill-red { background: var(--red); color: #fff; }
 
         .terminal-container {
             background: var(--terminal-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden;
@@ -384,6 +460,42 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         }
         .terminal-logs.errors-view {
             color: #fbbf24;
+        }
+
+        /* Blacklist View */
+        .blacklist-view {
+            background: var(--card); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px;
+            display: none; flex-direction: column; height: 56vh; min-height: 340px;
+        }
+        .form-row {
+            display: flex; gap: 8px; margin-bottom: 14px;
+        }
+        .input-text {
+            flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--card-border);
+            background: #090d16; color: #fff; font-size: 0.85rem; outline: none;
+        }
+        .input-text:focus { border-color: var(--blue); }
+        .btn-add {
+            background: #dc2626; color: white; padding: 10px 16px; border-radius: 8px; font-weight: 700;
+            font-size: 0.85rem; cursor: pointer; border: none; white-space: nowrap;
+        }
+        .sellers-container {
+            flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px;
+        }
+        .seller-item {
+            display: flex; justify-content: space-between; align-items: center; background: #090d16;
+            border: 1px solid var(--card-border); padding: 10px 14px; border-radius: 8px;
+        }
+        .seller-name {
+            font-weight: 600; font-size: 0.88rem; display: flex; align-items: center; gap: 8px; color: #f8fafc;
+        }
+        .btn-unblock {
+            background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4);
+            padding: 5px 12px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+        }
+        .btn-unblock:hover { background: rgba(239, 68, 68, 0.35); color: #fff; }
+        .empty-sellers {
+            text-align: center; color: var(--muted); padding: 40px 10px; font-size: 0.85rem; line-height: 1.6;
         }
         
         #toast {
@@ -422,11 +534,15 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             📡 Flux complet
         </button>
         <button id="tabErrors" class="tab-btn" onclick="switchTab('errors')">
-            ⚠️ Historique Erreurs <span id="errorBadge" class="pill-count pill-zero">0</span>
+            ⚠️ Erreurs <span id="errorBadge" class="pill-count pill-zero">0</span>
+        </button>
+        <button id="tabBlacklist" class="tab-btn" onclick="switchTab('blacklist')">
+            🚫 Vendeurs Bloqués <span id="blacklistBadge" class="pill-count pill-zero">0</span>
         </button>
     </div>
 
-    <div class="terminal-container">
+    <!-- Terminal Container (Tabs All & Errors) -->
+    <div id="terminalContainer" class="terminal-container">
         <div class="terminal-header">
             <span id="terminalTitle">📡 Flux de logs complet (Temps réel)</span>
             <div class="terminal-header-right">
@@ -439,6 +555,18 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         <div id="logsBox" class="terminal-logs">Chargement des logs...</div>
     </div>
 
+    <!-- Blacklist Container (Tab Blacklist) -->
+    <div id="blacklistContainer" class="blacklist-view">
+        <form class="form-row" onsubmit="addSeller(event)">
+            <input type="text" id="sellerInput" class="input-text" placeholder="Pseudo Vinted (ex: jean_dupont ou @jean_dupont ou URL profil)" required>
+            <button type="submit" class="btn-add">➕ Bloquer</button>
+        </form>
+
+        <div id="sellersList" class="sellers-container">
+            <div class="empty-sellers">Chargement des vendeurs bloqués...</div>
+        </div>
+    </div>
+
     <div id="toast">Message</div>
 
     <script>
@@ -446,6 +574,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         let activeTab = "all";
         let cachedFullLogs = "";
         let cachedErrorLogs = "";
+        let cachedSellers = [];
 
         function showToast(msg, bg="#22c55e") {
             const t = document.getElementById("toast");
@@ -459,26 +588,38 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             activeTab = tab;
             const tabAll = document.getElementById("tabAll");
             const tabErrors = document.getElementById("tabErrors");
+            const tabBlacklist = document.getElementById("tabBlacklist");
+            const termCont = document.getElementById("terminalContainer");
+            const blackCont = document.getElementById("blacklistContainer");
             const box = document.getElementById("logsBox");
             const title = document.getElementById("terminalTitle");
             const btnClear = document.getElementById("btnClearErrors");
 
-            if (tab === "all") {
-                tabAll.className = "tab-btn active";
-                tabErrors.className = "tab-btn";
-                box.className = "terminal-logs";
-                box.innerText = cachedFullLogs || "Chargement du flux complet...";
-                title.innerText = "📡 Flux de logs complet (Temps réel)";
-                btnClear.style.display = "none";
+            tabAll.className = "tab-btn" + (tab === "all" ? " active" : "");
+            tabErrors.className = "tab-btn" + (tab === "errors" ? " active" : "");
+            tabBlacklist.className = "tab-btn" + (tab === "blacklist" ? " active" : "");
+
+            if (tab === "blacklist") {
+                termCont.style.display = "none";
+                blackCont.style.display = "flex";
+                fetchBlacklist();
             } else {
-                tabAll.className = "tab-btn";
-                tabErrors.className = "tab-btn active";
-                box.className = "terminal-logs errors-view";
-                box.innerText = cachedErrorLogs || "Chargement de l'historique...";
-                title.innerText = "⚠️ Historique persistant des erreurs et alertes";
-                btnClear.style.display = "inline-flex";
+                termCont.style.display = "flex";
+                blackCont.style.display = "none";
+
+                if (tab === "all") {
+                    box.className = "terminal-logs";
+                    box.innerText = cachedFullLogs || "Chargement du flux complet...";
+                    title.innerText = "📡 Flux de logs complet (Temps réel)";
+                    btnClear.style.display = "none";
+                } else {
+                    box.className = "terminal-logs errors-view";
+                    box.innerText = cachedErrorLogs || "Chargement de l'historique...";
+                    title.innerText = "⚠️ Historique persistant des erreurs et alertes";
+                    btnClear.style.display = "inline-flex";
+                }
+                box.scrollTop = box.scrollHeight;
             }
-            box.scrollTop = box.scrollHeight;
         }
 
         async function updateStatus() {
@@ -547,9 +688,102 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             } catch(e) {}
         }
 
+        async function fetchBlacklist() {
+            try {
+                const res = await fetch("/api/blacklist");
+                const data = await res.json();
+                cachedSellers = data.sellers || [];
+                
+                const badge = document.getElementById("blacklistBadge");
+                badge.innerText = data.count || 0;
+                badge.className = "pill-count " + (data.count > 0 ? "pill-red" : "pill-zero");
+
+                renderSellersList(cachedSellers);
+            } catch(e) {}
+        }
+
+        function renderSellersList(sellers) {
+            const list = document.getElementById("sellersList");
+            if (!sellers || sellers.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-sellers">
+                        ✅ Aucun vendeur bloqué pour le moment.<br>
+                        Saisissez un pseudo Vinted ci-dessus pour bloquer immédiatement ses annonces.
+                    </div>`;
+                return;
+            }
+
+            let html = "";
+            for (const s of sellers) {
+                html += `
+                    <div class="seller-item">
+                        <span class="seller-name">👤 @${escapeHtml(s)}</span>
+                        <button class="btn-unblock" onclick="removeSeller('${escapeHtml(s)}')">
+                            🗑️ Débloquer
+                        </button>
+                    </div>`;
+            }
+            list.innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        async function addSeller(e) {
+            e.preventDefault();
+            const input = document.getElementById("sellerInput");
+            const seller = input.value.trim();
+            if (!seller) return;
+
+            showToast("Ajout en cours...", "#3b82f6");
+            try {
+                const res = await fetch("/api/blacklist/add", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ seller: seller })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message);
+                    input.value = "";
+                    fetchBlacklist();
+                } else {
+                    showToast(data.message || "Erreur", "#ef4444");
+                }
+            } catch(err) {
+                showToast("Erreur communication serveur", "#ef4444");
+            }
+        }
+
+        async function removeSeller(seller) {
+            if (!confirm(`Voulez-vous vraiment débloquer le vendeur @${seller} ?`)) return;
+            showToast("Déblocage en cours...", "#f59e0b");
+            try {
+                const res = await fetch("/api/blacklist/remove", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ seller: seller })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message);
+                    fetchBlacklist();
+                } else {
+                    showToast(data.message || "Erreur", "#ef4444");
+                }
+            } catch(err) {
+                showToast("Erreur communication serveur", "#ef4444");
+            }
+        }
+
         async function refreshAll() {
             if (document.hidden) return;
-            await Promise.all([fetchLogs(), fetchErrors()]);
+            if (activeTab === "blacklist") {
+                await fetchBlacklist();
+            } else {
+                await Promise.all([fetchLogs(), fetchErrors()]);
+            }
         }
 
         async function clearErrorsHistory() {
@@ -592,12 +826,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         // Periodic updates with smart intervals
         setInterval(refreshAll, 3000);
         setInterval(() => {
-            if (!document.hidden) updateStatus();
+            if (!document.hidden) {
+                updateStatus();
+                fetchBlacklist();
+            }
         }, 5000);
 
         // Immediate run on load
         updateStatus();
         refreshAll();
+        fetchBlacklist();
     </script>
 </body>
 </html>
