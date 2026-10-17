@@ -20,6 +20,10 @@ ERRORS_LOG_FILE = os.environ.get(
     "ERRORS_LOG_FILE",
     "/root/vinted_errors.log" if os.path.exists("/root") else "vinted_errors.log"
 )
+RESET_TIMESTAMP_FILE = os.environ.get(
+    "RESET_TIMESTAMP_FILE",
+    "/root/.last_errors_reset" if os.path.exists("/root") else ".last_errors_reset"
+)
 
 # In-memory caches to handle multi-device / multi-client connections seamlessly without CPU overload
 cache_lock = threading.Lock()
@@ -36,6 +40,11 @@ status_cache = {
 
 ERROR_PATTERNS = re.compile(
     r"(⚠️|🚨|❌|[Ee]rreur|[Ee]rror|[Tt]imeout|[Ww]atchdog|[Ii]ncident|[Tt]raceback|[Rr]ecréation de l'onglet)",
+    re.UNICODE
+)
+
+IGNORE_PATTERNS = re.compile(
+    r"(write EPIPE|emitErrorNT|emitErrorCloseNT|Unhandled 'error' event|SyntaxWarning|errno: -32|syscall: 'write')",
     re.UNICODE
 )
 
@@ -120,6 +129,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_response({"success": True, "message": "Bot démarré !"})
         elif parsed.path == "/api/clear-errors":
             try:
+                now_epoch = time.time()
+                with open(RESET_TIMESTAMP_FILE, "w") as f:
+                    f.write(str(now_epoch))
                 now_str = time.strftime("%Y-%m-%d %H:%M:%S")
                 with open(ERRORS_LOG_FILE, "w", encoding="utf-8") as f:
                     f.write(f"[{now_str}] 🧹 Historique des erreurs réinitialisé par l'utilisateur.\n")
@@ -220,17 +232,34 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 capture_output=True, text=True, timeout=5
             )
             raw_text = res.stdout
-            lines = raw_text.splitlines()
 
-            # 2. Sync any newly appeared errors/warnings into persistent log file
+            # Read last reset epoch
+            last_reset = 0.0
+            if os.path.exists(RESET_TIMESTAMP_FILE):
+                try:
+                    with open(RESET_TIMESTAMP_FILE, "r") as f:
+                        last_reset = float(f.read().strip())
+                except Exception:
+                    pass
+
+            # 2. Sync any unexpected systemd error lines that occurred strictly AFTER the reset
+            if last_reset > 0:
+                since_arg = f"--since=@{int(last_reset)}"
+                sync_res = subprocess.run(
+                    ["journalctl", "-u", "vinted-bot", since_arg, "--no-pager"],
+                    capture_output=True, text=True, timeout=5
+                )
+                check_lines = sync_res.stdout.splitlines()
+            else:
+                check_lines = raw_text.splitlines()
+
             new_errs = []
-            for line in lines:
-                if ERROR_PATTERNS.search(line):
+            for line in check_lines:
+                if ERROR_PATTERNS.search(line) and not IGNORE_PATTERNS.search(line):
                     new_errs.append(line)
 
             if new_errs and os.path.exists(ERRORS_LOG_FILE):
                 try:
-                    # Read tail of existing file to avoid duplicates
                     with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
                         existing_tail = set(f.read().splitlines()[-100:])
                     to_append = [e for e in new_errs if e not in existing_tail]
@@ -244,7 +273,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             # 3. Read full persistent error history
             if os.path.exists(ERRORS_LOG_FILE):
                 with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
-                    stored_lines = [l.strip() for l in f if l.strip()]
+                    stored_lines = [
+                        l.strip() for l in f
+                        if l.strip() and not IGNORE_PATTERNS.search(l)
+                    ]
             else:
                 stored_lines = []
 
