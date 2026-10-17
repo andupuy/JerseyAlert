@@ -1027,14 +1027,12 @@ def send_discord_alert(context, item):
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
-        checkout_url = f"https://www.vinted.fr/checkout?item_id={item_id}"
-
         # Description formatée pour Discord embed avec bouton d'achat direct
         description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
         if seller_name:
             description_text += f"\n👤 Vendeur: **{seller_name}**"
 
-        description_text += f"\n\n🚀 **[⚡ PAYER DIRECTEMENT (CHECKOUT EXPRESS) ⚡]({checkout_url})**\n👉 [Voir l'annonce sur Vinted]({item_url})"
+        description_text += f"\n\n👉 **[⚡ OUVRIR POUR ACHETER SUR VINTED ⚡]({item_url})**"
 
         if desc_clean:
             embed_desc_body = desc_clean[:350] + ("..." if len(desc_clean) > 350 else "")
@@ -1047,8 +1045,8 @@ def send_discord_alert(context, item):
             "color": 0x09B83E,
             "fields": [
                 {
-                    "name": "⚡ Paiement Express",
-                    "value": f"👉 **[⚡ ACCÉDER DIRECTEMENT AU PAIEMENT ⚡]({checkout_url})**",
+                    "name": "⚡ Accès Direct",
+                    "value": f"👉 **[⚡ OUVRIR DANS L'APPLI VINTED ⚡]({item_url})**",
                     "inline": False
                 }
             ],
@@ -1088,13 +1086,7 @@ def send_discord_alert(context, item):
                         {
                             "type": 2,
                             "style": 5,
-                            "label": "⚡ Payer directement",
-                            "url": checkout_url
-                        },
-                        {
-                            "type": 2,
-                            "style": 5,
-                            "label": "👁️ Voir l'annonce",
+                            "label": "⚡ Acheter sur Vinted",
                             "url": item_url
                         }
                     ]
