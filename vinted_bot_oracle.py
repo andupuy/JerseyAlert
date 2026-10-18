@@ -1251,11 +1251,14 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 is_fresh_item = False
                 if shared_last_seen_id > 0:
                     diff = i_id - shared_last_seen_id
-                    # 1. Annonce publiée pendant le redémarrage (ID supérieur au dernier ID vu, max ~15 min)
-                    if 0 < diff < 50000:
+                    # 1. Annonce publiée pendant le redémarrage (ID supérieur au dernier ID vu)
+                    if diff > 0:
                         is_fresh_item = True
-                    # 2. Pour le Filet : annonce récente (~1 heure max) jamais vue et non alertée
-                    elif is_filet and diff > -300000 and i_id not in filet_seen_ids:
+                    # 2. Pour le Filet : annonce dans les recherches mots-clés jamais vue dans le cache.
+                    # Vinted traite ~1.2M annonces/h en Europe. Une annonce modérée ou retardée
+                    # de quelques heures peut avoir un ID décalé de plusieurs millions.
+                    # On conserve toute annonce non vue dans les dernières ~12h (~15M IDs).
+                    elif is_filet and diff > -15000000 and i_id not in filet_seen_ids:
                         is_fresh_item = True
 
                 if is_fresh_item:
@@ -1296,17 +1299,14 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 continue
 
             if is_filet:
-                # Filet de sécurité : cache dédié
+                # Filet de sécurité : toute nouvelle annonce arrivant sur la 1ère page non vue est traitée
                 if item_id not in filet_seen_ids:
-                    # Protection stricte contre les annonces anciennes de fond de catalogue
-                    if shared_last_seen_id == 0 or item_id > (shared_last_seen_id - 500000):
-                        new_found.append(item)
+                    new_found.append(item)
                     filet_seen_ids.add(item_id)
             else:
-                # Flux général
+                # Flux général : toute nouvelle annonce non vue est traitée
                 if item_id not in flux_seen_ids:
-                    if shared_last_seen_id == 0 or item_id > (shared_last_seen_id - 500000):
-                        new_found.append(item)
+                    new_found.append(item)
                     flux_seen_ids.add(item_id)
         
         if not new_found:
