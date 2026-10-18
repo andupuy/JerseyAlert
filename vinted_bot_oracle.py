@@ -1230,34 +1230,58 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
     with state_lock:
         is_filet = "Filet" in source_label
 
-        # Absorption automatique de l'historique lors du premier passage de chaque source
+        # Gestion intelligente de l'initialisation :
+        # Au premier passage, on n'absorbe que le véritable ancien historique (> 1h ou ID <= shared_last_seen_id).
+        # Tout article récent (publié pendant un redémarrage court) ou frais dans le Filet est conservé pour être analysé !
         if source_label not in initialized_sources or is_initial:
             initialized_sources.add(source_label)
             count_absorbed = 0
+            items_to_keep = []
+
             for item in items:
                 try:
                     i_id = int(item['id'])
                 except (ValueError, TypeError):
                     continue
-                if is_filet:
-                    if i_id not in filet_seen_ids:
-                        filet_seen_ids.add(i_id)
-                        count_absorbed += 1
+
+                # Déjà alerté : jamais de doublon
+                if i_id in alerted_ids:
+                    continue
+
+                is_fresh_item = False
+                if shared_last_seen_id > 0:
+                    diff = i_id - shared_last_seen_id
+                    # 1. Annonce publiée pendant le redémarrage (ID supérieur au dernier ID vu, max ~15 min)
+                    if 0 < diff < 50000:
+                        is_fresh_item = True
+                    # 2. Pour le Filet : annonce récente (~1 heure max) jamais vue et non alertée
+                    elif is_filet and diff > -300000 and i_id not in filet_seen_ids:
+                        is_fresh_item = True
+
+                if is_fresh_item:
+                    items_to_keep.append(item)
                 else:
-                    if i_id not in flux_seen_ids:
-                        flux_seen_ids.add(i_id)
-                        count_absorbed += 1
-            if is_filet:
-                save_filet_seen_ids_cache(filet_seen_ids)
-            else:
-                save_seen_ids_cache(flux_seen_ids)
-                if items:
-                    try:
-                        shared_last_seen_id = max(shared_last_seen_id, max(int(x['id']) for x in items if str(x.get('id', '')).isdigit()))
-                        save_last_seen_id(shared_last_seen_id)
-                    except: pass
-            log(f"📥 [{source_label}] {count_absorbed} annonce(s) existante(s) absorbée(s) à l'initialisation.")
-            return
+                    if is_filet:
+                        if i_id not in filet_seen_ids:
+                            filet_seen_ids.add(i_id)
+                            count_absorbed += 1
+                    else:
+                        if i_id not in flux_seen_ids:
+                            flux_seen_ids.add(i_id)
+                            count_absorbed += 1
+
+            if count_absorbed > 0:
+                if is_filet:
+                    save_filet_seen_ids_cache(filet_seen_ids)
+                else:
+                    save_seen_ids_cache(flux_seen_ids)
+                log(f"📥 [{source_label}] {count_absorbed} annonce(s) d'historique absorbée(s) à l'initialisation.")
+
+            # S'il y a des annonces fraîches à traiter, on remplace items par items_to_keep
+            # Sinon, on s'arrête là pour ce cycle d'initialisation
+            if not items_to_keep:
+                return
+            items = items_to_keep
 
         new_found = []
         for item in items:
