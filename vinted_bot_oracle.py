@@ -329,13 +329,17 @@ def get_search_url(query, color_id=None):
         url += f"&color_ids[]={color_id}"
     return url
 
-def log(message):
+def log(message, to_error_log=None):
     """Log avec timestamp heure de Paris et persistance automatique des erreurs"""
     timestamp = get_paris_time().strftime('%Y-%m-%d %H:%M:%S')
     formatted = f"[{timestamp}] {message}"
     print(formatted, flush=True)
 
-    if any(k in message for k in ["⚠️", "🚨", "❌", "Erreur", "erreur", "Error", "error", "Timeout", "timeout", "WATCHDOG", "Incident", "incident"]):
+    if to_error_log is False:
+        return
+
+    should_record = to_error_log is True or any(k in message for k in ["⚠️", "🚨", "❌", "WATCHDOG"])
+    if should_record:
         try:
             with open(ERRORS_LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(formatted + "\n")
@@ -707,10 +711,14 @@ def extract_items_from_page(page):
     """Extrait les articles avec Parsing Intelligent du Titre (V5.0 Ultra-Rapide Flash)"""
     try:
         items = page.evaluate("""
-            () => {
-                const items = [];
-                const gridItems = document.querySelectorAll('div[class*="feed-grid__item"], [data-testid="grid-item"]');
+            async () => {
+                let gridItems = document.querySelectorAll('div[class*="feed-grid__item"], [data-testid="grid-item"]');
+                if (!gridItems || gridItems.length < 20) {
+                    await new Promise(r => setTimeout(r, 250));
+                    gridItems = document.querySelectorAll('div[class*="feed-grid__item"], [data-testid="grid-item"]');
+                }
                 if (!gridItems || gridItems.length === 0) return [];
+                const items = [];
                 const maxToExtract = 48; // Buffer de sécurité blindé pour les heures de pointe (48 vraies annonces)
                 const count = Math.min(gridItems.length, maxToExtract);
                 
@@ -1307,6 +1315,7 @@ def worker_turbo_sniper():
 
                 session_start_time = time.time()
                 cycle_count = 0
+                consecutive_errors = 0
 
                 while True:
                     cycle_count += 1
@@ -1344,23 +1353,31 @@ def worker_turbo_sniper():
                             signal.signal(signal.SIGALRM, watchdog_handler)
                             signal.alarm(120)
 
-                        page.goto(target_url, wait_until='commit', timeout=8000)
+                        page.goto(target_url, wait_until='commit', timeout=12000)
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted] Scan {scan_label} : {len(items)} annonces")
+                        consecutive_errors = 0
                         if items:
                             process_incoming_items_safe(items, scan_label, is_initial=is_initial_scan)
                             if is_initial_scan and cycle_count >= 5:
                                 is_initial_scan = False
                     except Exception as e:
-                        log(f"⚠️ [Vinted] Erreur locale : {e}")
+                        consecutive_errors += 1
                         err_str = str(e).lower()
+                        is_timeout = "timeout" in err_str
+                        # Si c'est un timeout isolé (< 3 consécutifs), on ne pollue pas le dashboard d'erreurs
+                        if is_timeout and consecutive_errors < 3:
+                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors}/3) sur {scan_label} : reprise fluide...")
+                        else:
+                            log(f"⚠️ [Vinted] Erreur locale ({consecutive_errors} consécutives) : {e}")
+
                         if any(k in err_str for k in ["crash", "closed", "destroyed", "timeout"]):
-                            log("🔄 [Vinted] Recréation immédiate de l'onglet suite à incident/timeout...")
+                            log("🔄 [Vinted] Recréation de l'onglet suite à incident/timeout...", to_error_log=False)
                             try: page.close()
                             except: pass
                             try:
                                 page = context.new_page()
-                                page.set_default_timeout(8000)
+                                page.set_default_timeout(12000)
                             except:
                                 break
                     finally:
