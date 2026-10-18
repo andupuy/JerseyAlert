@@ -442,7 +442,9 @@ def log(message, to_error_log=None):
     if to_error_log is False:
         return
 
-    should_record = to_error_log is True or any(k in message for k in ["⚠️", "🚨", "❌", "WATCHDOG"])
+    should_record = to_error_log is True or (
+        message.lstrip().startswith(("⚠️", "🚨", "❌")) or "WATCHDOG" in message
+    )
     if should_record:
         try:
             with open(ERRORS_LOG_FILE, "a", encoding="utf-8") as f:

@@ -43,12 +43,12 @@ status_cache = {
 }
 
 ERROR_PATTERNS = re.compile(
-    r"(⚠️|🚨|❌|[Ww]atchdog|[Tt]raceback)",
+    r"(\]\s*(?:⚠️|🚨|❌)|[Ww]atchdog:|[Tt]raceback)",
     re.UNICODE
 )
 
 IGNORE_PATTERNS = re.compile(
-    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections|Micro-latence réseau|reprise fluide)",
+    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections|Micro-latence réseau|reprise fluide|Détecté #|Article ignoré|Scan Flux|Scan Filet)",
     re.IGNORECASE
 )
 
