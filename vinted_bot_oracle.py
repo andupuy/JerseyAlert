@@ -1504,15 +1504,10 @@ def worker_turbo_sniper():
                         else:
                             log(f"⚠️ [Vinted] Erreur locale ({consecutive_errors} consécutives) : {e}")
 
-                        if any(k in err_str for k in ["crash", "closed", "destroyed", "timeout"]):
-                            log("🔄 [Vinted] Recréation de l'onglet suite à incident/timeout...", to_error_log=False)
-                            try: page.close()
-                            except: pass
-                            try:
-                                page = context.new_page()
-                                page.set_default_timeout(12000)
-                            except:
-                                break
+                        # Si crash du processus ou 2 micro-latences consécutives, recyclage propre et immédiat en 1s
+                        if any(k in err_str for k in ["crash", "closed", "destroyed"]) or consecutive_errors >= 2:
+                            log("♻️ [Vinted] Recyclage propre de la session Chromium...", to_error_log=False)
+                            break
                     finally:
                         if hasattr(signal, "SIGALRM"):
                             signal.alarm(0)
