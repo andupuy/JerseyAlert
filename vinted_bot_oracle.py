@@ -236,6 +236,105 @@ def parse_price(price_str):
         except ValueError: return None
     return None
 
+def is_asse_jersey_match(title):
+    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
+    if not title: return False
+    import re
+    title_low = title.lower()
+    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
+    return bool(re.search(team_pattern, title_low))
+
+# Dictionnaire des clubs majeurs pour identifier le "tag stuffing" (spam de mots-clés)
+CLUB_PATTERNS = {
+    'psg': r'\b(psg|paris\s+sg|paris\s+saint[- ]germain)\b',
+    'om': r'\b(om|olympique\s+de\s+marseille|marseille)\b',
+    'ol': r'\b(ol|olympique\s+lyonnais|lyon)\b',
+    'lens': r'\b(rc\s+lens|lens)\b',
+    'lille': r'\b(losc|lille)\b',
+    'monaco': r'\b(as\s+monaco|monaco)\b',
+    'rennes': r'\b(stade\s+rennais|rennes)\b',
+    'nantes': r'\b(fc\s+nantes|nantes)\b',
+    'nice': r'\b(ogc\s+nice|nice)\b',
+    'bordeaux': r'\b(girondins|bordeaux)\b',
+    'montpellier': r'\b(mhsc|montpellier)\b',
+    'strasbourg': r'\b(rcsa|strasbourg)\b',
+    'toulouse': r'\b(tfc|toulouse)\b',
+    'reims': r'\b(stade\s+de\s+reims|reims)\b',
+    'brest': r'\b(stade\s+brestois|brest)\b',
+    'auxerre': r'\b(aja|auxerre)\b',
+    'metz': r'\b(fc\s+metz|metz)\b',
+    'angers': r'\b(sco\s+angers|angers)\b',
+    'lorient': r'\b(fc\s+lorient|lorient)\b',
+    'le_havre': r'\b(hac|le\s+havre)\b',
+    'asse': r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b',
+    'real_madrid': r'\b(real\s+madrid)\b',
+    'barcelona': r'\b(barcelona|bar[çc]a)\b',
+    'atletico': r'\b(atletico\s+madrid|atletico)\b',
+    'sevilla': r'\b(sevilla|seville)\b',
+    'valencia': r'\b(valencia|valence)\b',
+    'villarreal': r'\b(villarr?eal)\b',
+    'betis': r'\b(betis)\b',
+    'bilbao': r'\b(athletic\s+bilbao|bilbao)\b',
+    'man_united': r'\b(manchester\s+united|man\s+utd)\b',
+    'man_city': r'\b(manchester\s+city|man\s+city)\b',
+    'liverpool': r'\b(liverpool)\b',
+    'arsenal': r'\b(arsenal)\b',
+    'chelsea': r'\b(chelsea)\b',
+    'tottenham': r'\b(tottenham|spurs)\b',
+    'newcastle': r'\b(newcastle)\b',
+    'aston_villa': r'\b(aston\s+villa)\b',
+    'everton': r'\b(everton)\b',
+    'west_ham': r'\b(west\s+ham)\b',
+    'juventus': r'\b(juventus|juve)\b',
+    'milan': r'\b(ac\s+milan|milan\s+ac)\b',
+    'inter': r'\b(inter\s+milan|inter)\b',
+    'napoli': r'\b(napoli|naples)\b',
+    'roma': r'\b(as\s+roma|roma)\b',
+    'lazio': r'\b(lazio)\b',
+    'fiorentina': r'\b(fiorentina)\b',
+    'bayern': r'\b(bayern\s+munich|bayern)\b',
+    'dortmund': r'\b(borussia\s+dortmund|dortmund)\b',
+    'leverkusen': r'\b(bayer\s+leverkusen|leverkusen)\b',
+    'leipzig': r'\b(rb\s+leipzig|leipzig)\b',
+    'schalke': r'\b(schalke\s*04|schalke)\b',
+    'ajax': r'\b(ajax\s+amsterdam|ajax)\b',
+    'benfica': r'\b(benfica)\b',
+    'porto': r'\b(fc\s+porto|porto)\b',
+    'sporting': r'\b(sporting\s+lisbon[ae]?|sporting\s+cp)\b',
+    'psv': r'\b(psv\s+eindhoven|psv)\b',
+    'feyenoord': r'\b(feyenoord)\b',
+    'galatasaray': r'\b(galatasaray)\b',
+    'celtic': r'\b(celtic\s+glasgow|celtic)\b',
+    'rangers': r'\b(glasgow\s+rangers|rangers)\b'
+}
+
+def is_explicit_asse_jersey(title, desc=""):
+    """
+    Vérifie si l'article est EXPLICITEMENT un article / maillot de l'ASSE :
+    1. Soit le titre mentionne directement l'ASSE / Saint-Etienne (hors lot multi-articles).
+    2. Soit la description associe explicitement un maillot/vêtement à l'ASSE (ex: 'maillot de l'asse', 'maillot st etienne', 'tenue asse').
+    """
+    import re
+    t = (title or "").lower()
+    d = (desc or "").lower()
+
+    # 1. Dans le titre : mention claire de l'ASSE (sauf si annonce de type lot multi-articles)
+    if is_asse_jersey_match(t):
+        if not re.search(r'\b(lot|lots|plusieurs)\s+(?:de\s+)?(?:maillots|articles|t-?shirts)\b', t):
+            return True
+
+    # 2. Dans la description : formulation sans équivoque liant le vêtement à l'ASSE
+    explicit_desc_patterns = [
+        r'\b(?:maillot|jersey|vareuse|t-?shirt|ensemble|tenue|polo)\s+(?:de\s+(?:l[\'\s])?)?(?:l[\'\s])?(?:asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b',
+        r'\b(?:asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\s+(?:maillot|jersey|vareuse|domicile|ext[ée]rieur|third|vintage|collector|flocage|manufrance|supert[ée]l[ée]|duarig|le\s+coq\s+sportif|puma|adidas|hummel|kappa)\b',
+        r'\b(?:vends|vente)\s+(?:un\s+|mon\s+|ce\s+)?(?:maillot|jersey)\s+(?:de\s+(?:l[\'\s])?)?(?:l[\'\s])?(?:asse|saint[- \.]*etienne|st[- \.]*etienne|sainté)\b'
+    ]
+    for pat in explicit_desc_patterns:
+        if re.search(pat, d):
+            return True
+
+    return False
+
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
     Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
@@ -243,6 +342,8 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     2. Mugs, tasses, bols, chopes
     3. Cartes Panini, stickers, vignettes, topps
     4. Magnets, magnettes, aimants
+    5. Vestes, blousons, doudounes
+    6. Spam de mots-clés multi-clubs (> 4 clubs cités sans mention explicite ASSE)
     """
     import re
     t = (title_str or "").lower()
@@ -293,15 +394,18 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Veste / Blouson"
 
-    return False, "OK"
+    # 7. Spam de mots-clés / Tag stuffing multi-clubs (> 4 clubs cités)
+    if d:
+        clubs_found = set()
+        for club_key, club_pattern in CLUB_PATTERNS.items():
+            if re.search(club_pattern, d):
+                clubs_found.add(club_key)
 
-def is_asse_jersey_match(title):
-    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
-    if not title: return False
-    import re
-    title_low = title.lower()
-    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
-    return bool(re.search(team_pattern, title_low))
+        if len(clubs_found) > 4:
+            if not is_explicit_asse_jersey(t, d):
+                return True, f"Spam multi-clubs ({len(clubs_found)} clubs cités sans mention explicite ASSE)"
+
+    return False, "OK"
 
 def get_api_search_url(query, color_id=None):
     """Génère l'URL d'API directe Vinted pour une recherche texte"""
@@ -1238,8 +1342,11 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                         log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
                         continue
                     if is_asse_jersey_match(desc):
-                        matched = True
-                        log(f"🎯 MATCH {source_label} (Confirmé dans la description) : '{t_titre}' ({t_prix})")
+                        if is_explicit_asse_jersey(t_titre, desc):
+                            matched = True
+                            log(f"🎯 MATCH {source_label} (Confirmé dans la description) : '{t_titre}' ({t_prix})")
+                        else:
+                            log(f"🚫 Article ignoré : mention ASSE non explicite dans la description ('{t_titre}')")
 
             if matched:
                 send_discord_alert(None, item)
