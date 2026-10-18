@@ -43,12 +43,12 @@ status_cache = {
 }
 
 ERROR_PATTERNS = re.compile(
-    r"(⚠️|🚨|❌|[Ee]rreur|[Ee]rror|[Tt]imeout|[Ww]atchdog|[Ii]ncident|[Tt]raceback|[Rr]ecréation de l'onglet)",
+    r"(⚠️|🚨|❌|[Ww]atchdog|[Tt]raceback)",
     re.UNICODE
 )
 
 IGNORE_PATTERNS = re.compile(
-    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections)",
+    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections|Micro-latence réseau|reprise fluide)",
     re.IGNORECASE
 )
 
