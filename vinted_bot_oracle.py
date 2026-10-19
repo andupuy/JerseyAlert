@@ -1497,14 +1497,23 @@ def worker_turbo_sniper():
                     except Exception as e:
                         consecutive_errors += 1
                         err_str = str(e).lower()
-                        is_timeout = "timeout" in err_str
-                        # Si c'est un timeout isolé (< 3 consécutifs), on ne pollue pas le dashboard d'erreurs
-                        if is_timeout and consecutive_errors < 3:
-                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors}/3) sur {scan_label} : reprise fluide...")
+                        is_transient = any(k in err_str for k in ["timeout", "interrupted", "err_aborted"])
+                        # Si c'est un incident réseau isolé (< 2 consécutifs), on purge l'onglet pour éviter tout conflit de navigation
+                        if is_transient and consecutive_errors < 2:
+                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors}/2) sur {scan_label} : reprise fluide...")
+                            try:
+                                page.close()
+                            except Exception:
+                                pass
+                            try:
+                                page = context.new_page()
+                                page.set_default_timeout(12000)
+                            except Exception:
+                                break
                         else:
                             log(f"⚠️ [Vinted] Erreur locale ({consecutive_errors} consécutives) : {e}")
 
-                        # Si crash du processus ou 2 micro-latences consécutives, recyclage propre et immédiat en 1s
+                        # Si crash du processus ou 2 erreurs consécutives, recyclage propre et immédiat en 1s
                         if any(k in err_str for k in ["crash", "closed", "destroyed"]) or consecutive_errors >= 2:
                             log("♻️ [Vinted] Recyclage propre de la session Chromium...", to_error_log=False)
                             break
