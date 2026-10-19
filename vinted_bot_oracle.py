@@ -1608,11 +1608,10 @@ def worker_turbo_sniper():
     # Flux combiné Temps Réel : Maillots (3267) + Hauts & T-shirts de sport (584)
     FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&catalog_ids[]=584&order=newest_first"
     
-    # Filet de Sécurité resserré (rotation ultra-rapide en ~1 min)
+    # Filet de Sécurité Turbo centré exclusivement sur 'Maillot Asse'
+    # Zéro pollution géographique de la ville de Saint-Étienne, scan ultra-rapide toutes les ~18s
     SAFETY_QUERIES = [
         ("Maillot Asse", get_search_url("Maillot Asse")),
-        ("Maillot Saint-Etienne", get_search_url("Maillot Saint-Etienne")),
-        ("Maillot St Etienne", get_search_url("Maillot St Etienne")),
     ]
 
     log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité Foot Temps Réel + Filet Sécurité Alterné)")
