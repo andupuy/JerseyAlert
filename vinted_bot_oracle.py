@@ -335,6 +335,79 @@ def is_explicit_asse_jersey(title, desc=""):
 
     return False
 
+# Dictionnaire des équipes et pays concurrents (pour le filtrage liste noire du Filet de sécurité)
+OTHER_TEAMS_PATTERNS = {
+    # Nations
+    'France (hors ASSE)': r'\b(equipe\s+de\s+france|edf|france\s*98|france\s*20\d\d|fff)\b',
+    'Italie': r'\b(italie|italia|italy)\b',
+    'Allemagne': r'\b(allemagne|germany|deutschland)\b',
+    'Belgique': r'\b(belgique|belgium|belgie)\b',
+    'Espagne': r'\b(espagne|spain|espana)\b',
+    'Portugal': r'\b(portugal)\b',
+    'Angleterre': r'\b(angleterre|england)\b',
+    'Brésil': r'\b(br[eé]sil|brazil)\b',
+    'Argentine': r'\b(argentine|argentina)\b',
+    'Pays-Bas': r'\b(pays[- ]bas|netherlands|hollande)\b',
+    'Croatie': r'\b(croatie|croatia)\b',
+    'Maroc': r'\b(maroc|morocco)\b',
+    'Algérie': r'\b(alg[eé]rie|algeria)\b',
+    
+    # Clubs français majeurs
+    'PSG': r'\b(psg|paris\s+sg|paris\s+saint[- ]germain)\b',
+    'OM': r'\b(om|marseille|olympique\s+de\s+marseille)\b',
+    'OL': r'\b(ol|lyon|olympique\s+lyonnais)\b',
+    'Lens': r'\b(rc\s+lens|lens)\b',
+    'Lille': r'\b(losc|lille)\b',
+    'Monaco': r'\b(as\s+monaco|monaco)\b',
+    'Rennes': r'\b(stade\s+rennais|rennes)\b',
+    'Nantes': r'\b(fc\s+nantes|nantes)\b',
+    'Nice': r'\b(ogc\s+nice|nice\s+ogc|maillot\s+(?:de\s+)?nice)\b',
+    'Bordeaux': r'\b(girondins|bordeaux)\b',
+    'Montpellier': r'\b(mhsc|montpellier)\b',
+    'Strasbourg': r'\b(rcsa|strasbourg)\b',
+    'Toulouse': r'\b(tfc|toulouse)\b',
+    'Reims': r'\b(stade\s+de\s+reims|reims)\b',
+    'Brest': r'\b(stade\s+brestois|brest)\b',
+    'Auxerre': r'\b(aja|auxerre)\b',
+    'Metz': r'\b(fc\s+metz|metz)\b',
+
+    # Clubs européens
+    'Real Madrid': r'\b(real\s+madrid)\b',
+    'FC Barcelone': r'\b(barcelona|bar[çc]a)\b',
+    'Atletico': r'\b(atletico\s+madrid|atletico)\b',
+    'Juventus': r'\b(juventus|juve)\b',
+    'AC Milan': r'\b(ac\s+milan|milan\s+ac)\b',
+    'Inter Milan': r'\b(inter\s+milan)\b',
+    'Bayern Munich': r'\b(bayern\s+munich|bayern)\b',
+    'Dortmund': r'\b(borussia\s+dortmund|dortmund)\b',
+    'Liverpool': r'\b(liverpool)\b',
+    'Arsenal': r'\b(arsenal)\b',
+    'Chelsea': r'\b(chelsea)\b',
+    'Manchester United': r'\b(manchester\s+united|man\s+utd)\b',
+    'Manchester City': r'\b(manchester\s+city|man\s+city)\b',
+    'Manchester': r'\b(manchester)\b',
+    'Tottenham': r'\b(tottenham|spurs)\b',
+    'Ajax': r'\b(ajax\s+amsterdam|ajax)\b'
+}
+
+def is_conflicting_team(text):
+    """
+    Détecte si le texte concerne explicitement une autre équipe ou nation concurrente,
+    en ignorant les mentions d'adversaires (ex: 'contre Montpellier', 'vs OM', 'face à Lyon').
+    """
+    if not text:
+        return False, None
+    import re
+    t = text.lower()
+    # Neutraliser les mentions d'adversaires / confrontations pour ne pas bloquer les maillots de match
+    opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|match\s+contre)\s+([a-z0-9\-\'\s]+?)(?=\s+(?:en|le|du|au|pour|saison|19\d\d|20\d\d)\b|[,\.;\(\)\!]|$)'
+    t_clean = re.sub(opponent_pattern, ' ', t)
+    
+    for team_name, pat in OTHER_TEAMS_PATTERNS.items():
+        if re.search(pat, t_clean):
+            return True, team_name
+    return False, None
+
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
     Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
@@ -439,6 +512,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if len(clubs_found) > 4:
             if not is_explicit_asse_jersey(t, d):
                 return True, f"Spam multi-clubs ({len(clubs_found)} clubs cités sans mention explicite ASSE)"
+
+    # 14. Bas de sport seuls (shorts, pantalons, joggings, chaussettes) sans mention de maillot/jersey/tenue
+    pants_pattern = r'\b(short|shorts|pantalon|pantalons|jogging|joggings|surv[eê]tement|surv[eê]tements|chaussette|chaussettes|bas\s+de\s+foot)\b'
+    if re.search(pants_pattern, t):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble|t-?shirt|haut)\b', t):
+            return True, "Bas de sport / Short seul"
 
     return False, "OK"
 
@@ -1401,8 +1480,14 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 matched = True
                 log(f"🎯 MATCH {source_label} : '{t_titre}' ({t_prix})")
             elif is_filet:
-                # Si l'annonce vient du Filet et que le titre est générique (ex: 'Maillot de foot'),
-                # on vérifie la description car Vinted l'a retournée suite à la recherche ASSE
+                # Logique Filet de sécurité (recherche par mots-clés ASSE sur Vinted) :
+                # Vinted a déjà ciblé cet article pour 'Maillot ASSE'.
+                # Logique inverse (Blacklist) : on alerte TOUT sauf exclusions et équipes concurrentes explicites.
+                is_conf, conf_team = is_conflicting_team(t_titre)
+                if is_conf:
+                    log(f"🚫 Article Filet ignoré (Équipe concurrente dans le titre : {conf_team}) : '{t_titre}'")
+                    continue
+
                 desc = fetch_item_description(item_url)
                 if desc:
                     is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
@@ -1410,11 +1495,20 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                         log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
                         continue
                     if is_asse_jersey_match(desc):
-                        if is_explicit_asse_jersey(t_titre, desc):
-                            matched = True
-                            log(f"🎯 MATCH {source_label} (Confirmé dans la description) : '{t_titre}' ({t_prix})")
-                        else:
-                            log(f"🚫 Article ignoré : mention ASSE non explicite dans la description ('{t_titre}')")
+                        matched = True
+                        log(f"🎯 MATCH {source_label} (Confirmé dans la description) : '{t_titre}' ({t_prix})")
+                    else:
+                        is_conf_d, conf_team_d = is_conflicting_team(desc)
+                        if is_conf_d:
+                            log(f"🚫 Article Filet ignoré (Équipe concurrente dans la description : {conf_team_d}) : '{t_titre}'")
+                            continue
+                        matched = True
+                        log(f"🎯 MATCH {source_label} (Filet - Logique inverse / Zéro omission) : '{t_titre}' ({t_prix})")
+                else:
+                    # En cas d'échec micro-fetch description, le titre n'étant pas une équipe concurrente
+                    # et les exclusions produit/taille étant OK, on valide par sécurité
+                    matched = True
+                    log(f"🎯 MATCH {source_label} (Filet - Titre validé sans description) : '{t_titre}' ({t_prix})")
 
             if matched:
                 send_discord_alert(None, item)
