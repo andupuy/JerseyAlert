@@ -552,6 +552,11 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|tenue|ensemble|t-?shirt|haut)\b', t):
             return True, "Bas de sport / Short seul"
 
+    # 15. Vêtements hors-sujet / Danse / Lingerie / Féminin non-sport (pole dance, paillettes, robes, jupes, etc.)
+    offtopic_pattern = r'\b(poledance|pole\s+dance|paillette|paillettes|paillet[ée]s?|lingerie|soutien[- ]gorge|brassi[eè]re|robe|robes|jupe|jupes|dentelle|dentelles|escarpins?|talons?|maquillage|combishort)\b'
+    if re.search(offtopic_pattern, t) or (d and re.search(offtopic_pattern, d)):
+        return True, "Vêtement hors-sujet (danse/lingerie/robe)"
+
     return False, "OK"
 
 def get_api_search_url(query, color_id=None):
