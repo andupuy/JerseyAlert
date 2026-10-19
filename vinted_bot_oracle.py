@@ -385,7 +385,42 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble|surv[eê]tement|short)\b', t) or re.search(r'\b(lot\s+de\s+magnets?|magnets?\s+aimant[ée]s?|aimant\s+de\s+frigo)\b', d):
             return True, "Magnet / Aimant"
 
-    # 6. Vestes, blousons, doudounes, parkas, coupe-vents
+    # 6. Photos, posters, affiches, cadres, tableaux, lithographies
+    photo_pattern = r'\b(photo|photos|photographie|photographies|clich[eé]|clich[eé]s|poster|posters|affiche|affiches|cadre|cadres|tableau|tableaux|toile|toiles|lithographie|lithographies|tirage[s]?\s+photo)\b'
+    if re.search(photo_pattern, t):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Photo / Poster / Cadre"
+
+    # 7. Livres, magazines, revues, journaux, DVD, VHS, BD
+    media_pattern = r'\b(livre|livres|magazine|magazines|revue|revues|journal|journaux|gazette|gazettes|dvd|vhs|cassette|cassettes|bd|bande[ -]dessin[eé]e)\b'
+    if re.search(media_pattern, t):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Livre / Magazine / Journal"
+
+    # 8. Fanions, drapeaux, bannières, écharpes, foulards
+    flag_pattern = r'\b(fanion|fanions|drapeau|drapeaux|banni[eè]re|banni[eè]res|oriflamme|oriflammes|echarpe|écharpe|echarpes|écharpes|foulard|foulards)\b'
+    if re.search(flag_pattern, t):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Fanion / Drapeau / Écharpe"
+
+    # 9. Figurines, fèves, pin's, porte-clés, badges, calendriers, goodies
+    goodies_pattern = r'\b(figurine|figurines|f[eé]ve|f[eé]ves|pin\'?s|porte[- ]cl[eé]s?|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles)\b'
+    if re.search(goodies_pattern, t):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Goodies / Pin's / Calendrier"
+
+    # 10. Casquettes, bonnets, bobs, chapeaux
+    headwear_pattern = r'\b(casquette|casquettes|bonnet|bonnets|bob|bobs|chapeau|chapeaux|b[eé]ret|b[eé]rets)\b'
+    if re.search(headwear_pattern, t):
+        if not re.search(r'\b(maillot|jersey)\b', t):
+            return True, "Casquette / Bonnet"
+
+    # 11. Maillots de bain, bikinis, swimwear
+    swim_pattern = r'\b(maillot\s+de\s+bain|bikini|swimwear)\b'
+    if re.search(swim_pattern, t) or re.search(swim_pattern, d):
+        return True, "Maillot de bain"
+
+    # 12. Vestes, blousons, doudounes, parkas, coupe-vents
     jacket_pattern = r'\b(veste|vestes|blouson|blousons|doudoune|doudounes|parka|parkas|coupe[- ]vent|k[- ]?way|anorak)\b'
     if re.search(jacket_pattern, t):
         if not re.search(r'\b(maillot|jersey)\b', t):
@@ -394,7 +429,7 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Veste / Blouson"
 
-    # 7. Spam de mots-clés / Tag stuffing multi-clubs (> 4 clubs cités)
+    # 13. Spam de mots-clés / Tag stuffing multi-clubs (> 4 clubs cités)
     if d:
         clubs_found = set()
         for club_key, club_pattern in CLUB_PATTERNS.items():
