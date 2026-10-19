@@ -323,19 +323,21 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     pass
 
             # 2. Sync any unexpected systemd error lines that occurred strictly AFTER the reset
-            if last_reset > 0:
-                since_arg = f"--since=@{int(last_reset)}"
-                sync_res = subprocess.run(
-                    ["journalctl", "-u", "vinted-bot", since_arg, "--no-pager"],
-                    capture_output=True, text=True, timeout=5
-                )
-                check_lines = sync_res.stdout.splitlines()
-            else:
-                check_lines = raw_text.splitlines()
-
+            check_lines = raw_text.splitlines()
             new_errs = []
+            now_sec = time.time()
             for line in check_lines:
                 if ERROR_PATTERNS.search(line) and not IGNORE_PATTERNS.search(line):
+                    # Si la réinitialisation a eu lieu récemment (< 15 min), on ignore les lignes antérieures au reset
+                    if last_reset > 0 and (now_sec - last_reset) < 900:
+                        m = re.search(r'\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]', line)
+                        if m:
+                            try:
+                                dt = time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                                if time.mktime(dt) < last_reset:
+                                    continue
+                            except Exception:
+                                pass
                     new_errs.append(line)
 
             if new_errs and os.path.exists(ERRORS_LOG_FILE):
