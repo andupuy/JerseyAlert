@@ -549,36 +549,43 @@ def save_filet_seen_ids_cache(seen_set):
         log(f"⚠️ Erreur sauvegarde cache Filet: {e}")
 
 def fetch_item_description(item_url):
-    """Récupère rapidement la description d'une annonce via une mini-requête HTTP (< 0.3s)"""
+    """Récupère rapidement la description d'une annonce via une mini-requête HTTP optimisée avec retry silencieux"""
     if not item_url:
         return ""
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'fr-FR,fr;q=0.9',
-        }
-        resp = requests.get(item_url, headers=headers, timeout=4)
-        if resp.status_code == 200:
-            resp.encoding = 'utf-8'
-            html = resp.text
-            desc_raw = ""
-            m_json = re.search(r'\"description\":\"(.*?)\"', html)
-            if m_json:
-                raw_val = m_json.group(1)
-                def unescape_u(m):
-                    try:
-                        return chr(int(m.group(1), 16))
-                    except Exception:
-                        return m.group(0)
-                desc_raw = re.sub(r'\\u([0-9a-fA-F]{4})', unescape_u, raw_val)
-                desc_raw = desc_raw.replace('\\n', '\n').replace('\\r', '').replace('\\"', '"').replace('\\/', '/').replace('\\\\', '\\')
-            if not desc_raw:
-                m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
-                if m_dom:
-                    desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
-            return clean_text(desc_raw)
-    except Exception as e:
-        log(f"⚠️ [Vinted] Erreur micro-fetch description: {e}")
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'fr-FR,fr;q=0.9',
+    }
+    for attempt in range(2):
+        try:
+            resp = requests.get(item_url, headers=headers, timeout=6)
+            if resp.status_code == 200:
+                resp.encoding = 'utf-8'
+                html = resp.text
+                desc_raw = ""
+                m_json = re.search(r'\"description\":\"(.*?)\"', html)
+                if m_json:
+                    raw_val = m_json.group(1)
+                    def unescape_u(m):
+                        try:
+                            return chr(int(m.group(1), 16))
+                        except Exception:
+                            return m.group(0)
+                    desc_raw = re.sub(r'\\u([0-9a-fA-F]{4})', unescape_u, raw_val)
+                    desc_raw = desc_raw.replace('\\n', '\n').replace('\\r', '').replace('\\"', '"').replace('\\/', '/').replace('\\\\', '\\')
+                if not desc_raw:
+                    m_dom = re.search(r'itemprop=\"description\"[^>]*>(.*?)</div>', html, re.DOTALL)
+                    if m_dom:
+                        desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
+                return clean_text(desc_raw)
+        except requests.exceptions.Timeout:
+            if attempt == 0:
+                time.sleep(0.5)
+                continue
+            log("ℹ️ [Vinted] Latence réseau temporaire micro-fetch description", to_error_log=False)
+        except Exception as e:
+            log(f"ℹ️ [Vinted] Incident micro-fetch description: {e}", to_error_log=False)
+            break
     return ""
 
 def scrape_item_details(page, item_url):

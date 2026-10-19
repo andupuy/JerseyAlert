@@ -48,7 +48,7 @@ ERROR_PATTERNS = re.compile(
 )
 
 IGNORE_PATTERNS = re.compile(
-    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections|Micro-latence réseau|reprise fluide|Détecté #|Article ignoré|Scan Flux|Scan Filet|is interrupted by another navigation|net::ERR_ABORTED)",
+    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections|Micro-latence réseau|reprise fluide|Détecté #|Article ignoré|Scan Flux|Scan Filet|is interrupted by another navigation|net::ERR_ABORTED|micro-fetch description|Read timed out)",
     re.IGNORECASE
 )
 
