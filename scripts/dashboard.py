@@ -28,6 +28,10 @@ BLACKLIST_FILE = os.environ.get(
     "BLACKLIST_FILE",
     "/root/JerseyAlert/blacklisted_sellers.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_sellers.json"
 )
+BLACKLIST_KEYWORDS_FILE = os.environ.get(
+    "BLACKLIST_KEYWORDS_FILE",
+    "/root/JerseyAlert/blacklisted_keywords.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_keywords.json"
+)
 
 # In-memory caches to handle multi-device / multi-client connections seamlessly without CPU overload
 cache_lock = threading.Lock()
@@ -86,6 +90,28 @@ def save_blacklisted_sellers(sellers_list):
         print(f"Erreur sauvegarde blacklist: {e}")
     return clean_list
 
+def get_blacklisted_keywords():
+    """Charge la liste des mots-clés bloqués"""
+    if os.path.exists(BLACKLIST_KEYWORDS_FILE):
+        try:
+            with open(BLACKLIST_KEYWORDS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return sorted(list({str(k).strip().lower() for k in data if str(k).strip()}))
+        except Exception:
+            pass
+    return []
+
+def save_blacklisted_keywords(keywords_list):
+    """Sauvegarde la liste des mots-clés bloqués"""
+    clean_list = sorted(list({str(k).strip().lower() for k in keywords_list if str(k).strip()}))
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(BLACKLIST_KEYWORDS_FILE)), exist_ok=True)
+        with open(BLACKLIST_KEYWORDS_FILE, "w", encoding="utf-8") as f:
+            json.dump(clean_list, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Erreur sauvegarde keywords blacklist: {e}")
+    return clean_list
+
 class ThreadedTCPServer(ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -139,9 +165,13 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             })
         elif parsed.path == "/api/blacklist":
             sellers = get_blacklisted_sellers()
+            keywords = get_blacklisted_keywords()
             self.send_json_response({
                 "sellers": sellers,
-                "count": len(sellers)
+                "keywords": keywords,
+                "sellers_count": len(sellers),
+                "keywords_count": len(keywords),
+                "count": len(sellers) + len(keywords)
             })
         else:
             self.send_response(404)
@@ -220,6 +250,50 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 })
             else:
                 self.send_json_response({"success": False, "message": "Pseudo de vendeur invalide."})
+        elif parsed.path == "/api/blacklist/keywords/add":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = urllib.parse.parse_qs(body)
+                data = {k: v[0] for k, v in data.items()}
+            kw_raw = data.get("keyword", "").strip().lower()
+            if kw_raw:
+                current = get_blacklisted_keywords()
+                if kw_raw not in current:
+                    current.append(kw_raw)
+                    save_blacklisted_keywords(current)
+                self.send_json_response({
+                    "success": True,
+                    "message": f"Mot-clé '{kw_raw}' bloqué avec succès !",
+                    "keywords": sorted(current),
+                    "count": len(current)
+                })
+            else:
+                self.send_json_response({"success": False, "message": "Mot-clé invalide."})
+        elif parsed.path == "/api/blacklist/keywords/remove":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = urllib.parse.parse_qs(body)
+                data = {k: v[0] for k, v in data.items()}
+            kw_raw = data.get("keyword", "").strip().lower()
+            if kw_raw:
+                current = get_blacklisted_keywords()
+                if kw_raw in current:
+                    current.remove(kw_raw)
+                    save_blacklisted_keywords(current)
+                self.send_json_response({
+                    "success": True,
+                    "message": f"Mot-clé '{kw_raw}' débloqué !",
+                    "keywords": sorted(current),
+                    "count": len(current)
+                })
+            else:
+                self.send_json_response({"success": False, "message": "Mot-clé invalide."})
         else:
             self.send_response(404)
             self.end_headers()
@@ -488,21 +562,48 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             background: #dc2626; color: white; padding: 10px 16px; border-radius: 8px; font-weight: 700;
             font-size: 0.85rem; cursor: pointer; border: none; white-space: nowrap;
         }
+        .btn-add-kw {
+            background: #d97706; color: white; padding: 10px 16px; border-radius: 8px; font-weight: 700;
+            font-size: 0.85rem; cursor: pointer; border: none; white-space: nowrap;
+        }
+        .subtab-bar {
+            display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--card-border); padding-bottom: 10px;
+        }
+        .subtab-btn {
+            background: #090d16; border: 1px solid var(--card-border); color: var(--muted);
+            padding: 7px 14px; border-radius: 8px; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+        }
+        .subtab-btn.active {
+            background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;
+        }
+        .info-box {
+            background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.78rem; color: #94a3b8; line-height: 1.5;
+        }
+        .info-box code { color: #f59e0b; background: rgba(245, 158, 11, 0.1); padding: 2px 5px; border-radius: 4px; }
         .sellers-container {
             flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px;
         }
-        .seller-item {
+        .seller-item, .keyword-item {
             display: flex; justify-content: space-between; align-items: center; background: #090d16;
             border: 1px solid var(--card-border); padding: 10px 14px; border-radius: 8px;
         }
         .seller-name {
             font-weight: 600; font-size: 0.88rem; display: flex; align-items: center; gap: 8px; color: #f8fafc;
         }
+        .keyword-name {
+            font-weight: 600; font-size: 0.88rem; display: flex; align-items: center; gap: 8px; color: #fef3c7;
+        }
         .btn-unblock {
             background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4);
             padding: 5px 12px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
         }
         .btn-unblock:hover { background: rgba(239, 68, 68, 0.35); color: #fff; }
+        .btn-unblock-kw {
+            background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4);
+            padding: 5px 12px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+        }
+        .btn-unblock-kw:hover { background: rgba(245, 158, 11, 0.35); color: #fff; }
         .empty-sellers {
             text-align: center; color: var(--muted); padding: 40px 10px; font-size: 0.85rem; line-height: 1.6;
         }
@@ -546,7 +647,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             ⚠️ Erreurs <span id="errorBadge" class="pill-count pill-zero">0</span>
         </button>
         <button id="tabBlacklist" class="tab-btn" onclick="switchTab('blacklist')">
-            🚫 Vendeurs Bloqués <span id="blacklistBadge" class="pill-count pill-zero">0</span>
+            🚫 Blocages <span id="blacklistBadge" class="pill-count pill-zero">0</span>
         </button>
     </div>
 
@@ -567,15 +668,41 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         <div id="logsBox" class="terminal-logs">Chargement des logs...</div>
     </div>
 
-    <!-- Blacklist Container (Tab Blacklist) -->
+    <!-- Blacklist Container (Tab Blocages) -->
     <div id="blacklistContainer" class="blacklist-view">
-        <form class="form-row" onsubmit="addSeller(event)">
-            <input type="text" id="sellerInput" class="input-text" placeholder="Pseudo Vinted (ex: jean_dupont ou @jean_dupont ou URL profil)" required>
-            <button type="submit" class="btn-add">➕ Bloquer</button>
-        </form>
+        <div class="subtab-bar">
+            <button id="subtabSellers" class="subtab-btn active" onclick="switchSubTab('sellers')">
+                👤 Vendeurs (<span id="sellersSubCount">0</span>)
+            </button>
+            <button id="subtabKeywords" class="subtab-btn" onclick="switchSubTab('keywords')">
+                🔤 Mots-clés (<span id="keywordsSubCount">0</span>)
+            </button>
+        </div>
 
-        <div id="sellersList" class="sellers-container">
-            <div class="empty-sellers">Chargement des vendeurs bloqués...</div>
+        <!-- Section Vendeurs -->
+        <div id="sellersSection" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+            <form class="form-row" onsubmit="addSeller(event)">
+                <input type="text" id="sellerInput" class="input-text" placeholder="Pseudo Vinted (ex: jean_dupont ou @jean_dupont ou URL profil)" required>
+                <button type="submit" class="btn-add">➕ Bloquer Vendeur</button>
+            </form>
+            <div id="sellersList" class="sellers-container">
+                <div class="empty-sellers">Chargement des vendeurs bloqués...</div>
+            </div>
+        </div>
+
+        <!-- Section Mots-clés -->
+        <div id="keywordsSection" style="display: none; flex-direction: column; flex: 1; overflow: hidden;">
+            <div class="info-box">
+                💡 <em>Les filtres de base (mugs, panini, photos, pays, clubs rivaux, lingerie...) sont déjà actifs par défaut.</em><br>
+                Ajoutez ici des mots-clés spécifiques à bannir en direct (ex: <code>bourges</code>, <code>running</code>, <code>poledance</code>).
+            </div>
+            <form class="form-row" onsubmit="addKeyword(event)">
+                <input type="text" id="keywordInput" class="input-text" placeholder="Mot-clé à bloquer (ex: bourges, running, poledance...)" required>
+                <button type="submit" class="btn-add-kw">➕ Bloquer Mot-clé</button>
+            </form>
+            <div id="keywordsList" class="sellers-container">
+                <div class="empty-sellers">Chargement des mots-clés bloqués...</div>
+            </div>
         </div>
     </div>
 
@@ -584,10 +711,31 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     <script>
         let currentStatus = "active";
         let activeTab = "all";
+        let activeSubTab = "sellers";
         let cachedFullLogs = "";
         let cachedErrorLogs = "";
         let cachedSellers = [];
+        let cachedKeywords = [];
         let isUserInteracting = false;
+
+        function switchSubTab(subtab) {
+            activeSubTab = subtab;
+            const subSellers = document.getElementById("subtabSellers");
+            const subKeywords = document.getElementById("subtabKeywords");
+            const secSellers = document.getElementById("sellersSection");
+            const secKeywords = document.getElementById("keywordsSection");
+
+            subSellers.className = "subtab-btn" + (subtab === "sellers" ? " active" : "");
+            subKeywords.className = "subtab-btn" + (subtab === "keywords" ? " active" : "");
+
+            if (subtab === "sellers") {
+                secSellers.style.display = "flex";
+                secKeywords.style.display = "none";
+            } else {
+                secSellers.style.display = "none";
+                secKeywords.style.display = "flex";
+            }
+        }
 
         function hasUserSelection() {
             const sel = window.getSelection();
@@ -763,12 +911,19 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 const res = await fetch("/api/blacklist");
                 const data = await res.json();
                 cachedSellers = data.sellers || [];
+                cachedKeywords = data.keywords || [];
                 
                 const badge = document.getElementById("blacklistBadge");
                 badge.innerText = data.count || 0;
                 badge.className = "pill-count " + (data.count > 0 ? "pill-red" : "pill-zero");
 
+                const sBadge = document.getElementById("sellersSubCount");
+                if (sBadge) sBadge.innerText = data.sellers_count || 0;
+                const kBadge = document.getElementById("keywordsSubCount");
+                if (kBadge) kBadge.innerText = data.keywords_count || 0;
+
                 renderSellersList(cachedSellers);
+                renderKeywordsList(cachedKeywords);
             } catch(e) {}
         }
 
@@ -789,6 +944,31 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     <div class="seller-item">
                         <span class="seller-name">👤 @${escapeHtml(s)}</span>
                         <button class="btn-unblock" onclick="removeSeller('${escapeHtml(s)}')">
+                            🗑️ Débloquer
+                        </button>
+                    </div>`;
+            }
+            list.innerHTML = html;
+        }
+
+        function renderKeywordsList(keywords) {
+            const list = document.getElementById("keywordsList");
+            if (!list) return;
+            if (!keywords || keywords.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-sellers">
+                        ✅ Aucun mot-clé personnalisé bloqué.<br>
+                        Ajoutez un mot-clé ci-dessus (ex: <code>bourges</code>, <code>running</code>) pour le bannir en temps réel.
+                    </div>`;
+                return;
+            }
+
+            let html = "";
+            for (const kw of keywords) {
+                html += `
+                    <div class="keyword-item">
+                        <span class="keyword-name">🔤 ${escapeHtml(kw)}</span>
+                        <button class="btn-unblock-kw" onclick="removeKeyword('${escapeHtml(kw)}')">
                             🗑️ Débloquer
                         </button>
                     </div>`;
@@ -834,6 +1014,53 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ seller: seller })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message);
+                    fetchBlacklist();
+                } else {
+                    showToast(data.message || "Erreur", "#ef4444");
+                }
+            } catch(err) {
+                showToast("Erreur communication serveur", "#ef4444");
+            }
+        }
+
+        async function addKeyword(e) {
+            e.preventDefault();
+            const input = document.getElementById("keywordInput");
+            const kw = input.value.trim().toLowerCase();
+            if (!kw) return;
+
+            showToast("Ajout du mot-clé...", "#3b82f6");
+            try {
+                const res = await fetch("/api/blacklist/keywords/add", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ keyword: kw })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message);
+                    input.value = "";
+                    fetchBlacklist();
+                } else {
+                    showToast(data.message || "Erreur", "#ef4444");
+                }
+            } catch(err) {
+                showToast("Erreur communication serveur", "#ef4444");
+            }
+        }
+
+        async function removeKeyword(kw) {
+            if (!confirm(`Voulez-vous vraiment débloquer le mot-clé '${kw}' ?`)) return;
+            showToast("Déblocage en cours...", "#f59e0b");
+            try {
+                const res = await fetch("/api/blacklist/keywords/remove", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ keyword: kw })
                 });
                 const data = await res.json();
                 if (data.success) {

@@ -43,6 +43,7 @@ ALERTED_IDS_FILE = "alerted_ids_cache.json"
 FILET_SEEN_IDS_FILE = "filet_seen_ids_cache.json"
 ERRORS_LOG_FILE = os.environ.get("ERRORS_LOG_FILE", "/root/vinted_errors.log" if os.path.exists("/root/JerseyAlert") else "vinted_errors.log")
 BLACKLIST_FILE = os.environ.get("BLACKLIST_FILE", "/root/JerseyAlert/blacklisted_sellers.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_sellers.json")
+BLACKLIST_KEYWORDS_FILE = os.environ.get("BLACKLIST_KEYWORDS_FILE", "/root/JerseyAlert/blacklisted_keywords.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_keywords.json")
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20
@@ -140,6 +141,23 @@ def remove_blacklisted_seller(username):
         log(f"✅ Vendeur '{cleaned}' retiré de la liste noire Vinted.")
         return True
     return False
+
+_keywords_cache = {"mtime": 0, "keywords": []}
+def load_blacklisted_keywords():
+    """Charge la liste des mots-clés bloqués personnalisés avec cache mtime ultra-rapide"""
+    global _keywords_cache
+    if not os.path.exists(BLACKLIST_KEYWORDS_FILE):
+        return []
+    try:
+        mtime = os.path.getmtime(BLACKLIST_KEYWORDS_FILE)
+        if mtime != _keywords_cache["mtime"]:
+            with open(BLACKLIST_KEYWORDS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                _keywords_cache["keywords"] = sorted(list({str(k).strip().lower() for k in data if str(k).strip()}))
+                _keywords_cache["mtime"] = mtime
+        return _keywords_cache["keywords"]
+    except Exception:
+        return _keywords_cache.get("keywords", [])
 
 def repair_mojibake(text):
     """Répare les caractères accentués corrompus en UTF-8 / latin-1 (ex: Ã© -> é, Ã¨ -> è)"""
@@ -556,6 +574,14 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     offtopic_pattern = r'\b(poledance|pole\s+dance|paillette|paillettes|paillet[ée]s?|lingerie|soutien[- ]gorge|brassi[eè]re|robe|robes|jupe|jupes|dentelle|dentelles|escarpins?|talons?|maquillage|combishort)\b'
     if re.search(offtopic_pattern, t) or (d and re.search(offtopic_pattern, d)):
         return True, "Vêtement hors-sujet (danse/lingerie/robe)"
+
+    # 16. Mots-clés personnalisés ajoutés en direct via le Dashboard
+    custom_keywords = load_blacklisted_keywords()
+    if custom_keywords:
+        for kw in custom_keywords:
+            kw_pat = r'\b' + re.escape(kw) + r'\b'
+            if re.search(kw_pat, t) or (d and re.search(kw_pat, d)):
+                return True, f"Mot-clé bloqué ({kw})"
 
     return False, "OK"
 
