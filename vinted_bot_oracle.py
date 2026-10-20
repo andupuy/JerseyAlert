@@ -500,18 +500,30 @@ OTHER_TEAMS_PATTERNS = {
 def is_conflicting_team(text):
     """
     Détecte si le texte concerne explicitement une autre équipe ou nation concurrente,
-    en ignorant les mentions d'adversaires (ex: 'contre Montpellier', 'vs OM', 'face à Lyon').
+    en ignorant les mentions d'adversaires (ex: 'contre Montpellier', 'vs OM', 'face à Lyon', 'porté de asse marseille').
     """
     if not text:
         return False, None
     import re
     t = text.lower()
-    # Neutraliser les mentions d'adversaires / confrontations pour ne pas bloquer les maillots de match
-    opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|match\s+contre)\s+([a-z0-9\-\'\s]+?)(?=\s+(?:en|le|du|au|pour|saison|19\d\d|20\d\d)\b|[,\.;\(\)\!]|$)'
+    
+    # 1. Neutraliser les mentions d'adversaires et confrontations (ex: 'contre OM', 'vs Lyon', 'match Marseille', 'porté de ASSE Marseille')
+    opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|match(?:\s+(?:contre|de|face\s+[àa]))?|port[eé](?:\s+(?:contre|face\s+[àa]|lors\s+de|de))?)\s+([a-z0-9\-\'\s]+?)(?=\s+(?:en|le|du|au|pour|saison|19\d\d|20\d\d)\b|[,\.;\(\)\!]|$)'
     t_clean = re.sub(opponent_pattern, ' ', t)
     
+    # 2. Neutraliser les duels directs (ex: 'ASSE - OM', 'ASSE / Marseille', 'Sainté - Lyon')
+    confrontation_pattern = r'\b(?:asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé])\s*[\-\/]\s*([a-z0-9\-\'\s]+)'
+    t_clean = re.sub(confrontation_pattern, ' ', t_clean)
+
+    # 3. Contexte de match / maillot porté avec mention ASSE
+    has_match_context = bool(re.search(r'\b(port[eé]|match|finale|derby|demi[- ]finale|coupe|championnat)\b', t))
+    has_asse = bool(re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé])\b', t))
+
     for team_name, pat in OTHER_TEAMS_PATTERNS.items():
         if re.search(pat, t_clean):
+            # Si le texte contient à la fois l'ASSE et un contexte de match/porté, l'autre club est l'adversaire de la rencontre
+            if has_asse and has_match_context:
+                continue
             return True, team_name
     return False, None
 
