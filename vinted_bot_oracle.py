@@ -540,13 +540,14 @@ def load_asse_knowledge():
 
 ASSE_PLAYERS, ASSE_PLAYERS_FULL, ASSE_SPONSORS = load_asse_knowledge()
 
-def is_asse_signal(text):
+def is_asse_signal(text, is_filet=False):
     """
     Vérifie la présence d'un signal formel ASSE :
     1. 'ASSE' ou 'Saint-Étienne' (ou Sainté)
     2. Un joueur de la base ASSE 1980-2026 (ex: Khazri, Perrin, Stassin...)
     3. Un sponsor historique ou équipementier ASSE (ex: Manufrance, Dreamcast, Winamax...)
     4. Mots-clés verts / Chaudron / Geoffroy-Guichard / Forez
+    5. Couleur verte (actif uniquement sur le flux Filet 'Maillot Asse')
     """
     if not text:
         return False, ""
@@ -576,12 +577,12 @@ def is_asse_signal(text):
         if kw in t_clean:
             return True, f"Mot-clé ({kw.title()})"
 
-    # 5. Couleur verte dans un contexte maillot
-    if any(w in t_clean.split() for w in ['vert', 'verte', 'verts', 'vertes', 'green']):
+    # 5. Couleur verte dans un contexte maillot (uniquement si stream Filet 'Maillot Asse' pour éviter le bruit sur le flux foot général)
+    if is_filet and any(w in t_clean.split() for w in ['vert', 'verte', 'verts', 'vertes', 'green']):
         if any(k in t_clean for k in ['maillot', 'jersey', 'trikot', 'shirt', 'vintage', 'collector', 'tenue', 'domicile', 'exterieur']):
             # Vérifier qu'il n'y a pas d'autre club majeur cité
             if not is_conflicting_team(text)[0]:
-                return True, "Couleur verte dans un contexte maillot"
+                return True, "Couleur verte dans un contexte maillot (Filet)"
 
     return False, ""
 
@@ -723,6 +724,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(anime_pattern, t) or (d and re.search(anime_pattern, d)):
         if not is_asse_jersey_match(t):
             return True, "Fiction / Animé (Captain Tsubasa/Manga)"
+
+    # 19. Arbitres / Arbitrage (maillots d'arbitre génériques non-club)
+    ref_pattern = r'\b(arbitre|arbitres|referee|referees|arbitrage)\b'
+    if re.search(ref_pattern, t) or (d and re.search(ref_pattern, d)):
+        if not is_asse_jersey_match(t):
+            return True, "Maillot d'arbitre (non-club)"
 
     return False, "OK"
 
@@ -1680,7 +1687,7 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
 
             # 3. Correspondance ASSE (Bases Joueurs, Sponsors et Signal Vert)
             matched = False
-            has_sig, sig_reason = is_asse_signal(t_titre)
+            has_sig, sig_reason = is_asse_signal(t_titre, is_filet=is_filet)
             if has_sig:
                 matched = True
                 log(f"🎯 MATCH {source_label} ({sig_reason}) : '{t_titre}' ({t_prix})")
@@ -1698,7 +1705,7 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                     if is_excl_d:
                         log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
                         continue
-                    has_sig_d, sig_reason_d = is_asse_signal(desc)
+                    has_sig_d, sig_reason_d = is_asse_signal(desc, is_filet=True)
                     if has_sig_d:
                         matched = True
                         log(f"🎯 MATCH {source_label} ({sig_reason_d} dans description) : '{t_titre}' ({t_prix})")
