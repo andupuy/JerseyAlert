@@ -1685,36 +1685,42 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                     log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
                     continue
 
-            # 3. Correspondance ASSE (Bases Joueurs, Sponsors et Signal Vert)
+            # 3. Correspondance ASSE
             matched = False
-            has_sig, sig_reason = is_asse_signal(t_titre, is_filet=is_filet)
-            if has_sig:
+            # Flux Général : Strictement comme avant (exclusivité mention ASSE / Saint-Étienne)
+            if is_asse_jersey_match(t_titre):
                 matched = True
-                log(f"🎯 MATCH {source_label} ({sig_reason}) : '{t_titre}' ({t_prix})")
+                log(f"🎯 MATCH {source_label} : '{t_titre}' ({t_prix})")
             elif is_filet:
-                # Logique Filet intelligente :
-                # Si le titre ne comporte pas de signal immédiat, on vérifie la description
+                # Filet de sécurité ('Maillot Asse') : Uniquement ici, utilisation des bases Joueurs, Sponsors et Vert
                 is_conf, conf_team = is_conflicting_team(t_titre)
                 if is_conf:
                     log(f"🚫 Article Filet ignoré (Équipe concurrente dans le titre : {conf_team}) : '{t_titre}'")
                     continue
 
-                desc = fetch_item_description(item_url)
-                if desc:
-                    is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
-                    if is_excl_d:
-                        log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
-                        continue
-                    has_sig_d, sig_reason_d = is_asse_signal(desc, is_filet=True)
-                    if has_sig_d:
-                        matched = True
-                        log(f"🎯 MATCH {source_label} ({sig_reason_d} dans description) : '{t_titre}' ({t_prix})")
-                    else:
-                        log(f"🚫 Article Filet ignoré (Aucun signal ASSE/Joueur/Sponsor/Vert) : '{t_titre}'")
-                        continue
+                # Test du signal dans le titre (Joueur, Sponsor ou Vert)
+                has_sig_t, sig_reason_t = is_asse_signal(t_titre, is_filet=True)
+                if has_sig_t:
+                    matched = True
+                    log(f"🎯 MATCH {source_label} ({sig_reason_t}) : '{t_titre}' ({t_prix})")
                 else:
-                    log(f"🚫 Article Filet ignoré (Titre sans signal ASSE et description inaccessible) : '{t_titre}'")
-                    continue
+                    # Si pas de signal direct dans le titre, test dans la description
+                    desc = fetch_item_description(item_url)
+                    if desc:
+                        is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
+                        if is_excl_d:
+                            log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
+                            continue
+                        has_sig_d, sig_reason_d = is_asse_signal(desc, is_filet=True)
+                        if has_sig_d:
+                            matched = True
+                            log(f"🎯 MATCH {source_label} ({sig_reason_d} dans description) : '{t_titre}' ({t_prix})")
+                        else:
+                            log(f"🚫 Article Filet ignoré (Aucun signal ASSE/Joueur/Sponsor/Vert) : '{t_titre}'")
+                            continue
+                    else:
+                        log(f"🚫 Article Filet ignoré (Titre sans signal ASSE et description inaccessible) : '{t_titre}'")
+                        continue
 
             if matched:
                 send_discord_alert(None, item)
