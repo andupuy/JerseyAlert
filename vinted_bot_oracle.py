@@ -459,6 +459,118 @@ def is_conflicting_team(text):
             return True, team_name
     return False, None
 
+def load_asse_knowledge():
+    """Charge les bases de connaissances exhaustives des joueurs et sponsors ASSE"""
+    import unicodedata
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    players_path = os.path.join(base_dir, "asse_players_since_1980.json")
+    sponsors_path = os.path.join(base_dir, "asse_sponsors_equipementiers.json")
+
+    # Generic global stars with big careers elsewhere
+    generic_stars = {
+        'alex', 'aloisio', 'henrique', 'silva', 'bernard', 'david', 'blanc', 'perez', 'pedro',
+        'mendy', 'camara', 'traore', 'sissoko', 'cisse', 'bamba', 'fall', 'diallo', 'kante',
+        'diarra', 'fofana', 'saliba', 'aubameyang', 'platini', 'matuidi', 'payet', 'veretout',
+        'cabaye', 'rocheteau', 'sagnol', 'dabo', 'corgnet', 'samba', 'roger', 'morais', 'moreau',
+        'garcia', 'martin', 'nelson', 'andre', 'lucas', 'florentin', 'jorge', 'basto', 'gilles',
+        'muller', 'geiger', 'leclerc', 'clement', 'marchal', 'pajot', 'roux', 'bell', 'albert',
+        'cruz', 'junior', 'pinto', 'santos', 'costa', 'ferreira', 'gomez', 'lopez'
+    }
+
+    player_names = {}
+    if os.path.exists(players_path):
+        try:
+            with open(players_path, 'r', encoding='utf-8') as f:
+                p_data = json.load(f)
+            for p in p_data:
+                full_name = p.get('nom', '')
+                parts = full_name.split()
+                if parts:
+                    last = parts[-1]
+                    last_clean = ''.join(c for c in unicodedata.normalize('NFD', last) if unicodedata.category(c) != 'Mn').lower()
+                    last_clean = re.sub(r'[^a-z]', '', last_clean)
+                    if len(last_clean) >= 4 and last_clean not in generic_stars:
+                        player_names[last_clean] = full_name
+        except Exception as e:
+            log(f"⚠️ Erreur chargement joueurs ASSE: {e}")
+
+    # Joueurs emblématiques ASSE garantis
+    famous_asse = [
+        'khazri', 'bouanga', 'ruffier', 'perrin', 'janot', 'beric', 'hamouma', 'aouchiche',
+        'krasso', 'davitashvili', 'stassin', 'cafaro', 'bouchouari', 'moueffek', 'amougou',
+        'larsonneur', 'maubleu', 'feindouno', 'moravcik', 'brandao', 'gomis', 'gradel',
+        'tannane', 'selnaes', 'lemoine', 'cohade', 'guilavogui', 'zouma', 'ghoulam',
+        'subotic', 'debuchy', 'cabella', 'diony', 'riviere', 'piquionne', 'sable',
+        'hellebuyck', 'potillon', 'castaneda', 'curkovic', 'janvion', 'zanon', 'roussey',
+        'paganelli', 'repellini'
+    ]
+    for fn in famous_asse:
+        player_names[fn] = fn.capitalize()
+
+    # Sponsors & équipementiers distinctifs
+    distinctive_sponsors = [
+        'manufrance', 'super tele', 'supertele', 'kb jardin', 'kb-jardin',
+        'cake rocher', 'dreamcast', 'game one', 'sacma', 'konica minolta',
+        'eovi', 'aesio', 'smart good things', 'kelyps', 'mister auto',
+        'mister-auto', 'markal', 'despinasse', 'duarig'
+    ]
+    if os.path.exists(sponsors_path):
+        try:
+            with open(sponsors_path, 'r', encoding='utf-8') as f:
+                sp_data = json.load(f)
+            for sp in sp_data.get('sponsors_principaux', []):
+                nom_sp = sp.get('nom', '').lower()
+                if len(nom_sp) >= 4 and nom_sp not in ['casino']:
+                    if nom_sp not in distinctive_sponsors:
+                        distinctive_sponsors.append(nom_sp)
+        except Exception as e:
+            log(f"⚠️ Erreur chargement sponsors ASSE: {e}")
+
+    return player_names, distinctive_sponsors
+
+ASSE_PLAYERS, ASSE_SPONSORS = load_asse_knowledge()
+
+def is_asse_signal(text):
+    """
+    Vérifie la présence d'un signal formel ASSE :
+    1. 'ASSE' ou 'Saint-Étienne' (ou Sainté)
+    2. Un joueur de la base ASSE 1980-2026 (ex: Khazri, Perrin, Stassin...)
+    3. Un sponsor historique ou équipementier ASSE (ex: Manufrance, Dreamcast, Winamax...)
+    4. Mots-clés verts / Chaudron / Geoffroy-Guichard / Forez
+    """
+    if not text:
+        return False, ""
+    import unicodedata
+    t_clean = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn').lower()
+
+    # 1. ASSE / Saint-Étienne / Sainté
+    if re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainte|saint[- \.]*étienne|st[- \.]*étienne)\b', t_clean):
+        return True, "Mention explicite ASSE / Saint-Étienne"
+
+    # 2. Sponsors & équipementiers historiques ASSE
+    for sp in ASSE_SPONSORS:
+        if re.search(r'\b' + re.escape(sp) + r'\b', t_clean):
+            return True, f"Sponsor historique ({sp.title()})"
+
+    # 3. Joueurs ASSE (1980-2026)
+    for p_last, p_full in ASSE_PLAYERS.items():
+        if re.search(r'\b' + re.escape(p_last) + r'\b', t_clean):
+            return True, f"Joueur ({p_full})"
+
+    # 4. Mots-clés club / Chaudron / Forez
+    for kw in ['chaudron', 'geoffroy guichard', 'geoffroy-guichard', 'forez']:
+        if kw in t_clean:
+            return True, f"Mot-clé ({kw.title()})"
+
+    # 5. Couleur verte dans un contexte maillot
+    if any(w in t_clean.split() for w in ['vert', 'verte', 'verts', 'vertes', 'green']):
+        if any(k in t_clean for k in ['maillot', 'jersey', 'trikot', 'shirt', 'vintage', 'collector', 'tenue', 'domicile', 'exterieur']):
+            # Vérifier qu'il n'y a pas d'autre club majeur cité
+            if not is_conflicting_team(text)[0]:
+                return True, "Couleur verte dans un contexte maillot"
+
+    return False, ""
+
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
     Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
@@ -582,6 +694,15 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
             kw_pat = r'\b' + re.escape(kw) + r'\b'
             if re.search(kw_pat, t) or (d and re.search(kw_pat, d)):
                 return True, f"Mot-clé bloqué ({kw})"
+
+    # 17. Sports hors-football (rugby, RCT, etc.) et vêtements non sportifs (blouse, pull, chemisier, gilet)
+    off_clothing = r'\b(rugby|rct|top\s*14|six\s*nations|blouse|blouses|chemisier|chemisiers|pull|pulls|gilet|gilets|cardigan|cardigans)\b'
+    if re.search(off_clothing, t):
+        if not is_asse_jersey_match(t):
+            return True, "Sport hors-football ou vêtement non sportif (rugby/blouse/pull)"
+    if d and re.search(off_clothing, d):
+        if not is_asse_jersey_match(t) and not is_asse_jersey_match(d):
+            return True, "Sport hors-football ou vêtement non sportif (rugby/blouse/pull)"
 
     return False, "OK"
 
@@ -1537,16 +1658,15 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                     log(f"🚫 Article ignoré dès la liste ({reason}) : '{item.get('title')}' (Taille: {item['size']})")
                     continue
 
-            # 3. Correspondance ASSE
+            # 3. Correspondance ASSE (Bases Joueurs, Sponsors et Signal Vert)
             matched = False
-            # Test direct sur le titre (ultra-rapide pour Flux et Filet)
-            if is_asse_jersey_match(t_titre):
+            has_sig, sig_reason = is_asse_signal(t_titre)
+            if has_sig:
                 matched = True
-                log(f"🎯 MATCH {source_label} : '{t_titre}' ({t_prix})")
+                log(f"🎯 MATCH {source_label} ({sig_reason}) : '{t_titre}' ({t_prix})")
             elif is_filet:
-                # Logique Filet de sécurité (recherche par mots-clés ASSE sur Vinted) :
-                # Vinted a déjà ciblé cet article pour 'Maillot ASSE'.
-                # Logique inverse (Blacklist) : on alerte TOUT sauf exclusions et équipes concurrentes explicites.
+                # Logique Filet intelligente :
+                # Si le titre ne comporte pas de signal immédiat, on vérifie la description
                 is_conf, conf_team = is_conflicting_team(t_titre)
                 if is_conf:
                     log(f"🚫 Article Filet ignoré (Équipe concurrente dans le titre : {conf_team}) : '{t_titre}'")
@@ -1558,21 +1678,16 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                     if is_excl_d:
                         log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
                         continue
-                    if is_asse_jersey_match(desc):
+                    has_sig_d, sig_reason_d = is_asse_signal(desc)
+                    if has_sig_d:
                         matched = True
-                        log(f"🎯 MATCH {source_label} (Confirmé dans la description) : '{t_titre}' ({t_prix})")
+                        log(f"🎯 MATCH {source_label} ({sig_reason_d} dans description) : '{t_titre}' ({t_prix})")
                     else:
-                        is_conf_d, conf_team_d = is_conflicting_team(desc)
-                        if is_conf_d:
-                            log(f"🚫 Article Filet ignoré (Équipe concurrente dans la description : {conf_team_d}) : '{t_titre}'")
-                            continue
-                        matched = True
-                        log(f"🎯 MATCH {source_label} (Filet - Logique inverse / Zéro omission) : '{t_titre}' ({t_prix})")
+                        log(f"🚫 Article Filet ignoré (Aucun signal ASSE/Joueur/Sponsor/Vert) : '{t_titre}'")
+                        continue
                 else:
-                    # En cas d'échec micro-fetch description, le titre n'étant pas une équipe concurrente
-                    # et les exclusions produit/taille étant OK, on valide par sécurité
-                    matched = True
-                    log(f"🎯 MATCH {source_label} (Filet - Titre validé sans description) : '{t_titre}' ({t_prix})")
+                    log(f"🚫 Article Filet ignoré (Titre sans signal ASSE et description inaccessible) : '{t_titre}'")
+                    continue
 
             if matched:
                 send_discord_alert(None, item)

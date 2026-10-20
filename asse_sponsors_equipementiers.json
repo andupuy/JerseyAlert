@@ -1,0 +1,275 @@
+{
+  "equipementiers": [
+    {
+      "nom": "Le Coq Sportif",
+      "periode": "1969-1984"
+    },
+    {
+      "nom": "Duarig",
+      "periode": "1984-1985"
+    },
+    {
+      "nom": "Puma",
+      "periode": "1985-1995"
+    },
+    {
+      "nom": "Lotto",
+      "periode": "1995-1998"
+    },
+    {
+      "nom": "Asics",
+      "periode": "1998-2000"
+    },
+    {
+      "nom": "Umbro",
+      "periode": "2000-2003"
+    },
+    {
+      "nom": "Duarig",
+      "periode": "2003-2005"
+    },
+    {
+      "nom": "Adidas",
+      "periode": "2005-2015"
+    },
+    {
+      "nom": "Le Coq Sportif",
+      "periode": "2015-2022"
+    },
+    {
+      "nom": "Hummel",
+      "periode": "Depuis 2022"
+    }
+  ],
+  "sponsors_principaux": [
+    {
+      "nom": "Manufrance",
+      "periode": "1973-1979",
+      "secteur": "Vente par correspondance / Armes et cycles"
+    },
+    {
+      "nom": "Super Télé",
+      "periode": "1979-1981",
+      "secteur": "Presse magazine TV"
+    },
+    {
+      "nom": "KB Jardin",
+      "periode": "1981-1984",
+      "secteur": "Produits de jardinage"
+    },
+    {
+      "nom": "Cake Rocher",
+      "periode": "1984-1986",
+      "secteur": "Biscuiterie ligérienne"
+    },
+    {
+      "nom": "Casino",
+      "periode": "1986-1999",
+      "secteur": "Grande distribution"
+    },
+    {
+      "nom": "Sega",
+      "periode": "1999-2000",
+      "secteur": "Jeux vidéo"
+    },
+    {
+      "nom": "Dreamcast",
+      "periode": "2000-2001",
+      "secteur": "Console de jeux vidéo (Sega)"
+    },
+    {
+      "nom": "Game One",
+      "periode": "2001-2002",
+      "secteur": "Chaîne TV jeux vidéo"
+    },
+    {
+      "nom": "Alliance Intérim",
+      "periode": "2002-2003",
+      "secteur": "Travail temporaire"
+    },
+    {
+      "nom": "RMC",
+      "periode": "2002-2003",
+      "secteur": "Radio"
+    },
+    {
+      "nom": "SACMA Agencements",
+      "periode": "2003-2004",
+      "secteur": "Agencement immobilier"
+    },
+    {
+      "nom": "Konica Minolta",
+      "periode": "2004-2009",
+      "secteur": "Bureautique / Image"
+    },
+    {
+      "nom": "Fruité",
+      "periode": "2009-2010",
+      "secteur": "Jus de fruits"
+    },
+    {
+      "nom": "Winamax",
+      "periode": "2010-2015",
+      "secteur": "Paris sportifs et Poker"
+    },
+    {
+      "nom": "Eovi Mcd Mutuelle",
+      "periode": "2015-2018",
+      "secteur": "Mutuelle santé"
+    },
+    {
+      "nom": "Aésio Mutuelle",
+      "periode": "2018-2021",
+      "secteur": "Mutuelle santé"
+    },
+    {
+      "nom": "ZeBet",
+      "periode": "2021-2022",
+      "secteur": "Paris sportifs"
+    },
+    {
+      "nom": "Smart Good Things",
+      "periode": "2022-2024",
+      "secteur": "Boissons instantanées bien-être"
+    },
+    {
+      "nom": "Kelyps Intérim",
+      "periode": "2024-2026",
+      "secteur": "Recrutement / Intérim"
+    },
+    {
+      "nom": "Casino",
+      "periode": "Depuis 2026",
+      "secteur": "Grande distribution historique"
+    }
+  ],
+  "sponsors_secondaires_et_manches": [
+    {
+      "nom": "Géant / Géant Casino",
+      "emplacement": "Face avant complémentaire / Dos",
+      "periode": "1999-2001"
+    },
+    {
+      "nom": "Markal",
+      "emplacement": "Manche gauche / Short",
+      "periode": "2011-2022"
+    },
+    {
+      "nom": "Mister-Auto.com",
+      "emplacement": "Poitrine haute / Dos",
+      "periode": "2011-2015"
+    },
+    {
+      "nom": "Invicta",
+      "emplacement": "Manche gauche",
+      "periode": "2007-2008"
+    },
+    {
+      "nom": "Département de la Loire / Conseil Général",
+      "emplacement": "Dos du maillot / Manche",
+      "periode": "Années 1990 - 2020s"
+    },
+    {
+      "nom": "Saint-Étienne Métropole",
+      "emplacement": "Dos / Clavicule",
+      "periode": "Années 2000 - 2020s"
+    },
+    {
+      "nom": "ByMyCAR",
+      "emplacement": "Haut du dos",
+      "periode": "2021-2024"
+    },
+    {
+      "nom": "Triangle Intérim",
+      "emplacement": "Manche",
+      "periode": "2019-2021"
+    },
+    {
+      "nom": "Despinasse Viandes",
+      "emplacement": "Manche / Short",
+      "periode": "Années 2000"
+    },
+    {
+      "nom": "Rapid Flore",
+      "emplacement": "Manche",
+      "periode": "2004-2007"
+    },
+    {
+      "nom": "Alain Afflelou",
+      "emplacement": "Dos",
+      "periode": "Fin années 1990"
+    },
+    {
+      "nom": "ParuVendu",
+      "emplacement": "Manche / Dos",
+      "periode": "2003-2005"
+    },
+    {
+      "nom": "Piscines Desjoyaux",
+      "emplacement": "Short / Clavicule",
+      "periode": "Partenaire régulier"
+    },
+    {
+      "nom": "Terroir du Forez",
+      "emplacement": "Manche",
+      "periode": "Années 2020"
+    }
+  ],
+  "sponsors_coupes_officielles": [
+    {
+      "nom": "RTL",
+      "competition": "Coupe de France",
+      "periode": "Années 1970-1980"
+    },
+    {
+      "nom": "Vittel",
+      "competition": "Coupe de France",
+      "periode": "Années 1970-1990"
+    },
+    {
+      "nom": "Perrier",
+      "competition": "Coupe de France",
+      "periode": "Années 1970"
+    },
+    {
+      "nom": "TF1",
+      "competition": "Coupe de France",
+      "periode": "Années 1980-1990"
+    },
+    {
+      "nom": "Crédit Agricole",
+      "competition": "Coupe de France",
+      "periode": "Années 2000-2020s"
+    },
+    {
+      "nom": "PMU",
+      "competition": "Coupe de France",
+      "periode": "Années 2010-2020s"
+    },
+    {
+      "nom": "Pages Jaunes",
+      "competition": "Coupe de France",
+      "periode": "Années 2000-2010s"
+    },
+    {
+      "nom": "Carrefour",
+      "competition": "Coupe de France",
+      "periode": "Années 2010s"
+    },
+    {
+      "nom": "Intermarché",
+      "competition": "Coupe de France",
+      "periode": "Années 2020s"
+    },
+    {
+      "nom": "Point P",
+      "competition": "Coupe de la Ligue",
+      "periode": "Années 2010s"
+    },
+    {
+      "nom": "BKT",
+      "competition": "Coupe de la Ligue",
+      "periode": "Années 2010-2020"
+    }
+  ]
+}
