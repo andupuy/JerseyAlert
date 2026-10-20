@@ -466,7 +466,7 @@ def load_asse_knowledge():
     players_path = os.path.join(base_dir, "asse_players_since_1980.json")
     sponsors_path = os.path.join(base_dir, "asse_sponsors_equipementiers.json")
 
-    # Generic global stars with big careers elsewhere
+    # Generic global stars with big careers elsewhere or ambiguous common first names
     generic_stars = {
         'alex', 'aloisio', 'henrique', 'silva', 'bernard', 'david', 'blanc', 'perez', 'pedro',
         'mendy', 'camara', 'traore', 'sissoko', 'cisse', 'bamba', 'fall', 'diallo', 'kante',
@@ -474,7 +474,17 @@ def load_asse_knowledge():
         'cabaye', 'rocheteau', 'sagnol', 'dabo', 'corgnet', 'samba', 'roger', 'morais', 'moreau',
         'garcia', 'martin', 'nelson', 'andre', 'lucas', 'florentin', 'jorge', 'basto', 'gilles',
         'muller', 'geiger', 'leclerc', 'clement', 'marchal', 'pajot', 'roux', 'bell', 'albert',
-        'cruz', 'junior', 'pinto', 'santos', 'costa', 'ferreira', 'gomez', 'lopez'
+        'cruz', 'junior', 'pinto', 'santos', 'costa', 'ferreira', 'gomez', 'lopez',
+        'heinz', 'nielsen', 'robert', 'thomas', 'daniel', 'francois', 'schneider'
+    }
+
+    full_name_players = {
+        'marek heinz': 'Marek Heinz',
+        'benny nielsen': 'Benny Nielsen',
+        'christophe robert': 'Christophe Robert',
+        'jean-pierre francois': 'Jean-Pierre François',
+        'jean-christophe thomas': 'Jean-Christophe Thomas',
+        'jean-francois daniel': 'Jean-François Daniel'
     }
 
     player_names = {}
@@ -526,9 +536,9 @@ def load_asse_knowledge():
         except Exception as e:
             log(f"⚠️ Erreur chargement sponsors ASSE: {e}")
 
-    return player_names, distinctive_sponsors
+    return player_names, full_name_players, distinctive_sponsors
 
-ASSE_PLAYERS, ASSE_SPONSORS = load_asse_knowledge()
+ASSE_PLAYERS, ASSE_PLAYERS_FULL, ASSE_SPONSORS = load_asse_knowledge()
 
 def is_asse_signal(text):
     """
@@ -552,7 +562,11 @@ def is_asse_signal(text):
         if re.search(r'\b' + re.escape(sp) + r'\b', t_clean):
             return True, f"Sponsor historique ({sp.title()})"
 
-    # 3. Joueurs ASSE (1980-2026)
+    # 3. Joueurs ASSE (1980-2026 - noms complets requis pour prénoms communs)
+    for p_full_key, p_full_val in ASSE_PLAYERS_FULL.items():
+        if p_full_key in t_clean:
+            return True, f"Joueur ({p_full_val})"
+
     for p_last, p_full in ASSE_PLAYERS.items():
         if re.search(r'\b' + re.escape(p_last) + r'\b', t_clean):
             return True, f"Joueur ({p_full})"
@@ -703,6 +717,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if d and re.search(off_clothing, d):
         if not is_asse_jersey_match(t) and not is_asse_jersey_match(d):
             return True, "Sport hors-football ou vêtement non sportif (rugby/blouse/pull)"
+
+    # 18. Mangas, animés, esports, fiction (Captain Tsubasa, Olive et Tom, Inazuma, Blue Lock)
+    anime_pattern = r'\b(captain\s+tsubasa|tsubasa|olive\s+et\s+tom|inazuma|blue\s+lock)\b'
+    if re.search(anime_pattern, t) or (d and re.search(anime_pattern, d)):
+        if not is_asse_jersey_match(t):
+            return True, "Fiction / Animé (Captain Tsubasa/Manga)"
 
     return False, "OK"
 
