@@ -255,11 +255,11 @@ def parse_price(price_str):
     return None
 
 def is_asse_jersey_match(title):
-    """Filtrage strict ASSE avec limites de mots (évite les faux positifs type Borussia/Strasbourg tout en capturant tous les produits ASSE/St-Etienne)"""
+    """Filtrage strict ASSE avec limites de mots (capture ASSE, A.S.S.E, Saint-Étienne, Sainté, etc.)"""
     if not title: return False
     import re
     title_low = title.lower()
-    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
+    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
     return bool(re.search(team_pattern, title_low))
 
 # Dictionnaire des clubs majeurs pour identifier le "tag stuffing" (spam de mots-clés)
@@ -438,7 +438,63 @@ OTHER_TEAMS_PATTERNS = {
     'Manchester City': r'\b(manchester\s+city|man\s+city)\b',
     'Manchester': r'\b(manchester)\b',
     'Tottenham': r'\b(tottenham|spurs)\b',
-    'Ajax': r'\b(ajax\s+amsterdam|ajax)\b'
+    'Ajax': r'\b(ajax\s+amsterdam|ajax)\b',
+
+    # Clubs et sélections jouant en vert ou fréquents en faux positifs
+    'Celtic Glasgow': r'\b(celtic|celtic\s+glasgow|glasgow\s+celtic)\b',
+    'Real Betis': r'\b(betis|real\s+betis|betis\s+s[eé]ville|betis\s+balompi[eé])\b',
+    'Werder Brême': r'\b(werder|werder\s+br[eê]me|werder\s+bremen)\b',
+    'Wolfsburg': r'\b(wolfsburg|vfl\s+wolfsburg)\b',
+    'Panathinaikos': r'\b(panathinaikos|pana)\b',
+    'Sporting CP': r'\b(sporting\s+cp|sporting\s+portugal|sporting\s+lisbonne|sporting\s+clube|sporting\s+lisboa)\b',
+    'Palmeiras': r'\b(palmeiras|verd[aã]o)\b',
+    'Sassuolo': r'\b(sassuolo|us\s+sassuolo)\b',
+    'Rapid Vienne': r'\b(rapid\s+vienne|rapid\s+wien)\b',
+    'Legia Varsovie': r'\b(legia|legia\s+varsovie|legia\s+warszawa)\b',
+    'Plymouth': r'\b(plymouth|plymouth\s+argyle)\b',
+    'Hibernian': r'\b(hibernian|hibs)\b',
+    'Seattle Sounders': r'\b(sounders|seattle\s+sounders)\b',
+    'Austin FC': r'\b(austin\s+fc)\b',
+    'Portland Timbers': r'\b(portland\s+timbers|timbers)\b',
+    'Darmstadt': r'\b(darmstadt|sv\s+darmstadt)\b',
+    'Greuther Fürth': r'\b(greuther\s+f[uü]rth|f[uü]rth)\b',
+    'Saint-Gall': r'\b(st[\.\s]*gallen|saint[\-\s]gall|fc\s+st[\.\s]*gallen)\b',
+    'Saint-Patrick\'s': r'\b(st\s+patrick|st\s+patricks|saint\s+patrick)\b',
+    'Shamrock Rovers': r'\b(shamrock|shamrock\s+rovers)\b',
+    'Wydad': r'\b(wydad|wac)\b',
+    'Raja Casablanca': r'\b(raja|raja\s+casablanca|rca)\b',
+    'MC Alger': r'\b(mc\s+alger|mca)\b',
+    'JS Kabylie': r'\b(js\s+kabylie|jsk)\b',
+    'Chapecoense': r'\b(chapecoense)\b',
+    'Coritiba': r'\b(coritiba)\b',
+    'Goiás': r'\b(goi[aá]s)\b',
+    'Ferencváros': r'\b(ferencv[aá]ros|fradi)\b',
+    'Red Star': r'\b(red\s+star)\b',
+    'Sedan': r'\b(cs\s+sedan|sedan\s+ardenne)\b',
+    'La Louvière': r'\b(la\s+louvi[eè]re|raal)\b',
+    'Ludogorets': r'\b(ludogorets)\b',
+    'Bohemians Prague': r'\b(bohemians\s+1905|bohemians\s+prague)\b',
+    'Avellino': r'\b(us\s+avellino|avellino)\b',
+    'Elche': r'\b(elche\s+cf|elche)\b',
+    'Racing Santander': r'\b(racing\s+santander|santander)\b',
+    'Córdoba': r'\b(c[oó]rdoba\s+cf)\b',
+    'Rio Ave': r'\b(rio\s+ave)\b',
+    'Moreirense': r'\b(moreirense)\b',
+    'Omonia Nicosie': r'\b(omonia|omonia\s+nicosie)\b',
+    'Lechia Gdansk': r'\b(lechia\s+gdansk|lechia)\b',
+    'Slask Wroclaw': r'\b([sś]l[aą]sk\s+wroc[lł]aw)\b',
+    'Forest Green': r'\b(forest\s+green)\b',
+    'Atletico Nacional': r'\b(atl[eé]tico\s+nacional|atletico\s+nacional)\b',
+    'Deportivo Cali': r'\b(deportivo\s+cali)\b',
+    'Club León': r'\b(club\s+le[oó]n|le[oó]n\s+fc)\b',
+    'Santos Laguna': r'\b(santos\s+laguna)\b',
+    'Al Ahli': r'\b(al[\-\s]?ahli)\b',
+    'Al Ettifaq': r'\b(al[\-\s]?ettifaq)\b',
+    'Arabie Saoudite': r'\b(arabie\s+saoudite|saudi\s+arabia|saudi)\b',
+    'Bolivie': r'\b(bolivie|bolivia)\b',
+    'Zambie': r'\b(zambie|zambia)\b',
+    'Afrique du Sud': r'\b(afrique\s+du\s+sud|south\s+africa|bafana\s+bafana|springboks)\b',
+    'Malte': r'\b(malte|malta)\b'
 }
 
 def is_conflicting_team(text):
@@ -554,8 +610,9 @@ def is_asse_signal(text, is_filet=False):
     import unicodedata
     t_clean = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn').lower()
 
-    # 1. ASSE / Saint-Étienne / Sainté
-    if re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainte|saint[- \.]*étienne|st[- \.]*étienne)\b', t_clean):
+    # 1. ASSE / Saint-Étienne / Sainté / A.S.S.E
+    asse_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
+    if re.search(asse_pattern, t_clean):
         return True, "Mention explicite ASSE / Saint-Étienne"
 
     # 2. Sponsors & équipementiers historiques ASSE
@@ -730,6 +787,15 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(ref_pattern, t) or (d and re.search(ref_pattern, d)):
         if not is_asse_jersey_match(t):
             return True, "Maillot d'arbitre (non-club)"
+
+    # 20. Cyclisme / Vélo / Tour de France (maillots cyclistes, maillot vert Skoda/Santini, cuissards)
+    cycling_pat = r'\b(cyclis(?:me|te|tes)|v[eé]lo|v[eé]los|tour\s+de\s+france|letour|peloton|skoda|bicyclette|santini|castelli|uci|giro|giro\s+d[\'\s]italia|vuelta|cuissard|cuissards|vtt)\b'
+    if re.search(cycling_pat, t):
+        if not is_asse_jersey_match(t):
+            return True, "Cyclisme / Tour de France (non-football)"
+    if d and re.search(cycling_pat, d):
+        if not is_asse_jersey_match(t) and not is_asse_jersey_match(d):
+            return True, "Cyclisme / Tour de France (non-football)"
 
     return False, "OK"
 
@@ -1701,6 +1767,19 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 # Test du signal dans le titre (Joueur, Sponsor ou Vert)
                 has_sig_t, sig_reason_t = is_asse_signal(t_titre, is_filet=True)
                 if has_sig_t:
+                    # Si le signal n'est basé QUE sur la couleur verte, vérifions la description si disponible
+                    # pour éliminer tout risque d'équipe concurrente ou cyclisme
+                    if "Couleur verte" in sig_reason_t:
+                        desc = fetch_item_description(item_url)
+                        if desc:
+                            is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
+                            if is_excl_d:
+                                log(f"🚫 Article Filet ignoré après vérification description ({reason_d}) : '{t_titre}'")
+                                continue
+                            is_conf_d, conf_d = is_conflicting_team(desc)
+                            if is_conf_d:
+                                log(f"🚫 Article Filet ignoré (Équipe concurrente dans la description : {conf_d}) : '{t_titre}'")
+                                continue
                     matched = True
                     log(f"🎯 MATCH {source_label} ({sig_reason_t}) : '{t_titre}' ({t_prix})")
                 else:
@@ -1710,6 +1789,10 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                         is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
                         if is_excl_d:
                             log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
+                            continue
+                        is_conf_d, conf_d = is_conflicting_team(desc)
+                        if is_conf_d:
+                            log(f"🚫 Article Filet ignoré (Équipe concurrente dans la description : {conf_d}) : '{t_titre}'")
                             continue
                         has_sig_d, sig_reason_d = is_asse_signal(desc, is_filet=True)
                         if has_sig_d:
