@@ -259,6 +259,12 @@ def is_asse_jersey_match(title):
     if not title: return False
     import re
     title_low = title.lower()
+
+    # Bloquer les expressions composées non-football avec 'sainte' (Sainte-Barbe, Sainte-Marie, etc.)
+    non_foot_sainte = r'\bsainte[- ](?:barbe|marie|luce|croix|maxime|genevieve|adresse|claire|anne|rose|foy|helene)\b'
+    if re.search(non_foot_sainte, title_low) and not re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne)\b', title_low):
+        return False
+
     team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
     return bool(re.search(team_pattern, title_low))
 
@@ -438,6 +444,20 @@ OTHER_TEAMS_PATTERNS = {
     'Manchester City': r'\b(manchester\s+city|man\s+city)\b',
     'Manchester': r'\b(manchester)\b',
     'Tottenham': r'\b(tottenham|spurs)\b',
+    'Crystal Palace': r'\b(crystal\s+palace)\b',
+    'Fulham': r'\b(fulham)\b',
+    'Wolverhampton': r'\b(wolverhampton|wolves)\b',
+    'Brentford': r'\b(brentford)\b',
+    'Brighton': r'\b(brighton|brighton\s+&\s+hove)\b',
+    'Bournemouth': r'\b(bournemouth|afc\s+bournemouth)\b',
+    'Everton': r'\b(everton)\b',
+    'West Ham': r'\b(west\s+ham)\b',
+    'Aston Villa': r'\b(aston\s+villa)\b',
+    'Newcastle': r'\b(newcastle|newcastle\s+united)\b',
+    'Southampton': r'\b(southampton)\b',
+    'Leicester': r'\b(leicester|leicester\s+city)\b',
+    'Ipswich': r'\b(ipswich|ipswich\s+town)\b',
+    'Nottingham Forest': r'\b(nottingham|nottingham\s+forest)\b',
     'Ajax': r'\b(ajax\s+amsterdam|ajax)\b',
 
     # Clubs et sélections jouant en vert ou fréquents en faux positifs
@@ -543,7 +563,8 @@ def load_asse_knowledge():
         'garcia', 'martin', 'nelson', 'andre', 'lucas', 'florentin', 'jorge', 'basto', 'gilles',
         'muller', 'geiger', 'leclerc', 'clement', 'marchal', 'pajot', 'roux', 'bell', 'albert',
         'cruz', 'junior', 'pinto', 'santos', 'costa', 'ferreira', 'gomez', 'lopez',
-        'heinz', 'nielsen', 'robert', 'thomas', 'daniel', 'francois', 'schneider'
+        'heinz', 'nielsen', 'robert', 'thomas', 'daniel', 'francois', 'schneider',
+        'lacroix'
     }
 
     full_name_players = {
@@ -552,7 +573,8 @@ def load_asse_knowledge():
         'christophe robert': 'Christophe Robert',
         'jean-pierre francois': 'Jean-Pierre François',
         'jean-christophe thomas': 'Jean-Christophe Thomas',
-        'jean-francois daniel': 'Jean-François Daniel'
+        'jean-francois daniel': 'Jean-François Daniel',
+        'leo lacroix': 'Léo Lacroix'
     }
 
     player_names = {}
@@ -623,9 +645,13 @@ def is_asse_signal(text, is_filet=False):
     t_clean = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn').lower()
 
     # 1. ASSE / Saint-Étienne / Sainté / A.S.S.E
-    asse_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
-    if re.search(asse_pattern, t_clean):
-        return True, "Mention explicite ASSE / Saint-Étienne"
+    non_foot_sainte = r'\bsainte[- ](?:barbe|marie|luce|croix|maxime|genevieve|adresse|claire|anne|rose|foy|helene)\b'
+    if re.search(non_foot_sainte, t_clean) and not re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne)\b', t_clean):
+        pass
+    else:
+        asse_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
+        if re.search(asse_pattern, t_clean):
+            return True, "Mention explicite ASSE / Saint-Étienne"
 
     # 2. Sponsors & équipementiers historiques ASSE
     for sp in ASSE_SPONSORS:
@@ -723,11 +749,14 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Fanion / Drapeau / Écharpe"
 
-    # 9. Figurines, fèves, pin's, porte-clés, badges, calendriers, goodies
-    goodies_pattern = r'\b(figurine|figurines|f[eé]ve|f[eé]ves|pin\'?s|porte[- ]cl[eé]s?|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles)\b'
+    # 9. Figurines, fèves, pin's, porte-clés, badges, calendriers, goodies, téléphonie
+    goodies_pattern = r'\b(figurine|figurines|f[eé]ve|f[eé]ves|pin\'?s|porte[- ]cl[eé]s?|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles|support[- ]t[eé]l[eé]phone|porte[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur|chargeurs)\b'
     if re.search(goodies_pattern, t):
         if not re.search(r'\b(maillot|jersey)\b', t):
-            return True, "Goodies / Pin's / Calendrier"
+            return True, "Goodies / Accessoire téléphone / Pin's"
+    if d and re.search(r'\b(porte[- ]t[eé]l[eé]phone|support[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur)\b', d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble|t-?shirt|haut)\b', t):
+            return True, "Accessoire téléphone (non-textile)"
 
     # 10. Casquettes, bonnets, bobs, chapeaux
     headwear_pattern = r'\b(casquette|casquettes|bonnet|bonnets|bob|bobs|chapeau|chapeaux|b[eé]ret|b[eé]rets)\b'
@@ -800,14 +829,15 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not is_asse_jersey_match(t):
             return True, "Maillot d'arbitre (non-club)"
 
-    # 20. Cyclisme / Vélo / Tour de France (maillots cyclistes, maillot vert Skoda/Santini, cuissards)
-    cycling_pat = r'\b(cyclis(?:me|te|tes)|v[eé]lo|v[eé]los|tour\s+de\s+france|letour|peloton|skoda|bicyclette|santini|castelli|uci|giro|giro\s+d[\'\s]italia|vuelta|cuissard|cuissards|vtt)\b'
-    if re.search(cycling_pat, t):
-        if not is_asse_jersey_match(t):
-            return True, "Cyclisme / Tour de France (non-football)"
-    if d and re.search(cycling_pat, d):
-        if not is_asse_jersey_match(t) and not is_asse_jersey_match(d):
-            return True, "Cyclisme / Tour de France (non-football)"
+    # 20. Cyclisme / Vélo / Tour de France / Radsport (verrouillage strict)
+    cycling_pat = r'\b(cyclis(?:me|te|tes)|v[eé]lo|v[eé]los|tour\s+de\s+france|letour|peloton|skoda|bicyclette|santini|castelli|uci|giro|giro\s+d[\'\s]italia|vuelta|cuissard|cuissards|vtt|radsport|rennrad|rennradtrikot|fahrrad|cycling|ciclismo)\b'
+    is_cycl_t = bool(re.search(cycling_pat, t))
+    is_cycl_d = bool(d and re.search(cycling_pat, d))
+    if is_cycl_t or is_cycl_d:
+        # Bloqué dans tous les cas SAUF si le titre précise formellement du football (ex: 'maillot foot asse')
+        has_foot = bool(re.search(r'\b(foot|football)\b', t))
+        if not (has_foot and is_asse_jersey_match(t)):
+            return True, "Cyclisme / Vélo / Radsport (non-football)"
 
     return False, "OK"
 
