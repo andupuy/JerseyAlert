@@ -708,13 +708,13 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
             return True, "Mug / Tasse"
 
-    # 3. Panini / Stickers / Vignettes / Topps / Trading cards
-    card_pattern = r'\b(panini|sticker|stickers|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
+    # 3. Panini / Stickers / Vignettes / Topps / Trading cards / Autocollants
+    card_pattern = r'\b(panini|sticker|stickers|autocollant|autocollants|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
     if re.search(card_pattern, t):
-        return True, "Panini / Sticker"
+        return True, "Panini / Sticker / Autocollant"
     if d and re.search(card_pattern, d):
         if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
-            return True, "Panini / Sticker"
+            return True, "Panini / Sticker / Autocollant"
 
     # 4. Cartes seules : si le titre concerne des cartes de collection (sans mention de maillot/jersey)
     if re.search(r'\b(carte|cartes)\b', t):
@@ -749,8 +749,16 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Fanion / Drapeau / Écharpe"
 
-    # 9. Figurines, fèves, pin's, porte-clés, badges, calendriers, goodies, téléphonie
-    goodies_pattern = r'\b(figurine|figurines|f[eé]ve|f[eé]ves|pin\'?s|porte[- ]cl[eé]s?|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles|support[- ]t[eé]l[eé]phone|porte[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur|chargeurs)\b'
+    # 9. Porte-clés / Porte-clefs (exclut systématiquement dans le titre, y compris en forme de maillot)
+    keychain_pattern = r'\b(porte[- ]cl[eé]s?|porte[- ]clefs?)\b'
+    if re.search(keychain_pattern, t):
+        return True, "Porte-clés"
+    if d and re.search(keychain_pattern, d):
+        if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
+            return True, "Porte-clés"
+
+    # 10. Figurines, fèves, pin's, badges, calendriers, goodies, téléphonie
+    goodies_pattern = r'\b(figurine|figurines|f[eé]ve|f[eé]ves|pin\'?s|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles|support[- ]t[eé]l[eé]phone|porte[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur|chargeurs)\b'
     if re.search(goodies_pattern, t):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Goodies / Accessoire téléphone / Pin's"
@@ -758,18 +766,18 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|tenue|ensemble|t-?shirt|haut)\b', t):
             return True, "Accessoire téléphone (non-textile)"
 
-    # 10. Casquettes, bonnets, bobs, chapeaux
+    # 11. Casquettes, bonnets, bobs, chapeaux
     headwear_pattern = r'\b(casquette|casquettes|bonnet|bonnets|bob|bobs|chapeau|chapeaux|b[eé]ret|b[eé]rets)\b'
     if re.search(headwear_pattern, t):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Casquette / Bonnet"
 
-    # 11. Maillots de bain, bikinis, swimwear
+    # 12. Maillots de bain, bikinis, swimwear
     swim_pattern = r'\b(maillot\s+de\s+bain|bikini|swimwear)\b'
     if re.search(swim_pattern, t) or re.search(swim_pattern, d):
         return True, "Maillot de bain"
 
-    # 12. Vestes, blousons, doudounes, parkas, coupe-vents
+    # 13. Vestes, blousons, doudounes, parkas, coupe-vents
     jacket_pattern = r'\b(veste|vestes|blouson|blousons|doudoune|doudounes|parka|parkas|coupe[- ]vent|k[- ]?way|anorak)\b'
     if re.search(jacket_pattern, t):
         if not re.search(r'\b(maillot|jersey)\b', t):
@@ -778,7 +786,7 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Veste / Blouson"
 
-    # 13. Spam de mots-clés / Tag stuffing multi-clubs (> 4 clubs cités)
+    # 14. Spam de mots-clés / Tag stuffing multi-clubs (> 4 clubs cités)
     if d:
         clubs_found = set()
         for club_key, club_pattern in CLUB_PATTERNS.items():
@@ -789,18 +797,18 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
             if not is_explicit_asse_jersey(t, d):
                 return True, f"Spam multi-clubs ({len(clubs_found)} clubs cités sans mention explicite ASSE)"
 
-    # 14. Bas de sport seuls (shorts, pantalons, joggings, chaussettes) sans mention de maillot/jersey/tenue
+    # 15. Bas de sport seuls (shorts, pantalons, joggings, chaussettes) sans mention de maillot/jersey/tenue
     pants_pattern = r'\b(short|shorts|pantalon|pantalons|jogging|joggings|surv[eê]tement|surv[eê]tements|chaussette|chaussettes|bas\s+de\s+foot)\b'
     if re.search(pants_pattern, t):
         if not re.search(r'\b(maillot|jersey|tenue|ensemble|t-?shirt|haut)\b', t):
             return True, "Bas de sport / Short seul"
 
-    # 15. Vêtements hors-sujet / Danse / Lingerie / Féminin non-sport (pole dance, paillettes, robes, jupes, etc.)
+    # 16. Vêtements hors-sujet / Danse / Lingerie / Féminin non-sport (pole dance, paillettes, robes, jupes, etc.)
     offtopic_pattern = r'\b(poledance|pole\s+dance|paillette|paillettes|paillet[ée]s?|lingerie|soutien[- ]gorge|brassi[eè]re|robe|robes|jupe|jupes|dentelle|dentelles|escarpins?|talons?|maquillage|combishort)\b'
     if re.search(offtopic_pattern, t) or (d and re.search(offtopic_pattern, d)):
         return True, "Vêtement hors-sujet (danse/lingerie/robe)"
 
-    # 16. Mots-clés personnalisés ajoutés en direct via le Dashboard
+    # 17. Mots-clés personnalisés ajoutés en direct via le Dashboard
     custom_keywords = load_blacklisted_keywords()
     if custom_keywords:
         for kw in custom_keywords:
@@ -808,7 +816,7 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
             if re.search(kw_pat, t) or (d and re.search(kw_pat, d)):
                 return True, f"Mot-clé bloqué ({kw})"
 
-    # 17. Sports hors-football (rugby, RCT, etc.) et vêtements non sportifs (blouse, pull, chemisier, gilet)
+    # 18. Sports hors-football (rugby, RCT, etc.) et vêtements non sportifs (blouse, pull, chemisier, gilet)
     off_clothing = r'\b(rugby|rct|top\s*14|six\s*nations|blouse|blouses|chemisier|chemisiers|pull|pulls|gilet|gilets|cardigan|cardigans)\b'
     if re.search(off_clothing, t):
         if not is_asse_jersey_match(t):
@@ -817,19 +825,19 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not is_asse_jersey_match(t) and not is_asse_jersey_match(d):
             return True, "Sport hors-football ou vêtement non sportif (rugby/blouse/pull)"
 
-    # 18. Mangas, animés, esports, fiction (Captain Tsubasa, Olive et Tom, Inazuma, Blue Lock)
+    # 19. Mangas, animés, esports, fiction (Captain Tsubasa, Olive et Tom, Inazuma, Blue Lock)
     anime_pattern = r'\b(captain\s+tsubasa|tsubasa|olive\s+et\s+tom|inazuma|blue\s+lock)\b'
     if re.search(anime_pattern, t) or (d and re.search(anime_pattern, d)):
         if not is_asse_jersey_match(t):
             return True, "Fiction / Animé (Captain Tsubasa/Manga)"
 
-    # 19. Arbitres / Arbitrage (maillots d'arbitre génériques non-club)
+    # 20. Arbitres / Arbitrage (maillots d'arbitre génériques non-club)
     ref_pattern = r'\b(arbitre|arbitres|referee|referees|arbitrage)\b'
     if re.search(ref_pattern, t) or (d and re.search(ref_pattern, d)):
         if not is_asse_jersey_match(t):
             return True, "Maillot d'arbitre (non-club)"
 
-    # 20. Cyclisme / Vélo / Tour de France / Radsport (verrouillage strict)
+    # 21. Cyclisme / Vélo / Tour de France / Radsport (verrouillage strict)
     cycling_pat = r'\b(cyclis(?:me|te|tes)|v[eé]lo|v[eé]los|tour\s+de\s+france|letour|peloton|skoda|bicyclette|santini|castelli|uci|giro|giro\s+d[\'\s]italia|vuelta|cuissard|cuissards|vtt|radsport|rennrad|rennradtrikot|fahrrad|cycling|ciclismo)\b'
     is_cycl_t = bool(re.search(cycling_pat, t))
     is_cycl_d = bool(d and re.search(cycling_pat, d))
