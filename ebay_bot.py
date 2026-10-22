@@ -267,16 +267,18 @@ def run_ebay_sniper():
                 "q": query_str,
                 "sort": "newlyListed",
                 "filter": "buyingOptions:{FIXED_PRICE}",
-                "limit": 25
+                "limit": 50
             }
 
             resp = requests.get(search_url, headers=headers, params=params, timeout=12)
             if resp.status_code == 200:
                 data = resp.json()
                 items = data.get("itemSummaries", [])
-                log(f"🔎 [eBay] Scan effectué : {len(items)} annonces récentes avec Achat Immédiat")
+                log(f"🔎 [eBay] Scan effectué : {len(items)} annonces récentes")
 
                 new_matches = []
+                now_utc = datetime.now(timezone.utc)
+
                 for it in items:
                     raw_id = it.get("legacyItemId") or (it.get("itemId", "").split("|")[1] if "|" in it.get("itemId", "") else it.get("itemId", ""))
                     if not raw_id:
@@ -293,21 +295,35 @@ def run_ebay_sniper():
                     opts = it.get("buyingOptions", [])
                     seller_name = it.get("seller", {}).get("username", "")
 
-                    # 1. Vérification formelle Achat Immédiat
-                    if "FIXED_PRICE" not in opts:
+                    # 1. Vérification formelle Achat Immédiat PUR (exclut les enchères mixtes et les enchères en cours)
+                    if "FIXED_PRICE" not in opts or "AUCTION" in opts:
+                        continue
+                    if it.get("currentBidPrice") or it.get("bidCount", 0) > 0:
                         continue
 
-                    # 2. Vérification correspondance ASSE
+                    # 2. Vérification fraîcheur : annonce déposée il y a moins de 60 minutes
+                    created_str = it.get("itemCreationDate")
+                    if created_str:
+                        try:
+                            created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                            age_minutes = (now_utc - created_dt).total_seconds() / 60
+                            if age_minutes > 60:
+                                # Annonce trop ancienne (> 1 heure), ignorée silencieusement
+                                continue
+                        except Exception:
+                            pass
+
+                    # 3. Vérification correspondance ASSE
                     if not is_asse_jersey_match(title):
                         continue
 
-                    # 3. Filtrage des produits exclus (goodies, porte-clés, autocollants, mugs, etc.)
+                    # 4. Filtrage des produits exclus (goodies, porte-clés, autocollants, mugs, etc.)
                     is_excl, reason = is_excluded_product(title, "", f"{price_val} €")
                     if is_excl:
                         log(f"🚫 [eBay] Article exclu ({reason}) : '{title}'")
                         continue
 
-                    # 4. Filtrage vendeur bloqué
+                    # 5. Filtrage vendeur bloqué
                     if seller_name and is_seller_blacklisted(seller_name):
                         log(f"🚫 [eBay] Vendeur bloqué @{seller_name} : '{title}'")
                         continue
