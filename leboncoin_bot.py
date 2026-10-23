@@ -231,14 +231,15 @@ def run_bot():
                 title = ad.get("subject", "")
                 prices = ad.get("price", [0])
                 price = float(prices[0]) if prices else 0.0
-                body = ad.get("body", "")
+                price_str = f"{price} €"
+                body = ad.get("body", "") or ""
 
                 # 1. Vérification de correspondance maillot ASSE
                 if not is_asse_jersey_match(title):
                     continue
 
                 # 2. Filtrage strict anti faux positifs (Règles 1 à 22)
-                is_excl, reason = is_excluded_product(title, price, body)
+                is_excl, reason = is_excluded_product(title, body, price_str)
                 if is_excl:
                     log(f"🚫 Annonce exclue ({reason}) : '{title}' ({price}€)")
                     continue
