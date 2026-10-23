@@ -260,9 +260,13 @@ def is_asse_jersey_match(title):
     import re
     title_low = title.lower()
 
-    # Bloquer les expressions composées non-football avec 'sainte' (Sainte-Barbe, Sainte-Marie, etc.)
+    # Bloquer les expressions composées non-football avec 'sainte' (Sainte-Barbe, Sainte-Marie, etc.) ou Sainté-Lyon (trail)
     non_foot_sainte = r'\bsainte[- ](?:barbe|marie|luce|croix|maxime|genevieve|adresse|claire|anne|rose|foy|helene)\b'
     if re.search(non_foot_sainte, title_low) and not re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne)\b', title_low):
+        return False
+
+    # Bloquer spécifiquement la course Sainté-Lyon / Saintélyon
+    if re.search(r'\bsaint[eé][- ]?lyon\b', title_low) and not re.search(r'\b(asse|foot|football)\b', title_low):
         return False
 
     team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
@@ -846,6 +850,15 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         has_foot = bool(re.search(r'\b(foot|football)\b', t))
         if not (has_foot and is_asse_jersey_match(t)):
             return True, "Cyclisme / Vélo / Radsport (non-football)"
+
+    # 22. Running, Trail, Marathon, Sainté-Lyon, Course à pied (hors football)
+    running_pat = r'\b(saint[eé][- ]?lyon|course\s+(?:[aà]\s+)?pied|trail|trails|ultra[- ]trail|marathon|semi[- ]marathon|triathlon)\b'
+    is_run_t = bool(re.search(running_pat, t))
+    is_run_d = bool(d and re.search(running_pat, d))
+    if is_run_t or is_run_d:
+        has_foot = bool(re.search(r'\b(foot|football)\b', t))
+        if not (has_foot and is_asse_jersey_match(t)):
+            return True, "Course à pied / Trail / Sainté-Lyon (non-football)"
 
     return False, "OK"
 
