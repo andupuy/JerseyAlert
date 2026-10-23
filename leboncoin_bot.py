@@ -43,8 +43,8 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_IDS_FILE = "seen_lbc_ids.json"
 PROXY_URL = os.environ.get("LBC_PROXY_URL", "socks5://127.0.0.1:1055")
 
-CHECK_INTERVAL_MIN = 20
-CHECK_INTERVAL_MAX = 30
+CHECK_INTERVAL_MIN = 30
+CHECK_INTERVAL_MAX = 45
 
 def log(msg):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -182,9 +182,15 @@ def fetch_leboncoin_ads(session):
         'https': PROXY_URL
     } if PROXY_URL else None
 
-    resp = session.get(SEARCH_URL, headers=headers, proxies=proxies, impersonate='chrome124', timeout=15)
-    if resp.status_code != 200:
-        log(f"⚠️ Réponse HTTP {resp.status_code} reçue de LeBonCoin (Longueur: {len(resp.text)})")
+    try:
+        resp = session.get(SEARCH_URL, headers=headers, proxies=proxies, impersonate='chrome124', timeout=15)
+        if resp.status_code != 200:
+            log(f"⚠️ Réponse HTTP {resp.status_code} reçue de LeBonCoin (Longueur: {len(resp.text)})")
+            session.cookies.clear()
+            return []
+    except Exception as e:
+        log(f"⚠️ Erreur requête LeBonCoin: {e}")
+        session.cookies.clear()
         return []
 
     # Extraction des données JSON Next.js
@@ -214,7 +220,7 @@ def run_bot():
         try:
             ads = fetch_leboncoin_ads(session)
             if not ads:
-                time.sleep(15)
+                time.sleep(random.uniform(25, 40))
                 continue
 
             if cycle_count % 10 == 1:
