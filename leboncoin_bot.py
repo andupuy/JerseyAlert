@@ -217,6 +217,9 @@ def run_bot():
                 time.sleep(15)
                 continue
 
+            if cycle_count % 10 == 1:
+                log(f"🔎 Scan #{cycle_count} : {len(ads)} annonces analysées ({len(seen_ids)} en mémoire)")
+
             new_valid_ads = []
             for ad in ads:
                 ad_id = str(ad.get("list_id", ""))
