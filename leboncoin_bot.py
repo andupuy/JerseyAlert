@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-LeBonCoin Bot - Alertes Maillots ASSE en temps réel
-- Surveillance automatique de LeBonCoin (sort=time)
-- Extraction multi-photos haute résolution (rule=ad-large)
-- Filtrage strict ASSE (0 faux positif)
-- Notifications enrichies Discord Webhook
+LeBonCoin Sniper - Alertes Maillots ASSE en temps réel
+- Surveillance automatique de LeBonCoin (sort=time) via SOCKS5 proxy résidentiel (Nvidia Shield)
+- Bypasse DataDome sans frais via curl_cffi (impersonate='chrome124')
+- Filtrage strict ASSE (Règles 1 à 22 synchronisées avec Vinted)
+- Notifications enrichies Discord Webhook optimisées pour Garmin Watch
 """
 
 import os
@@ -12,333 +12,257 @@ import sys
 import time
 import random
 import re
-import requests
-import signal
-from datetime import datetime
-from playwright.sync_api import sync_playwright
+import json
+from datetime import datetime, timezone
+from curl_cffi import requests
+from dotenv import load_dotenv
 
-# Configuration
+# Charger les variables d'environnement
+load_dotenv()
+
+# Importer les filtres ASSE officiels du projet
+try:
+    from vinted_bot_oracle import is_asse_jersey_match, is_excluded_product, clean_text
+except ImportError:
+    # Fallback minimal si import direct impossible
+    def clean_text(txt):
+        return (txt or "").strip()
+
+    def is_asse_jersey_match(title):
+        if not title: return False
+        t = title.lower()
+        if re.search(r'\b(saint[eé][- ]?lyon|course\s*(?:a|à)\s*pied|marathon|trail)\b', t):
+            return False
+        return bool(re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b', t))
+
+    def is_excluded_product(title, price=0.0, description=""):
+        return False, ""
+
 SEARCH_URL = "https://www.leboncoin.fr/recherche?text=maillot%20asse&sort=time"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-STATE_FILE = "last_seen_lbc_id.txt"
-CHECK_INTERVAL_MIN = 30
-CHECK_INTERVAL_MAX = 45
+SEEN_IDS_FILE = "seen_lbc_ids.json"
+PROXY_URL = os.environ.get("LBC_PROXY_URL", "socks5://127.0.0.1:1055")
 
-def log(message):
-    """Log avec timestamp"""
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{timestamp}] [LeBonCoin] {message}", flush=True)
+CHECK_INTERVAL_MIN = 20
+CHECK_INTERVAL_MAX = 30
 
-def load_last_seen_id():
-    """Charge le dernier ID vu depuis le fichier"""
-    if os.path.exists(STATE_FILE):
+def log(msg):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now}] [LeBonCoin] {msg}", flush=True)
+
+def load_seen_ids():
+    if os.path.exists(SEEN_IDS_FILE):
         try:
-            with open(STATE_FILE, "r") as f:
-                return int(f.read().strip())
+            with open(SEEN_IDS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data)
         except Exception:
             pass
-    return 0
+    # Migration depuis ancien fichier texte si existant
+    if os.path.exists("last_seen_lbc_id.txt"):
+        try:
+            with open("last_seen_lbc_id.txt", "r") as f:
+                old_id = f.read().strip()
+                if old_id:
+                    return {old_id}
+        except Exception:
+            pass
+    return set()
 
-def save_last_seen_id(item_id):
-    """Sauvegarde le dernier ID vu"""
+def save_seen_ids(seen_set):
     try:
-        with open(STATE_FILE, "w") as f:
-            f.write(str(item_id))
+        # Conserver les 3 000 derniers IDs pour ne pas saturer le disque
+        id_list = list(seen_set)[-3000:]
+        with open(SEEN_IDS_FILE, "w", encoding="utf-8") as f:
+            json.dump(id_list, f)
     except Exception as e:
-        log(f"⚠️ Erreur sauvegarde ID: {e}")
+        log(f"⚠️ Erreur sauvegarde seen_ids: {e}")
 
-def is_asse_match(title):
-    """Filtrage strict ASSE avec limites de mots (évite faux positifs tout en capturant tous les produits ASSE)"""
-    if not title:
-        return False
-    title_low = title.lower()
-    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b'
-    return bool(re.search(team_pattern, title_low))
+def get_attribute_value(attributes, key_name):
+    if not attributes:
+        return ""
+    for attr in attributes:
+        if attr.get("key") == key_name:
+            return attr.get("value_label") or attr.get("value") or ""
+    return ""
 
-def scrape_ad_details(page, ad_url):
-    """Ouvre la page de l'annonce LeBonCoin pour récupérer toutes les photos HD et la description"""
-    try:
-        log(f"🔎 Scraping détails LBC: {ad_url}")
-        page.goto(ad_url, wait_until='domcontentloaded', timeout=15000)
-        page.wait_for_timeout(2000)
-        
-        details = page.evaluate("""() => {
-            const imgs = Array.from(document.querySelectorAll('img'))
-                                .map(i => i.src || i.getAttribute('data-src') || '')
-                                .filter(src => src && src.includes('img.leboncoin.fr/api/v1/lbcpb/images'));
-            
-            // URLs grand format HD
-            const cleanImgs = imgs.map(url => url.replace(/rule=[^&]+/, 'rule=ad-large'));
-            
-            const descEl = document.querySelector('[data-qa-id="adview_description_container"]') || 
-                           document.querySelector('div[class*="description"]') || 
-                           document.body;
-                           
-            return {
-                photos: Array.from(new Set(cleanImgs)),
-                description: descEl ? descEl.innerText.replace(/\\n+/g, '\\n').trim() : ''
-            };
-        }""")
-        return details
-    except Exception as e:
-        log(f"⚠️ Erreur scraping détails LBC: {e}")
-        return {"photos": [], "description": ""}
-
-def send_discord_alert(context, item):
-    """Envoie une alerte Discord enrichie pour LeBonCoin"""
+def send_discord_alert(ad):
     if not DISCORD_WEBHOOK_URL:
-        log("⚠️ Aucun DISCORD_WEBHOOK_URL configuré. Notification sautée.")
+        log("⚠️ DISCORD_WEBHOOK_URL non configuré !")
         return
 
-    # Récupération des détails riches (Toutes les photos HD + Description)
-    details = {"photos": [], "description": ""}
-    try:
-        detail_page = context.new_page()
-        details = scrape_ad_details(detail_page, item['url'])
-        detail_page.close()
-    except Exception as e:
-        log(f"⚠️ Erreur création page détails LBC: {e}")
+    ad_id = str(ad.get("list_id", ""))
+    title = clean_text(ad.get("subject", "Maillot ASSE"))
+    url = ad.get("url", f"https://www.leboncoin.fr/ad/sport_plein_air/{ad_id}")
+    
+    # Prix
+    prices = ad.get("price", [0])
+    price_val = prices[0] if prices else 0
+    price_str = f"{price_val} €"
+
+    # Attributs
+    attrs = ad.get("attributes", [])
+    size = get_attribute_value(attrs, "clothing_st") or "Non spécifiée"
+    brand = get_attribute_value(attrs, "clothing_brand") or ""
+    condition = get_attribute_value(attrs, "condition") or "Occasion"
+
+    # Localisation
+    loc = ad.get("location", {})
+    city = loc.get("city") or loc.get("city_label") or ""
+    zipcode = loc.get("zipcode") or ""
+    location_str = f"{city} ({zipcode})" if city and zipcode else (city or zipcode or "France")
+
+    # Vendeur
+    owner = ad.get("owner", {})
+    seller_name = owner.get("name") or "Particulier"
+
+    # Date
+    pub_date = ad.get("first_publication_date", "")
+
+    # Photos HD (large)
+    images_info = ad.get("images", {})
+    photos = images_info.get("urls_large", []) or images_info.get("urls", [])
+
+    # Description pour notification Garmin et Discord Embed
+    desc_lines = [
+        f"💰 Prix : **{price_str}** | 📍 Localisation : **{location_str}**",
+        f"📏 Taille : **{size}**" + (f" | 🏷️ Marque : **{brand}**" if brand else "") + f" | État : **{condition}**",
+        f"👤 Vendeur : **{seller_name}**",
+        f"\n🔗 [Voir l'annonce sur LeBonCoin]({url})"
+    ]
+
+    embed1 = {
+        "title": f"🟠 [LeBonCoin] {title}",
+        "url": url,
+        "description": "\n".join(desc_lines),
+        "color": 0xFF6E14,  # Orange officiel LeBonCoin
+        "footer": {"text": f"LeBonCoin Sniper • ID: {ad_id}"},
+        "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+    }
+    if photos:
+        embed1["image"] = {"url": photos[0]}
+
+    embeds = [embed1]
+    # Jusqu'à 4 photos en galerie
+    for p in photos[1:4]:
+        embeds.append({"url": url, "image": {"url": p}})
+
+    payload = {
+        "username": "LeBonCoin ASSE Sniper",
+        "avatar_url": "https://www.leboncoin.fr/favicon.ico",
+        "embeds": embeds
+    }
 
     try:
-        title = item.get('title', 'Nouvelle annonce LeBonCoin')
-        price = item.get('price', 'N/A')
-        location = item.get('location', 'France')
-        date_str = item.get('date', '')
-        
-        photos = details['photos'] if details['photos'] else ([item['photo']] if item.get('photo') else [])
-        desc = details['description']
-        
-        if len(desc) > 500:
-            desc = desc[:500] + "..."
-
-        description_text = f"**{price}** | Localisation: **{location}**\n\n{desc}" if desc else f"**{price}** | Localisation: **{location}**"
-
-        embed1 = {
-            "title": f"🟠 LeBonCoin : {title}",
-            "url": item.get('url'),
-            "description": description_text,
-            "color": 0xFF6E14,  # Orange LeBonCoin
-            "footer": {"text": f"LeBonCoin Bot • ID: {item.get('id')} • {date_str}"},
-            "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-        }
-        
-        if photos:
-            embed1["image"] = {"url": photos[0]}
-
-        embeds = [embed1]
-        for photo_url in photos[1:4]:
-            embeds.append({"url": item.get('url'), "image": {"url": photo_url}})
-
-        desc_preview = desc[:500] if desc else "Pas de description"
-        notif_text = f"@everyone | 🟠 **LeBonCoin** : {title}\n💰 {price} | 📍 {location}\n📝 {desc_preview}"
-
-        payload = {
-            "content": notif_text,
-            "username": "LeBonCoin ASSE Bot",
-            "avatar_url": "https://www.leboncoin.fr/favicon.ico",
-            "embeds": embeds
-        }
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        log(f"✅ Alerte Discord envoyée pour LeBonCoin #{item.get('id')}")
-
+        r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
+        if r.status_code in (200, 204):
+            log(f"✅ Alerte envoyée sur Discord pour #{ad_id} : '{title}' ({price_str})")
+        else:
+            log(f"⚠️ Erreur Discord (HTTP {r.status_code}) : {r.text[:200]}")
     except Exception as e:
-        log(f"❌ Erreur envoi Discord LBC: {e}")
+        log(f"❌ Erreur envoi webhook Discord: {e}")
 
-def watchdog_handler(signum, frame):
-    """Watchdog freeze detection"""
-    log("🚨 WATCHDOG: Bot LeBonCoin figé ! Redémarrage...")
-    os._exit(1)
+def fetch_leboncoin_ads(session):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"macOS"',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'none',
+        'sec-fetch-user': '?1',
+        'upgrade-insecure-requests': '1'
+    }
 
-import threading
+    proxies = {
+        'http': PROXY_URL,
+        'https': PROXY_URL
+    } if PROXY_URL else None
 
-def set_watchdog():
-    """Active le watchdog uniquement si exécuté dans le thread principal"""
-    if threading.current_thread() is threading.main_thread():
-        try:
-            signal.signal(signal.SIGALRM, watchdog_handler)
-            signal.alarm(180)
-        except Exception:
-            pass
+    resp = session.get(SEARCH_URL, headers=headers, proxies=proxies, impersonate='chrome124', timeout=15)
+    if resp.status_code != 200:
+        log(f"⚠️ Réponse HTTP {resp.status_code} reçue de LeBonCoin (Longueur: {len(resp.text)})")
+        return []
 
-def reset_watchdog():
-    """Désactive le watchdog uniquement si exécuté dans le thread principal"""
-    if threading.current_thread() is threading.main_thread():
-        try:
-            signal.alarm(0)
-        except Exception:
-            pass
+    # Extraction des données JSON Next.js
+    m = re.search(r'<script id=[\"\']__NEXT_DATA__[\"\'][^>]*>(.*?)</script>', resp.text)
+    if not m:
+        log("⚠️ Impossible de trouver le bloc __NEXT_DATA__ dans la page LeBonCoin")
+        return []
+
+    try:
+        data = json.loads(m.group(1))
+        ads = data.get("props", {}).get("pageProps", {}).get("searchData", {}).get("ads", [])
+        return ads
+    except Exception as e:
+        log(f"⚠️ Erreur parsing JSON Next.js: {e}")
+        return []
 
 def run_bot():
-    """Boucle principale du bot LeBonCoin"""
-    log("🚀 Démarrage du Bot LeBonCoin ASSE")
-    
-    seen_ids = set()
-    is_initial_cycle = True
-    last_seen_id = load_last_seen_id()
+    log("🚀 Démarrage du Sniper LeBonCoin ASSE (curl_cffi + SOCKS5 Shield)")
+    seen_ids = load_seen_ids()
+    is_initial_run = (len(seen_ids) == 0)
 
-    try:
-        while True:
-            # Mode veille la nuit (1h à 7h)
-            os.environ['TZ'] = 'Europe/Paris'
-            if hasattr(time, 'tzset'):
-                time.tzset()
-            current_hour = time.localtime().tm_hour
+    session = requests.Session()
 
-            if os.environ.get("ENABLE_NIGHT_MODE", "false").lower() == "true" and (current_hour >= 1 and current_hour < 7):
-                log(f"🌙 Mode Veille Silencieuse activé ({current_hour}h).")
-                time.sleep(600)
+    cycle_count = 0
+    while True:
+        cycle_count += 1
+        try:
+            ads = fetch_leboncoin_ads(session)
+            if not ads:
+                time.sleep(15)
                 continue
 
-            try:
-                set_watchdog()
+            new_valid_ads = []
+            for ad in ads:
+                ad_id = str(ad.get("list_id", ""))
+                if not ad_id:
+                    continue
 
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(
-                        headless=True,
-                        args=[
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-blink-features=AutomationControlled',
-                            '--disable-infobars',
-                            '--disable-gpu',
-                            '--window-size=1920,1080'
-                        ]
-                    )
-                    context = browser.new_context(
-                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                        viewport={'width': 1920, 'height': 1080},
-                        locale='fr-FR',
-                        timezone_id='Europe/Paris',
-                        color_scheme='light',
-                        device_scale_factor=1
-                    )
+                if ad_id in seen_ids:
+                    continue
 
-                    page = context.new_page()
-                    page.add_init_script("""
-                        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                        window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
-                        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-                        Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'] });
-                    """)
-                    page.set_default_timeout(20000)
-                    
-                    log(f"🔎 Consultation LeBonCoin : {SEARCH_URL}")
-                    response = page.goto(SEARCH_URL, wait_until='domcontentloaded', timeout=20000)
-                    status_code = response.status if response else 0
-                    log(f"📡 Réponse HTTP LeBonCoin : Status {status_code}")
-                    
-                    try:
-                        page.wait_for_selector('a[href*="/ad/"]', timeout=12000)
-                    except Exception as err:
-                        log(f"⚠️ Attente annonces LeBonCoin: {err}")
-                    
-                    raw_ads = page.evaluate("""() => {
-                        const anchors = Array.from(document.querySelectorAll('a[href*="/ad/"]'));
-                        const ignoreBadges = ['urgent', 'pro', 'sponsorisé', 'sponsorise', 'livraison possible', 'nouveau', 'livraison', 'recommandé', 'boosté', 'à la une'];
-                        
-                        return anchors.map(a => {
-                            const idMatch = a.href.match(/\\/(\\d+)(\\?|$)/);
-                            const parent = a.closest('div') || a.parentElement;
-                            const img = a.querySelector('img') || parent.querySelector('img');
-                            const textLines = a.innerText.split('\\n').map(t => t.trim()).filter(t => t.length > 0);
-                            
-                            let title = textLines.find(line => {
-                                const low = line.toLowerCase();
-                                if (ignoreBadges.includes(low)) return false;
-                                if (line.includes('€') || line.includes('$')) return false;
-                                if (/^\\d{5}\\b/.test(line)) return false;
-                                if (/^(aujourd'hui|hier|\\d{1,2}\\/\\d{1,2})/i.test(low)) return false;
-                                return line.length > 2;
-                            }) || textLines[0] || 'Annonce LeBonCoin';
-                            
-                            let price = 'N/A';
-                            let location = 'France';
-                            let date = '';
-                            
-                            textLines.forEach(line => {
-                                if (line.includes('€')) price = line;
-                                else if (/\\d{5}/.test(line)) location = line;
-                                else if (line.includes('/') || line.includes(':') || line.toLowerCase().includes('hier') || line.toLowerCase().includes('aujourd')) date = line;
-                            });
-                            
-                            return {
-                                id: idMatch ? parseInt(idMatch[1]) : null,
-                                title: title,
-                                price: price,
-                                location: location,
-                                date: date,
-                                url: a.href,
-                                photo: img ? (img.src || img.getAttribute('data-src') || '') : '',
-                                fullText: a.innerText
-                            };
-                        }).filter(x => x.id && x.title.length > 3);
-                    }""")
-                    
-                    page.close()
+                seen_ids.add(ad_id)
 
-                    if raw_ads:
-                        new_found = []
-                        for ad in raw_ads:
-                            if ad['id'] not in seen_ids and ad['id'] > (last_seen_id - 100000):
-                                new_found.append(ad)
-                                seen_ids.add(ad['id'])
-                        
-                        if is_initial_cycle:
-                            if last_seen_id == 0:
-                                if new_found:
-                                    log(f"⚡ Initialisation LeBonCoin : Analyse de {len(new_found)} annonces...")
-                                    new_found.sort(key=lambda x: x['id'])
-                                    for ad in new_found:
-                                        date_low = ad.get('date', '').lower()
-                                        is_today = any(kw in date_low for kw in ["aujourd", ":"])
-                                        if is_asse_match(ad['title']) or is_asse_match(ad.get('fullText', '')):
-                                            if is_today:
-                                                log(f"🎯 MATCH INITIALISATION (Aujourd'hui) : '{ad['title']}' ({ad['price']})")
-                                                send_discord_alert(context, ad)
-                                    
-                                    last_seen_id = max(x['id'] for x in new_found)
-                                    save_last_seen_id(last_seen_id)
-                                    log(f"✅ Première initialisation terminée. {len(seen_ids)} annonces chargées. Dernier ID enregistré: {last_seen_id}")
-                            else:
-                                if new_found:
-                                    log(f"🆕 {len(new_found)} nouvelles annonces détectées au redémarrage LeBonCoin !")
-                                    new_found.sort(key=lambda x: x['id'])
-                                    for ad in new_found:
-                                        if is_asse_match(ad['title']) or is_asse_match(ad.get('fullText', '')):
-                                            log(f"🎯 MATCH LEBONCOIN : '{ad['title']}' ({ad['price']})")
-                                            send_discord_alert(context, ad)
-                                    
-                                    last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                                    save_last_seen_id(last_seen_id)
-                        elif new_found:
-                            log(f"🆕 {len(new_found)} nouvelles annonces détectées sur LeBonCoin !")
-                            new_found.sort(key=lambda x: x['id'])
-                            for ad in new_found:
-                                if is_asse_match(ad['title']) or is_asse_match(ad.get('fullText', '')):
-                                    log(f"🎯 MATCH LEBONCOIN : '{ad['title']}' ({ad['price']})")
-                                    send_discord_alert(context, ad)
-                            
-                            last_seen_id = max(last_seen_id, max(x['id'] for x in new_found))
-                            save_last_seen_id(last_seen_id)
-                    
-                    browser.close()
+                title = ad.get("subject", "")
+                prices = ad.get("price", [0])
+                price = float(prices[0]) if prices else 0.0
+                body = ad.get("body", "")
 
-                reset_watchdog()
-            except Exception as e:
-                log(f"🚨 Bug moteur LeBonCoin : {e}")
-                reset_watchdog()
+                # 1. Vérification de correspondance maillot ASSE
+                if not is_asse_jersey_match(title):
+                    continue
 
-            is_initial_cycle = False
-            if len(seen_ids) > 2000:
-                seen_ids_list = sorted(list(seen_ids), reverse=True)
-                seen_ids = set(seen_ids_list[:1500])
+                # 2. Filtrage strict anti faux positifs (Règles 1 à 22)
+                is_excl, reason = is_excluded_product(title, price, body)
+                if is_excl:
+                    log(f"🚫 Annonce exclue ({reason}) : '{title}' ({price}€)")
+                    continue
 
-            sleep_time = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
-            log(f"⏳ Repos {int(sleep_time)}s avant le prochain scan...")
-            time.sleep(sleep_time)
+                new_valid_ads.append(ad)
 
-    except KeyboardInterrupt:
-        log("⛔ Arrêt du bot LeBonCoin")
+            save_seen_ids(seen_ids)
+
+            if is_initial_run:
+                log(f"📋 Initialisation terminée : {len(seen_ids)} annonces existantes mémorisées.")
+                is_initial_run = False
+            else:
+                for ad in new_valid_ads:
+                    send_discord_alert(ad)
+
+            if cycle_count % 30 == 0:
+                log(f"💓 Heartbeat: {len(seen_ids)} annonces en mémoire, veille active.")
+
+        except Exception as e:
+            log(f"🚨 Erreur durant le cycle: {e}")
+
+        # Pause aléatoire entre 20 et 30 secondes pour discrétion et rapidité
+        sleep_sec = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
+        time.sleep(sleep_sec)
 
 if __name__ == "__main__":
     run_bot()
