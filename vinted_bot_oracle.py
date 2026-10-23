@@ -852,13 +852,13 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
             return True, "Cyclisme / Vélo / Radsport (non-football)"
 
     # 22. Running, Trail, Marathon, Sainté-Lyon, Course à pied (hors football)
-    running_pat = r'\b(saint[eé][- ]?lyon|course\s+(?:[aà]\s+)?pied|trail|trails|ultra[- ]trail|marathon|semi[- ]marathon|triathlon)\b'
-    is_run_t = bool(re.search(running_pat, t))
-    is_run_d = bool(d and re.search(running_pat, d))
-    if is_run_t or is_run_d:
-        has_foot = bool(re.search(r'\b(foot|football)\b', t))
-        if not (has_foot and is_asse_jersey_match(t)):
+    running_pat = r'\b(saint[eé][- ]?lyon|course\s+(?:[aà]\s+)?pied|ultra[- ]trail|marathon|semi[- ]marathon|triathlon)\b'
+    if re.search(running_pat, t):
+        if not (is_asse_jersey_match(t) and re.search(r'\b(foot|football)\b', t)):
             return True, "Course à pied / Trail / Sainté-Lyon (non-football)"
+    if d and re.search(r'\b(saint[eé][- ]?lyon|course\s+(?:[aà]\s+)?pied)\b', d):
+        if not (is_asse_jersey_match(t) and re.search(r'\b(maillot|jersey)\b', t)):
+            return True, "Course à pied / Sainté-Lyon (non-football)"
 
     return False, "OK"
 
