@@ -43,8 +43,8 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_IDS_FILE = "seen_lbc_ids.json"
 PROXY_URL = os.environ.get("LBC_PROXY_URL", "socks5://127.0.0.1:1055")
 
-CHECK_INTERVAL_MIN = 30
-CHECK_INTERVAL_MAX = 45
+CHECK_INTERVAL_MIN = 15
+CHECK_INTERVAL_MAX = 25
 
 def log(msg):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -220,7 +220,7 @@ def run_bot():
         try:
             ads = fetch_leboncoin_ads(session)
             if not ads:
-                time.sleep(random.uniform(25, 40))
+                time.sleep(random.uniform(15, 25))
                 continue
 
             if cycle_count % 10 == 1:
@@ -270,7 +270,7 @@ def run_bot():
         except Exception as e:
             log(f"🚨 Erreur durant le cycle: {e}")
 
-        # Pause aléatoire entre 20 et 30 secondes pour discrétion et rapidité
+        # Pause aléatoire entre 15 et 25 secondes pour discrétion et rapidité
         sleep_sec = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
         time.sleep(sleep_sec)
 
