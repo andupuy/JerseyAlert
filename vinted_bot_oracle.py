@@ -741,10 +741,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Photo / Poster / Cadre"
 
-    # 7. Livres, magazines, revues, journaux, DVD, VHS, BD
+    # 7. Livres, magazines, revues, journaux, DVD, VHS, BD (exclut systématiquement dans le titre, y compris 'Magazine Maillot Vert')
     media_pattern = r'\b(livre|livres|magazine|magazines|revue|revues|journal|journaux|gazette|gazettes|dvd|vhs|cassette|cassettes|bd|bande[ -]dessin[eé]e)\b'
     if re.search(media_pattern, t):
-        if not re.search(r'\b(maillot|jersey)\b', t):
+        return True, "Livre / Magazine / Journal"
+    if d and re.search(media_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
             return True, "Livre / Magazine / Journal"
 
     # 8. Fanions, drapeaux, bannières, écharpes, foulards
