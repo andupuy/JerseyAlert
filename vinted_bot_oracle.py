@@ -241,6 +241,28 @@ def is_excluded_size(size_str, title_str="", desc_str=""):
     if re.match(r'^(32|34|36)(?:\s*/\s*(?:XS|S))?$', s) or re.match(r'^(?:XS|S)\s*/\s*(32|34|36)$', s):
         return True, f"Taille numérique XS/S ({size_str})"
 
+    # 23. PLV, présentoirs, mobilier de magasin, cartons publicitaires
+    plv_pattern = r'\b(plv|pr[eé]sentoir|pr[eé]sentoirs|stand|vitrine|vitrines|totem|totems|panneau\s+publicitaire)\b'
+    if re.search(plv_pattern, t):
+        if not re.search(r'\b(maillot\s+port[eé]|maillot\s+match)\b', t):
+            return True, "PLV / Présentoir publicitaire"
+    if d and re.search(plv_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "PLV / Présentoir publicitaire"
+
+    # 24. Chaussures de football, crampons, protège-tibias
+    cleats_pattern = r'\b(crampon|crampons|chaussure[s]?\s+de\s+foot|chaussure[s]?\s+de\s+football|prot[eè]ge[- ]tibia[s]?)\b'
+    if re.search(cleats_pattern, t):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "Crampons / Chaussures de foot"
+    if d and re.search(cleats_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "Crampons / Chaussures de foot"
+
+    # 25. Négation explicite ("no maillot", "pas de maillot", "aucun maillot", "sans maillot")
+    if re.search(r'\b(no|pas\s+de|aucun|sans)\s+(?:de\s+)?(?:maillot|jersey)\b', t):
+        return True, "Négation explicite (no maillot)"
+
     return False, "OK"
 
 def parse_price(price_str):
@@ -785,16 +807,18 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey)\b', t):
             return True, "Veste / Blouson"
 
-    # 14. Spam de mots-clés / Tag stuffing multi-clubs (> 4 clubs cités)
-    if d:
-        clubs_found = set()
-        for club_key, club_pattern in CLUB_PATTERNS.items():
-            if re.search(club_pattern, d):
-                clubs_found.add(club_key)
+    # 14. Spam de mots-clés / Tag stuffing multi-clubs
+    full_text = f"{t} {d}"
+    clubs_in_title = {ck for ck, cp in CLUB_PATTERNS.items() if re.search(cp, t)}
+    clubs_total = {ck for ck, cp in CLUB_PATTERNS.items() if re.search(cp, full_text)}
 
-        if len(clubs_found) > 4:
-            if not is_explicit_asse_jersey(t, d):
-                return True, f"Spam multi-clubs ({len(clubs_found)} clubs cités sans mention explicite ASSE)"
+    # Si 3 clubs ou plus sont cités dans le titre seul -> spam évident
+    if len(clubs_in_title) >= 3:
+        return True, f"Spam multi-clubs dans le titre ({len(clubs_in_title)} clubs cités)"
+
+    if len(clubs_total) > 4:
+        if not is_explicit_asse_jersey(t, d):
+            return True, f"Spam multi-clubs ({len(clubs_total)} clubs cités sans mention explicite ASSE)"
 
     # 15. Bas de sport seuls (shorts, pantalons, joggings, chaussettes) sans mention de maillot/jersey/tenue
     pants_pattern = r'\b(short|shorts|pantalon|pantalons|jogging|joggings|surv[eê]tement|surv[eê]tements|chaussette|chaussettes|bas\s+de\s+foot)\b'
@@ -854,6 +878,28 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if d and re.search(r'\b(saint[eé][- ]?lyon|course\s+(?:[aà]\s+)?pied)\b', d):
         if not (is_asse_jersey_match(t) and re.search(r'\b(maillot|jersey)\b', t)):
             return True, "Course à pied / Sainté-Lyon (non-football)"
+
+    # 23. PLV, présentoirs, mobilier de magasin, cartons publicitaires
+    plv_pattern = r'\b(plv|pr[eé]sentoir|pr[eé]sentoirs|stand|vitrine|vitrines|totem|totems|panneau\s+publicitaire)\b'
+    if re.search(plv_pattern, t):
+        if not re.search(r'\b(maillot\s+port[eé]|maillot\s+match)\b', t):
+            return True, "PLV / Présentoir publicitaire"
+    if d and re.search(plv_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "PLV / Présentoir publicitaire"
+
+    # 24. Chaussures de football, crampons, protège-tibias
+    cleats_pattern = r'\b(crampon|crampons|chaussure[s]?\s+de\s+foot|chaussure[s]?\s+de\s+football|prot[eè]ge[- ]tibia[s]?)\b'
+    if re.search(cleats_pattern, t):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "Crampons / Chaussures de foot"
+    if d and re.search(cleats_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "Crampons / Chaussures de foot"
+
+    # 25. Négation explicite ("no maillot", "pas de maillot", "aucun maillot", "sans maillot")
+    if re.search(r'\b(no|pas\s+de|aucun|sans)\s+(?:de\s+)?(?:maillot|jersey)\b', t):
+        return True, "Négation explicite (no maillot)"
 
     return False, "OK"
 
