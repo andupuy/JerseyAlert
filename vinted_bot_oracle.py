@@ -269,7 +269,7 @@ def is_asse_jersey_match(title):
     if re.search(r'\bsaint[eé][- ]?lyon\b', title_low) and not re.search(r'\b(asse|foot|football)\b', title_low):
         return False
 
-    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
+    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne|(?:maillot|jersey|tenue|t-?shirt)?\s*(?:des|les)\s+verts|peuple\s+vert|allez\s+les\s+verts)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
     return bool(re.search(team_pattern, title_low))
 
 # Dictionnaire des clubs majeurs pour identifier le "tag stuffing" (spam de mots-clés)
@@ -671,8 +671,8 @@ def is_asse_signal(text, is_filet=False):
         if re.search(r'\b' + re.escape(p_last) + r'\b', t_clean):
             return True, f"Joueur ({p_full})"
 
-    # 4. Mots-clés club / Chaudron / Forez / Peuple Vert
-    for kw in ['chaudron', 'geoffroy guichard', 'geoffroy-guichard', 'forez', 'peuple vert', 'allez les verts']:
+    # 4. Mots-clés club / Chaudron / Forez / Peuple Vert / Les Verts
+    for kw in ['chaudron', 'geoffroy guichard', 'geoffroy-guichard', 'forez', 'peuple vert', 'allez les verts', 'les verts', 'des verts']:
         if kw in t_clean:
             return True, f"Mot-clé ({kw.title()})"
 
