@@ -671,17 +671,10 @@ def is_asse_signal(text, is_filet=False):
         if re.search(r'\b' + re.escape(p_last) + r'\b', t_clean):
             return True, f"Joueur ({p_full})"
 
-    # 4. Mots-clés club / Chaudron / Forez
-    for kw in ['chaudron', 'geoffroy guichard', 'geoffroy-guichard', 'forez']:
+    # 4. Mots-clés club / Chaudron / Forez / Peuple Vert
+    for kw in ['chaudron', 'geoffroy guichard', 'geoffroy-guichard', 'forez', 'peuple vert', 'allez les verts']:
         if kw in t_clean:
             return True, f"Mot-clé ({kw.title()})"
-
-    # 5. Couleur verte dans un contexte maillot (uniquement si stream Filet 'Maillot Asse' pour éviter le bruit sur le flux foot général)
-    if is_filet and any(w in t_clean.split() for w in ['vert', 'verte', 'verts', 'vertes', 'green']):
-        if any(k in t_clean for k in ['maillot', 'jersey', 'trikot', 'shirt', 'vintage', 'collector', 'tenue', 'domicile', 'exterieur']):
-            # Vérifier qu'il n'y a pas d'autre club majeur cité
-            if not is_conflicting_team(text)[0]:
-                return True, "Couleur verte dans un contexte maillot (Filet)"
 
     return False, ""
 
@@ -1829,22 +1822,9 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                     log(f"🚫 Article Filet ignoré (Équipe concurrente dans le titre : {conf_team}) : '{t_titre}'")
                     continue
 
-                # Test du signal dans le titre (Joueur, Sponsor ou Vert)
+                # Test du signal dans le titre (Mention ASSE, Joueur, Sponsor ou Mot-clé club)
                 has_sig_t, sig_reason_t = is_asse_signal(t_titre, is_filet=True)
                 if has_sig_t:
-                    # Si le signal n'est basé QUE sur la couleur verte, vérifions la description si disponible
-                    # pour éliminer tout risque d'équipe concurrente ou cyclisme
-                    if "Couleur verte" in sig_reason_t:
-                        desc = fetch_item_description(item_url)
-                        if desc:
-                            is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
-                            if is_excl_d:
-                                log(f"🚫 Article Filet ignoré après vérification description ({reason_d}) : '{t_titre}'")
-                                continue
-                            is_conf_d, conf_d = is_conflicting_team(desc)
-                            if is_conf_d:
-                                log(f"🚫 Article Filet ignoré (Équipe concurrente dans la description : {conf_d}) : '{t_titre}'")
-                                continue
                     matched = True
                     log(f"🎯 MATCH {source_label} ({sig_reason_t}) : '{t_titre}' ({t_prix})")
                 else:
@@ -1864,7 +1844,7 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                             matched = True
                             log(f"🎯 MATCH {source_label} ({sig_reason_d} dans description) : '{t_titre}' ({t_prix})")
                         else:
-                            log(f"🚫 Article Filet ignoré (Aucun signal ASSE/Joueur/Sponsor/Vert) : '{t_titre}'")
+                            log(f"🚫 Article Filet ignoré (Aucun signal ASSE/Joueur/Sponsor) : '{t_titre}'")
                             continue
                     else:
                         log(f"🚫 Article Filet ignoré (Titre sans signal ASSE et description inaccessible) : '{t_titre}'")
