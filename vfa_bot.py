@@ -15,7 +15,6 @@ import re
 import json
 from datetime import datetime, timezone
 import requests
-from dotenv import load_dotenv
 
 # Charger les variables d'environnement
 try:
@@ -26,7 +25,7 @@ except ImportError:
 
 # Importer les filtres ASSE officiels du projet
 try:
-    from vinted_bot_oracle import is_asse_jersey_match, is_excluded_product, clean_text
+    from vinted_bot_oracle import is_asse_jersey_match, is_excluded_product, is_excluded_size, clean_text
 except ImportError:
     def clean_text(txt):
         return (txt or "").strip()
@@ -39,6 +38,9 @@ except ImportError:
         return bool(re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b', t))
 
     def is_excluded_product(title, description="", price_str=""):
+        return False, ""
+
+    def is_excluded_size(size_str, title_str="", desc_str=""):
         return False, ""
 
 VFA_COLLECTION_URL = "https://www.vintagefootballarea.com/collections/asse/products.json?limit=50&sort_by=created-descending"
@@ -113,6 +115,51 @@ def parse_body_html(html_str):
             
     return meta
 
+def extract_vfa_size(prod, meta=None):
+    title = prod.get("title", "")
+    # 1. Vérification dans le titre type "2020/21 - Saint-Etienne (S)" ou "(XL)"
+    m_size = re.search(r'\(([^)]+)\)$', title)
+    if m_size:
+        return m_size.group(1).strip()
+    
+    # 2. Vérification dans les tags Shopify type "Taille S", "Taille M"
+    tags = prod.get("tags", [])
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",")]
+    for tag in tags:
+        m_tag = re.search(r'taille\s+([a-z0-9/]+)', tag, re.I)
+        if m_tag:
+            return m_tag.group(1).strip()
+            
+    # 3. Vérification dans les options / variantes Shopify
+    for opt in prod.get("options", []):
+        if opt.get("name", "").lower() in ("taille", "size"):
+            vals = opt.get("values", [])
+            if vals and vals[0] != "Default Title":
+                return vals[0].strip()
+                
+    # 4. Vérification dans le body HTML parsé
+    if meta and meta.get("taille"):
+        return meta["taille"].strip()
+        
+    return ""
+
+def fetch_vfa_single_product(handle):
+    if not handle:
+        return None
+    url = f"https://www.vintagefootballarea.com/products/{handle}.json"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*'
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code == 200:
+            return resp.json().get("product")
+    except Exception as e:
+        log(f"⚠️ Erreur fetch single product '{handle}': {e}")
+    return None
+
 def send_discord_alert(product):
     if not DISCORD_WEBHOOK_URL:
         log("⚠️ DISCORD_WEBHOOK_URL non configuré !")
@@ -123,11 +170,21 @@ def send_discord_alert(product):
     handle = product.get("handle", "")
     item_url = f"https://www.vintagefootballarea.com/products/{handle}" if handle else "https://www.vintagefootballarea.com/collections/asse"
     
-    # Prix & Disponibilité
+    # Prix & Disponibilité & Promotions
     variants = product.get("variants", [])
-    first_var = variants[0] if variants else {}
-    price_val = first_var.get("price", "N/A")
-    price_str = f"{price_val} €"
+    avail_vars = [v for v in variants if v.get("available")]
+    var = avail_vars[0] if avail_vars else (variants[0] if variants else {})
+    raw_price = var.get("price", "N/A")
+    compare_at = var.get("compare_at_price")
+
+    try:
+        p_float = float(raw_price)
+        if compare_at and float(compare_at) > p_float:
+            price_display = f"~~{float(compare_at):.2f} €~~ **{p_float:.2f} €** (Promo)"
+        else:
+            price_display = f"**{p_float:.2f} €**"
+    except (ValueError, TypeError):
+        price_display = f"**{raw_price} €**"
 
     # Images
     images = product.get("images", [])
@@ -137,13 +194,8 @@ def send_discord_alert(product):
     body_html = product.get("body_html", "")
     meta = parse_body_html(body_html)
     
-    # Taille (depuis body ou titre ex: (XL))
-    size = meta.get("taille")
-    if not size:
-        m_size = re.search(r'\(([^)]+)\)$', title)
-        if m_size:
-            size = m_size.group(1).strip()
-    size_str = size if size else "Voir fiche"
+    # Taille propre
+    size_str = extract_vfa_size(product, meta) or "Voir fiche"
 
     condition_str = meta.get("etat") or "Occasion vintage"
     brand_str = meta.get("marque") or ""
@@ -152,7 +204,7 @@ def send_discord_alert(product):
 
     # Construction de la description
     desc_lines = [
-        f"💰 Prix : **{price_str}** | 📏 Taille : **{size_str}**",
+        f"💰 Prix : {price_display} | 📏 Taille : **{size_str}**",
         f"🏷️ État : **{condition_str}**" + (f" | 👕 Marque : **{brand_str}**" if brand_str else "")
     ]
     if players_str:
@@ -187,7 +239,7 @@ def send_discord_alert(product):
     try:
         r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
         if r.status_code in (200, 204):
-            log(f"✅ Alerte envoyée sur Discord pour #{product_id} : '{title}' ({price_str})")
+            log(f"✅ Alerte envoyée sur Discord pour #{product_id} : '{title}' ({price_display})")
         else:
             log(f"⚠️ Erreur Discord (HTTP {r.status_code}) : {r.text[:200]}")
     except Exception as e:
@@ -240,20 +292,41 @@ def run_bot():
                 seen_ids.add(prod_id)
 
                 title = prod.get("title", "")
+                body = prod.get("body_html", "") or ""
                 variants = prod.get("variants", [])
+
+                # 1. Vérification disponibilité (Stock)
+                available = any(v.get("available", False) for v in variants)
+                if not available and variants:
+                    log(f"🚫 Produit exclu (Rupture de stock / Épuisé) : '{title}'")
+                    continue
+
+                # 2. Vérification ASSE
+                if not is_asse_jersey_match(title):
+                    continue
+
+                # 3. Vérification stricte des tailles (exclusion XS/S)
+                meta = parse_body_html(body)
+                size_str = extract_vfa_size(prod, meta)
+                if size_str:
+                    is_excl_size, reason_size = is_excluded_size(size_str, title, body)
+                    if is_excl_size:
+                        log(f"🚫 Produit exclu ({reason_size}) : '{title}' (Taille: {size_str})")
+                        continue
+                else:
+                    is_excl_size, reason_size = is_excluded_size("", title, body)
+                    if is_excl_size:
+                        log(f"🚫 Produit exclu ({reason_size}) : '{title}'")
+                        continue
+
+                # 4. Filtrage strict produits (Règles 1 à 25)
                 first_var = variants[0] if variants else {}
                 try:
                     price = float(first_var.get("price", 0.0))
                 except (ValueError, TypeError):
                     price = 0.0
-                price_str = f"{price} €"
-                body = prod.get("body_html", "") or ""
+                price_str = f"{price:.2f} €"
 
-                # 1. Vérification ASSE
-                if not is_asse_jersey_match(title):
-                    continue
-
-                # 2. Filtrage strict (Règles 1 à 22)
                 is_excl, reason = is_excluded_product(title, body, price_str)
                 if is_excl:
                     log(f"🚫 Produit exclu ({reason}) : '{title}' ({price_str})")
@@ -268,6 +341,12 @@ def run_bot():
                 is_initial_run = False
             else:
                 for prod in new_valid_products:
+                    # Double-check frais via l'API fiche produit individuelle si disponible
+                    handle = prod.get("handle")
+                    if handle:
+                        fresh = fetch_vfa_single_product(handle)
+                        if fresh:
+                            prod = fresh
                     send_discord_alert(prod)
 
         except Exception as e:
