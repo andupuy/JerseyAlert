@@ -879,6 +879,16 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(r'\bno\s+(?:de\s+)?(?:maillot|jersey)\b', t):
         return True, "Négation explicite (no maillot)"
 
+    # 26. Porte-manteaux, patères, cintres
+    coathanger_pattern = r'\b(porte[- ]manteau[x]?|pat[eè]re[s]?)\b'
+    if re.search(coathanger_pattern, t):
+        return True, "Porte-manteau / Patère"
+    if re.search(r'\bcintre[s]?\b', t) and not re.search(r'\b(maillot\s+port[eé]|maillot\s+match)\b', t):
+        return True, "Cintre"
+    if d and re.search(coathanger_pattern, d):
+        if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
+            return True, "Porte-manteau / Patère"
+
     return False, "OK"
 
 def get_api_search_url(query, color_id=None):
