@@ -43,8 +43,8 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_IDS_FILE = "seen_lbc_ids.json"
 PROXY_URL = os.environ.get("LBC_PROXY_URL", "socks5://127.0.0.1:1055")
 
-CHECK_INTERVAL_MIN = 15
-CHECK_INTERVAL_MAX = 25
+CHECK_INTERVAL_MIN = 6
+CHECK_INTERVAL_MAX = 10
 
 def log(msg):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -162,6 +162,25 @@ def send_discord_alert(ad):
     except Exception as e:
         log(f"❌ Erreur envoi webhook Discord: {e}")
 
+def send_discord_system_alert(title, description, color=0xFFA500):
+    if not DISCORD_WEBHOOK_URL:
+        return
+    payload = {
+        "username": "LeBonCoin Sentinel",
+        "avatar_url": "https://www.leboncoin.fr/favicon.ico",
+        "embeds": [{
+            "title": title,
+            "description": description,
+            "color": color,
+            "footer": {"text": "Protection Datadome • Shield Box"},
+            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        }]
+    }
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
+    except Exception as e:
+        log(f"❌ Erreur envoi webhook Discord système: {e}")
+
 def fetch_leboncoin_ads(session):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -187,40 +206,72 @@ def fetch_leboncoin_ads(session):
         if resp.status_code != 200:
             log(f"⚠️ Réponse HTTP {resp.status_code} reçue de LeBonCoin (Longueur: {len(resp.text)})")
             session.cookies.clear()
-            return []
+            return [], resp.status_code
     except Exception as e:
         log(f"⚠️ Erreur requête LeBonCoin: {e}")
         session.cookies.clear()
-        return []
+        return [], 0
 
     # Extraction des données JSON Next.js
     m = re.search(r'<script id=[\"\']__NEXT_DATA__[\"\'][^>]*>(.*?)</script>', resp.text)
     if not m:
         log("⚠️ Impossible de trouver le bloc __NEXT_DATA__ dans la page LeBonCoin")
-        return []
+        return [], 200
 
     try:
         data = json.loads(m.group(1))
         ads = data.get("props", {}).get("pageProps", {}).get("searchData", {}).get("ads", [])
-        return ads
+        return ads, 200
     except Exception as e:
         log(f"⚠️ Erreur parsing JSON Next.js: {e}")
-        return []
+        return [], 200
 
 def run_bot():
-    log("🚀 Démarrage du Sniper LeBonCoin ASSE (curl_cffi + SOCKS5 Shield)")
+    log("🚀 Démarrage du Sniper LeBonCoin ASSE (curl_cffi + SOCKS5 Shield - Cadence 6-10s)")
     seen_ids = load_seen_ids()
     is_initial_run = (len(seen_ids) == 0)
 
     session = requests.Session()
 
     cycle_count = 0
+    consecutive_403 = 0
+
     while True:
         cycle_count += 1
         try:
-            ads = fetch_leboncoin_ads(session)
+            ads, status = fetch_leboncoin_ads(session)
+
+            # Parachute de sécurité Datadome
+            if status == 403:
+                consecutive_403 += 1
+                if consecutive_403 >= 2:
+                    log(f"🚨 Détection Datadome persistante ({consecutive_403}x HTTP 403) ! Pause de protection de 5 minutes.")
+                    send_discord_system_alert(
+                        "🛡️ [LeBonCoin] Détection Datadome (HTTP 403)",
+                        "2 requêtes consécutives ont reçu un code **HTTP 403** de LeBonCoin.\n\n"
+                        "🛑 **Mise en pause automatique de 5 minutes** pour protéger l'adresse IP de votre box Orange.\n"
+                        "Le bot reprendra automatiquement après ce délai.",
+                        color=0xED4245
+                    )
+                    time.sleep(300)
+                    consecutive_403 = 0
+                    session = requests.Session()
+                    log("🔄 Fin de la pause de sécurité (5 min), reprise des scans.")
+                    send_discord_system_alert(
+                        "✅ [LeBonCoin] Reprise du Scan",
+                        "Période de refroidissement terminée.\n"
+                        "Le sniper LeBonCoin reprend la surveillance active (cadence 6-10s).",
+                        color=0x57F287
+                    )
+                    continue
+                else:
+                    time.sleep(12)
+                    continue
+            else:
+                consecutive_403 = 0
+
             if not ads:
-                time.sleep(random.uniform(15, 25))
+                time.sleep(random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX))
                 continue
 
             if cycle_count % 10 == 1:
@@ -247,7 +298,7 @@ def run_bot():
                 if not is_asse_jersey_match(title):
                     continue
 
-                # 2. Filtrage strict anti faux positifs (Règles 1 à 22)
+                # 2. Filtrage strict anti faux positifs (Règles 1 à 25)
                 is_excl, reason = is_excluded_product(title, body, price_str)
                 if is_excl:
                     log(f"🚫 Annonce exclue ({reason}) : '{title}' ({price}€)")
@@ -270,7 +321,7 @@ def run_bot():
         except Exception as e:
             log(f"🚨 Erreur durant le cycle: {e}")
 
-        # Pause aléatoire entre 15 et 25 secondes pour discrétion et rapidité
+        # Pause aléatoire entre 6 et 10 secondes pour discrétion et rapidité
         sleep_sec = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
         time.sleep(sleep_sec)
 
