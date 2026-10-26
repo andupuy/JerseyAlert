@@ -756,14 +756,14 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
             return True, "Porte-clés"
 
-    # 10. Figurines, fèves, pin's, badges, calendriers, goodies, téléphonie
-    goodies_pattern = r'\b(figurine|figurines|f[eé]ve|f[eé]ves|pin\'?s|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles|support[- ]t[eé]l[eé]phone|porte[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur|chargeurs)\b'
+    # 10. Figurines, statuettes, peluches, goodies, fèves, pin's, badges, calendriers, téléphonie
+    goodies_pattern = r'\b(figurine|figurines|statuette|statuettes|statue|statues|peluche|peluches|doudou|doudous|poup[eé]e|poup[eé]es|gorille|panth[eè]re|mascotte|mascottes|f[eé]ve|f[eé]ves|pin\'?s|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles|support[- ]t[eé]l[eé]phone|porte[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur|chargeurs)\b'
     if re.search(goodies_pattern, t):
-        if not re.search(r'\b(maillot|jersey)\b', t):
-            return True, "Goodies / Accessoire téléphone / Pin's"
-    if d and re.search(r'\b(porte[- ]t[eé]l[eé]phone|support[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur)\b', d):
+        if not re.search(r'\b(maillot\s+port[eé]|maillot\s+match)\b', t):
+            return True, "Goodies / Figurine / Peluche / Pin's"
+    if d and re.search(r'\b(figurine[s]?|statuette[s]?|statue[s]?|peluche[s]?|doudou[s]?|poup[eé]e[s]?|gorille|porte[- ]t[eé]l[eé]phone|support[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur)\b', d):
         if not re.search(r'\b(maillot|jersey|tenue|ensemble|t-?shirt|haut)\b', t):
-            return True, "Accessoire téléphone (non-textile)"
+            return True, "Goodies / Figurine / Accessoire (non-textile)"
 
     # 11. Casquettes, bonnets, bobs, chapeaux
     headwear_pattern = r'\b(casquette|casquettes|bonnet|bonnets|bob|bobs|chapeau|chapeaux|b[eé]ret|b[eé]rets)\b'
