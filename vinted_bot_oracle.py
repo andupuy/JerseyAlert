@@ -299,6 +299,21 @@ CLUB_PATTERNS = {
     'angers': r'\b(sco\s+angers|angers)\b',
     'lorient': r'\b(fc\s+lorient|lorient|fcl)\b',
     'le_havre': r'\b(hac|le\s+havre)\b',
+    'guingamp': r'\b(eag|guingamp|en\s+avant\s+guingamp)\b',
+    'valenciennes': r'\b(vafc|valenciennes)\b',
+    'clermont': r'\b(clermont\s+foot|clermont|cf63)\b',
+    'caen': r'\b(sm\s+caen|stade\s+malherbe|caen)\b',
+    'bastia': r'\b(sc\s+bastia|bastia|sporting\s+bastia)\b',
+    'ajaccio': r'\b(ac\s+ajaccio|ajaccio|gfca|gazelec)\b',
+    'troyes': r'\b(estac|troyes)\b',
+    'sochaux': r'\b(fc\s+sochaux|sochaux|fcsm)\b',
+    'grenoble': r'\b(grenoble\s+foot|gf38|grenoble)\b',
+    'paris_fc': r'\b(paris\s+fc|pfc)\b',
+    'amiens': r'\b(amiens\s+sc|amiens)\b',
+    'laval': r'\b(stade\s+lavallois|laval)\b',
+    'nimes': r'\b(n[iî]mes\s+olympique|n[iî]mes)\b',
+    'nancy': r'\b(as\s+nancy|asnl|nancy\s+lorraine)\b',
+    'dijon': r'\b(dfco|dijon\s+fco|dijon)\b',
     'asse': r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b',
     'real_madrid': r'\b(real\s+madrid)\b',
     'barcelona': r'\b(barcelona|bar[çc]a)\b',
@@ -439,6 +454,21 @@ OTHER_TEAMS_PATTERNS = {
     'Lorient': r'\b(fc\s+lorient|lorient|fcl)\b',
     'Angers': r'\b(sco\s+angers|angers\s+sco|angers)\b',
     'Le Havre': r'\b(hac|le\s+havre)\b',
+    'Guingamp': r'\b(eag|guingamp|en\s+avant\s+guingamp)\b',
+    'Valenciennes': r'\b(vafc|valenciennes)\b',
+    'Clermont': r'\b(clermont\s+foot|clermont|cf63)\b',
+    'Caen': r'\b(sm\s+caen|stade\s+malherbe|caen)\b',
+    'Bastia': r'\b(sc\s+bastia|bastia|sporting\s+bastia)\b',
+    'Ajaccio': r'\b(ac\s+ajaccio|ajaccio|gfca|gazelec)\b',
+    'Troyes': r'\b(estac|troyes)\b',
+    'Sochaux': r'\b(fc\s+sochaux|sochaux|fcsm)\b',
+    'Grenoble': r'\b(grenoble\s+foot|gf38|grenoble)\b',
+    'Paris FC': r'\b(paris\s+fc|pfc)\b',
+    'Amiens': r'\b(amiens\s+sc|amiens)\b',
+    'Laval': r'\b(stade\s+lavallois|laval)\b',
+    'Nîmes': r'\b(n[iî]mes\s+olympique|n[iî]mes)\b',
+    'Nancy': r'\b(as\s+nancy|asnl|nancy\s+lorraine)\b',
+    'Dijon': r'\b(dfco|dijon\s+fco|dijon)\b',
 
     # Clubs européens
     'Real Madrid': r'\b(real\s+madrid)\b',
@@ -540,8 +570,8 @@ def is_conflicting_team(text):
     t = text.lower()
     t_norm = ''.join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn').replace('’', "'")
     
-    # 1. Neutraliser les mentions d'adversaires et confrontations (ex: 'contre OM', 'vs Lyon', 'match Marseille', 'porté de ASSE Marseille', 'porté un match contre ASSE')
-    opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]|match(?:\s+(?:contre|de|face\s+[àa]))?|port[eé](?:\s+(?:un\s+match\s+)?(?:contre|face\s+[àa]|lors\s+de|de))?)\s+([a-z0-9\-\'\s]+?)(?=\s+(?:en|le|du|au|pour|saison|19\d\d|20\d\d|de\s+[a-z]+)\b|[,\.;\(\)\!]|$)'
+    # 1. Neutraliser les mentions d'adversaires et confrontations (ex: 'contre OM', 'vs Lyon', 'match contre Marseille', 'porté contre ASSE')
+    opponent_pattern = r'\b(?:(?:port[eé](?:\s+(?:un\s+)?match)?\s+|match\s+|jou[eé]\s+)?(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]))\s+([a-z0-9\-\'\s]+?)(?=\s+(?:en|le|du|au|pour|saison|19\d\d|20\d\d|de\s+[a-z]+)\b|[,\.;\(\)\!]|$)'
     t_clean = re.sub(opponent_pattern, ' ', t_norm)
     
     # 2. Neutraliser les duels directs (ex: 'ASSE - OM', 'ASSE / Marseille', 'Sainté - Lyon')
@@ -772,12 +802,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
             return True, "Porte-clés"
 
-    # 10. Figurines, statuettes, peluches, goodies, fèves, pin's, badges, calendriers, téléphonie
-    goodies_pattern = r'\b(figurine|figurines|statuette|statuettes|statue|statues|peluche|peluches|doudou|doudous|poup[eé]e|poup[eé]es|gorille|panth[eè]re|mascotte|mascottes|f[eé]ve|f[eé]ves|pin\'?s|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles|support[- ]t[eé]l[eé]phone|porte[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur|chargeurs)\b'
+    # 10. Figurines, statuettes, peluches, goodies, fèves, pin's, badges, calendriers, téléphonie, Funko Pop
+    goodies_pattern = r'\b(funko|funko\s*pops?|pop\s+football|corinthian|microstars|soccerstarz|figurine|figurines|statuette|statuettes|statue|statues|peluche|peluches|doudou|doudous|poup[eé]e|poup[eé]es|gorille|panth[eè]re|mascotte|mascottes|f[eé]ve|f[eé]ves|pin\'?s|badge|badges|porte[- ]monnaie|portefeuille|calendrier|calendriers|almanach|puzzle|puzzles|support[- ]t[eé]l[eé]phone|porte[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur|chargeurs)\b'
     if re.search(goodies_pattern, t):
         if not re.search(r'\b(maillot\s+port[eé]|maillot\s+match)\b', t):
-            return True, "Goodies / Figurine / Peluche / Pin's"
-    if d and re.search(r'\b(figurine[s]?|statuette[s]?|statue[s]?|peluche[s]?|doudou[s]?|poup[eé]e[s]?|gorille|porte[- ]t[eé]l[eé]phone|support[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur)\b', d):
+            return True, "Goodies / Figurine / Funko Pop"
+    if d and re.search(r'\b(funko|funko\s*pops?|corinthian|microstars|figurine[s]?|statuette[s]?|statue[s]?|peluche[s]?|doudou[s]?|poup[eé]e[s]?|gorille|porte[- ]t[eé]l[eé]phone|support[- ]t[eé]l[eé]phone|coque[s]?\s+(?:de\s+)?t[eé]l[eé]phone|coque[s]?\s+iphone|coque[s]?\s+smartphone|chargeur)\b', d):
         if not re.search(r'\b(maillot|jersey|tenue|ensemble|t-?shirt|haut)\b', t):
             return True, "Goodies / Figurine / Accessoire (non-textile)"
 
