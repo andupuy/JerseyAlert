@@ -257,8 +257,9 @@ def parse_price(price_str):
 def is_asse_jersey_match(title):
     """Filtrage strict ASSE avec limites de mots (capture ASSE, A.S.S.E, Saint-Étienne, Sainté, etc.)"""
     if not title: return False
-    import re
-    title_low = title.lower()
+    import re, unicodedata
+    title_low = ''.join(c for c in unicodedata.normalize('NFD', title) if unicodedata.category(c) != 'Mn').lower()
+    title_low = title_low.replace('’', "'")
 
     # Bloquer les expressions composées non-football avec 'sainte' (Sainte-Barbe, Sainte-Marie, etc.) ou Sainté-Lyon (trail)
     non_foot_sainte = r'\bsainte[- ](?:barbe|marie|luce|croix|maxime|genevieve|adresse|claire|anne|rose|foy|helene)\b'
@@ -269,30 +270,34 @@ def is_asse_jersey_match(title):
     if re.search(r'\bsaint[eé][- ]?lyon\b', title_low) and not re.search(r'\b(asse|foot|football)\b', title_low):
         return False
 
-    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne|(?:maillot|jersey|tenue|t-?shirt)?\s*(?:des|les)\s+verts|peuple\s+vert|allez\s+les\s+verts)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
-    return bool(re.search(team_pattern, title_low))
+    # Neutraliser les mentions adversaire où l'ASSE est seulement l'adversaire affronté (ex: 'Maillot Lyon contre ASSE')
+    asse_opp_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]|match\s+contre|jou[eé]\s+contre|match\s+face\s+[àa])\s+(?:l[\'\s]*)?(?:equipe\s+de\s+)?(?:as\s+)?(?:saint[- \.]*etienne|asse|st[- \.]*etienne|sainte|verts?)\b'
+    title_asse_clean = re.sub(asse_opp_pattern, ' ', title_low)
+
+    team_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainte|(?:maillot|jersey|tenue|t-?shirt)?\s*(?:des|les)\s+verts|peuple\s+vert|allez\s+les\s+verts)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
+    return bool(re.search(team_pattern, title_asse_clean))
 
 # Dictionnaire des clubs majeurs pour identifier le "tag stuffing" (spam de mots-clés)
 CLUB_PATTERNS = {
     'psg': r'\b(psg|paris\s+sg|paris\s+saint[- ]germain)\b',
     'om': r'\b(om|olympique\s+de\s+marseille|marseille)\b',
     'ol': r'\b(ol|olympique\s+lyonnais|lyon)\b',
-    'lens': r'\b(rc\s+lens|lens)\b',
+    'lens': r'\b(rc\s+lens|lens|rcl)\b',
     'lille': r'\b(losc|lille)\b',
-    'monaco': r'\b(as\s+monaco|monaco)\b',
-    'rennes': r'\b(stade\s+rennais|rennes)\b',
-    'nantes': r'\b(fc\s+nantes|nantes)\b',
-    'nice': r'\b(ogc\s+nice|nice)\b',
-    'bordeaux': r'\b(girondins|bordeaux)\b',
-    'montpellier': r'\b(mhsc|montpellier)\b',
+    'monaco': r'\b(as\s+monaco|monaco|asm)\b',
+    'rennes': r'\b(stade\s+rennais|rennes|srfc)\b',
+    'nantes': r'\b(fc\s+nantes|nantes|fcn)\b',
+    'nice': r'\b(ogc\s+nice|nice\s+ogc|ogcn|nice)\b',
+    'bordeaux': r'\b(girondins|bordeaux|fcgb)\b',
+    'montpellier': r'\b(mhsc|mshc|montpellier)\b',
     'strasbourg': r'\b(rcsa|strasbourg)\b',
     'toulouse': r'\b(tfc|toulouse)\b',
-    'reims': r'\b(stade\s+de\s+reims|reims)\b',
-    'brest': r'\b(stade\s+brestois|brest)\b',
+    'reims': r'\b(stade\s+de\s+reims|reims|sdr)\b',
+    'brest': r'\b(stade\s+brestois|brest|sb29)\b',
     'auxerre': r'\b(aja|auxerre)\b',
     'metz': r'\b(fc\s+metz|metz)\b',
     'angers': r'\b(sco\s+angers|angers)\b',
-    'lorient': r'\b(fc\s+lorient|lorient)\b',
+    'lorient': r'\b(fc\s+lorient|lorient|fcl)\b',
     'le_havre': r'\b(hac|le\s+havre)\b',
     'asse': r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b',
     'real_madrid': r'\b(real\s+madrid)\b',
@@ -417,20 +422,23 @@ OTHER_TEAMS_PATTERNS = {
     'PSG': r'\b(psg|paris\s+sg|paris\s+saint[- ]germain)\b',
     'OM': r'\b(om|marseille|olympique\s+de\s+marseille)\b',
     'OL': r'\b(ol|lyon|olympique\s+lyonnais)\b',
-    'Lens': r'\b(rc\s+lens|lens)\b',
+    'Lens': r'\b(rc\s+lens|lens|rcl)\b',
     'Lille': r'\b(losc|lille)\b',
-    'Monaco': r'\b(as\s+monaco|monaco)\b',
-    'Rennes': r'\b(stade\s+rennais|rennes)\b',
-    'Nantes': r'\b(fc\s+nantes|nantes)\b',
-    'Nice': r'\b(ogc\s+nice|nice\s+ogc|maillot\s+(?:de\s+)?nice)\b',
-    'Bordeaux': r'\b(girondins|bordeaux)\b',
-    'Montpellier': r'\b(mhsc|montpellier)\b',
+    'Monaco': r'\b(as\s+monaco|monaco|asm)\b',
+    'Rennes': r'\b(stade\s+rennais|rennes|srfc)\b',
+    'Nantes': r'\b(fc\s+nantes|nantes|fcn)\b',
+    'Nice': r'\b(ogc\s+nice|nice\s+ogc|ogcn|maillot\s+(?:de\s+)?nice)\b',
+    'Bordeaux': r'\b(girondins|bordeaux|fcgb)\b',
+    'Montpellier': r'\b(mhsc|mshc|montpellier)\b',
     'Strasbourg': r'\b(rcsa|strasbourg)\b',
     'Toulouse': r'\b(tfc|toulouse)\b',
-    'Reims': r'\b(stade\s+de\s+reims|reims)\b',
-    'Brest': r'\b(stade\s+brestois|brest)\b',
+    'Reims': r'\b(stade\s+de\s+reims|reims|sdr)\b',
+    'Brest': r'\b(stade\s+brestois|brest|sb29)\b',
     'Auxerre': r'\b(aja|auxerre)\b',
     'Metz': r'\b(fc\s+metz|metz)\b',
+    'Lorient': r'\b(fc\s+lorient|lorient|fcl)\b',
+    'Angers': r'\b(sco\s+angers|angers\s+sco|angers)\b',
+    'Le Havre': r'\b(hac|le\s+havre)\b',
 
     # Clubs européens
     'Real Madrid': r'\b(real\s+madrid)\b',
@@ -528,25 +536,28 @@ def is_conflicting_team(text):
     """
     if not text:
         return False, None
-    import re
+    import re, unicodedata
     t = text.lower()
+    t_norm = ''.join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn').replace('’', "'")
     
-    # 1. Neutraliser les mentions d'adversaires et confrontations (ex: 'contre OM', 'vs Lyon', 'match Marseille', 'porté de ASSE Marseille')
-    opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|match(?:\s+(?:contre|de|face\s+[àa]))?|port[eé](?:\s+(?:contre|face\s+[àa]|lors\s+de|de))?)\s+([a-z0-9\-\'\s]+?)(?=\s+(?:en|le|du|au|pour|saison|19\d\d|20\d\d)\b|[,\.;\(\)\!]|$)'
-    t_clean = re.sub(opponent_pattern, ' ', t)
+    # 1. Neutraliser les mentions d'adversaires et confrontations (ex: 'contre OM', 'vs Lyon', 'match Marseille', 'porté de ASSE Marseille', 'porté un match contre ASSE')
+    opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]|match(?:\s+(?:contre|de|face\s+[àa]))?|port[eé](?:\s+(?:un\s+match\s+)?(?:contre|face\s+[àa]|lors\s+de|de))?)\s+([a-z0-9\-\'\s]+?)(?=\s+(?:en|le|du|au|pour|saison|19\d\d|20\d\d|de\s+[a-z]+)\b|[,\.;\(\)\!]|$)'
+    t_clean = re.sub(opponent_pattern, ' ', t_norm)
     
     # 2. Neutraliser les duels directs (ex: 'ASSE - OM', 'ASSE / Marseille', 'Sainté - Lyon')
-    confrontation_pattern = r'\b(?:asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé])\s*[\-\/]\s*([a-z0-9\-\'\s]+)'
+    confrontation_pattern = r'\b(?:asse|saint[- \.]*etienne|st[- \.]*etienne|sainte)\s*[\-\/]\s*([a-z0-9\-\'\s]+)'
     t_clean = re.sub(confrontation_pattern, ' ', t_clean)
 
-    # 3. Contexte de match / maillot porté avec mention ASSE
-    has_match_context = bool(re.search(r'\b(port[eé]|match|finale|derby|demi[- ]finale|coupe|championnat)\b', t))
-    has_asse = bool(re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé])\b', t))
+    # 3. Vérifier la présence d'un signal ASSE autonome (qui n'est PAS uniquement la mention de l'adversaire affronté)
+    asse_opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]|match\s+contre|jou[eé]\s+contre|match\s+face\s+[àa])\s+(?:l[\'\s]*)?(?:equipe\s+de\s+)?(?:as\s+)?(?:saint[- \.]*etienne|asse|st[- \.]*etienne|sainte|verts?)\b'
+    t_no_asse_opp = re.sub(asse_opponent_pattern, ' ', t_norm)
+    has_standalone_asse = bool(re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainte)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)', t_no_asse_opp))
+    has_match_context = bool(re.search(r'\b(port[eé]|match|finale|derby|demi[- ]finale|coupe|championnat)\b', t_norm))
 
     for team_name, pat in OTHER_TEAMS_PATTERNS.items():
         if re.search(pat, t_clean):
-            # Si le texte contient à la fois l'ASSE et un contexte de match/porté, l'autre club est l'adversaire de la rencontre
-            if has_asse and has_match_context:
+            # Si le texte contient l'ASSE hors adversaire et un contexte de match/porté, l'autre club est l'adversaire de la rencontre
+            if has_standalone_asse and has_match_context:
                 continue
             return True, team_name
     return False, None
@@ -647,14 +658,19 @@ def is_asse_signal(text, is_filet=False):
         return False, ""
     import unicodedata
     t_clean = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn').lower()
+    t_clean = t_clean.replace('’', "'")
 
-    # 1. ASSE / Saint-Étienne / Sainté / A.S.S.E
+    # 0. Neutraliser les mentions d'adversaires où l'ASSE est l'équipe affrontée (ex: 'contre l'ASSE', 'face à Saint-Étienne')
+    asse_opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]|match\s+contre|jou[eé]\s+contre|match\s+face\s+[àa])\s+(?:l[\'\s]*)?(?:equipe\s+de\s+)?(?:as\s+)?(?:saint[- \.]*etienne|asse|st[- \.]*etienne|sainte|verts?)\b'
+    t_asse_clean = re.sub(asse_opponent_pattern, ' ', t_clean)
+
+    # 1. ASSE / Saint-Étienne / Sainté / A.S.S.E (sur texte nettoyé des mentions adversaires)
     non_foot_sainte = r'\bsainte[- ](?:barbe|marie|luce|croix|maxime|genevieve|adresse|claire|anne|rose|foy|helene)\b'
-    if re.search(non_foot_sainte, t_clean) and not re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne)\b', t_clean):
+    if re.search(non_foot_sainte, t_asse_clean) and not re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne)\b', t_asse_clean):
         pass
     else:
-        asse_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé]|saint[- \.]*[eé]tienne|st[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*saint[- \.]*[eé]tienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*[eé]tienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
-        if re.search(asse_pattern, t_clean):
+        asse_pattern = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainte|a[\.\s\-]*s[\.\s\-]*saint[- \.]*etienne|a[\.\s\-]*s[\.\s\-]*st[- \.]*etienne)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
+        if re.search(asse_pattern, t_asse_clean):
             return True, "Mention explicite ASSE / Saint-Étienne"
 
     # 2. Sponsors & équipementiers historiques ASSE
@@ -888,6 +904,18 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if d and re.search(coathanger_pattern, d):
         if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
             return True, "Porte-manteau / Patère"
+
+    # 27. Maillot adverse porté contre l'ASSE (l'ASSE est uniquement citée comme adversaire de la rencontre)
+    # Ex: 'Maillot MHSC de Benjamin Lecomte porté un match contre l’AS Saint-Étienne'
+    import unicodedata
+    full_text = f"{t} {d}"
+    full_text_norm = ''.join(c for c in unicodedata.normalize('NFD', full_text) if unicodedata.category(c) != 'Mn').lower().replace('’', "'")
+    asse_opp_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]|match\s+contre|jou[eé]\s+contre|match\s+face\s+[àa])\s+(?:l[\'\s]*)?(?:equipe\s+de\s+)?(?:as\s+)?(?:saint[- \.]*etienne|asse|st[- \.]*etienne|sainte|verts?)\b'
+    if re.search(asse_opp_pattern, full_text_norm):
+        full_text_stripped = re.sub(asse_opp_pattern, ' ', full_text_norm)
+        asse_standalone_pat = r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainte)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)'
+        if not re.search(asse_standalone_pat, full_text_stripped):
+            return True, "Maillot adverse (porté contre l'ASSE)"
 
     return False, "OK"
 
