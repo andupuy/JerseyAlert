@@ -929,6 +929,17 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|tenue|ensemble)\b', t):
             return True, "Livre / Magazine / Journal"
 
+    # 7b. Programme de match / Revue officielle ASSE intitulée 'Maillot Vert' (sans le mot 'magazine')
+    # Ex: 'ASSE – Maillot Vert – n° 33 - 2020' ou 'ASSE Maillot Vert n° 32 du 25/01/2020'
+    mv_mag_pattern = (
+        r'\bmaillot\s+vert\b[\s–\-\—:]*'
+        r'(?:(?:n[°oº]|num[eé]ro|#)\s*\d+\s*(?:du\s+\d{1,2}[/\-\.]\d{1,2}|[–\-\—]\s*(?:19|20)\d{2}\b)'
+        r'|hors[- ]s[eé]rie\b)'
+        r'|\b(?:programme|hebdo|mensuel|parution|exemplaire)\s+maillot\s+vert\b'
+    )
+    if re.search(mv_mag_pattern, t) or (d and re.search(mv_mag_pattern, d)):
+        return True, "Programme / Magazine 'Maillot Vert'"
+
     # 8. Fanions, drapeaux, bannières, écharpes, foulards
     flag_pattern = r'\b(fanion|fanions|drapeau|drapeaux|banni[eè]re|banni[eè]res|oriflamme|oriflammes|echarpe|écharpe|echarpes|écharpes|foulard|foulards)\b'
     if re.search(flag_pattern, t):
@@ -1836,17 +1847,25 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                 resp.encoding = 'utf-8'
                 html = resp.text
 
-                # Extraction du nombre initial de favoris ❤️
+                # Extraction du nombre initial de favoris ❤️ (supporte JSON normal et échappé Next.js)
                 m_fav = (
-                    re.search(r"ajouté aux favoris par (\d+) utilisateur", html, re.I)
-                    or re.search(r'data-testid="favourite-button"[^>]*>.*?<span[^>]*>(\d+)</span>', html, re.S)
-                    or re.search(r'"favourite_count"\s*:\s*(\d+)', html)
+                    re.search(r'\\?"favourite_count\\?"\s*:\s*(\d+)', html)
+                    or re.search(r"ajouté aux favoris par (\d+) utilisateur", html, re.I)
                 )
                 if m_fav:
                     try:
                         initial_fav_count = int(m_fav.group(1))
                     except ValueError:
                         initial_fav_count = 0
+
+                # Exclusion des catégories Livres / Magazines / Presse / DVD (hors recherche Collector Magic Fans)
+                if not bypass_jersey_filters:
+                    m_cat = re.search(r'\\?"category\\?"\s*:\s*\\?"([^"\\]+)', html)
+                    if m_cat:
+                        cat_val = m_cat.group(1).lower()
+                        if any(k in cat_val for k in ['livres', 'magazines', 'manuels', 'bande dessin', 'presse', 'dvd', 'jeux vid', 'musique', 'vinyles']):
+                            log(f"🚫 [Vinted] Alerte filtrée (Catégorie Vinted non-textile : {m_cat.group(1)}) : {final_title}")
+                            return
 
                 # Récupération du pseudo vendeur
                 m_user = re.search(r'\"login\":\"([^\"]+)\"', html)

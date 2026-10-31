@@ -246,12 +246,11 @@ def check_item_http(session, url):
             resp.encoding = "utf-8"
             html = resp.text
 
-            # Extraction du nombre de favoris ❤️
+            # Extraction du nombre de favoris ❤️ (supporte JSON normal et échappé Next.js)
             fav_count = 0
             m_fav = (
-                re.search(r"ajouté aux favoris par (\d+) utilisateur", html, re.I)
-                or re.search(r'data-testid="favourite-button"[^>]*>.*?<span[^>]*>(\d+)</span>', html, re.S)
-                or re.search(r'"favourite_count"\s*:\s*(\d+)', html)
+                re.search(r'\\?"favourite_count\\?"\s*:\s*(\d+)', html)
+                or re.search(r"ajouté aux favoris par (\d+) utilisateur", html, re.I)
             )
             if m_fav:
                 try:
