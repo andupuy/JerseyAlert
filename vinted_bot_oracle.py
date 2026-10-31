@@ -2307,13 +2307,20 @@ def worker_turbo_sniper():
         ("Maillot Saint Etienne", get_search_url("Maillot Saint Etienne") + "&catalog_ids[]=3267"),
         ("Maillot St Etienne", get_search_url("Maillot St Etienne") + "&catalog_ids[]=3267"),
     ]
-    MAGIC_FANS_URL = get_search_url("Magic Fans")
+    # Rotation Collector Magic Fans : 1 requête toutes les 40s = cycle complet des 4 expressions toutes les 2 min (120s)
+    # ('livre Magic Fans' couvre à la fois 'Magic Fans le livre' et 'livre Magic Fans' dans le moteur Vinted)
+    MAGIC_FANS_QUERIES = [
+        ("Magic Fans Livre", get_search_url("livre Magic Fans")),
+        ("Magic Fans SNK", get_search_url("SNK Magic Fans")),
+        ("Magic Fans Fanzine", get_search_url("Fanzine Magic Fans")),
+    ]
 
     log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité Foot Temps Réel + Filet Sécurité Alterné)")
-    log("⚡ [Vinted] 4 Scans Foot Direct pour 1 Scan Filet Sécurité + Scan Collector 'Magic Fans' toutes les 2 min")
+    log("⚡ [Vinted] 4 Scans Foot Direct pour 1 Scan Filet Sécurité + Cycle Collector 'Magic Fans' toutes les 2 min")
     log("📸 [Vinted] Support jusqu'à 20 photos HD avec notifications silencieuses")
 
     safety_index = 0
+    magic_fans_index = 0
     is_initial_scan = True
     last_magic_fans_scan = 0
 
@@ -2368,11 +2375,12 @@ def worker_turbo_sniper():
                         except: pass
 
                     # Choix de la cible :
-                    # - Toutes les 2 min (120s) : 1 scan rapide Collector 'Magic Fans' (0 impact sur le reste)
+                    # - Toutes les 40s (cycle complet en 2 min) : 1 scan rapide Collector 'Magic Fans' (0 impact sur le reste)
                     # - Sinon : 4 scans Foot pour 1 scan Filet de sécurité
-                    if not is_initial_scan and (now - last_magic_fans_scan) >= 120:
-                        target_url = MAGIC_FANS_URL
-                        scan_label = "Filet Collector 'Magic Fans'"
+                    if not is_initial_scan and (now - last_magic_fans_scan) >= 40:
+                        mf_label, target_url = MAGIC_FANS_QUERIES[magic_fans_index % len(MAGIC_FANS_QUERIES)]
+                        magic_fans_index += 1
+                        scan_label = f"Filet Collector '{mf_label}'"
                         last_magic_fans_scan = now
                     elif cycle_count % 5 == 0:
                         label, target_url = SAFETY_QUERIES[safety_index % len(SAFETY_QUERIES)]
