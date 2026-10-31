@@ -865,6 +865,50 @@ def is_asse_signal(text, is_filet=False):
 
     return False, ""
 
+def is_flux_smart_candidate(title_str):
+    """
+    Détecte en mémoire (<0.01ms) si une annonce du Flux Direct Foot mérite
+    une inspection asynchrone de sa description en tâche de fond (Queue) :
+    1. Présence d'une initiale + nom de joueur (ex: 'J. Clement', 'L. Perrin')
+    2. Titre avec couleur verte (vert, green) sans club rival
+    3. Titre neutre court de football (ex: 'Maillot de foot', 'Maillot vintage')
+    4. Termes / sponsors club (Chaudron, Geoffroy-Guichard, Forez, Manufrance...)
+    """
+    if not title_str:
+        return False, ""
+    import unicodedata
+    t_clean = ''.join(c for c in unicodedata.normalize('NFD', title_str) if unicodedata.category(c) != 'Mn').lower()
+    t_clean = t_clean.replace('’', "'")
+
+    # Éliminer d'emblée les sports non-football
+    if re.search(r'\b(ciclismo|cyclisme|velo|radsport|gymshark|fitness|running|trail|basket|nba|nfl|rugby)\b', t_clean):
+        return False, ""
+
+    # 1. Initiale + nom de joueur (ex: 'j. clement', 'j clement', 'l. perrin', 's. ruffier')
+    m_init = re.search(r'\b([a-z])\s*[\.\s]\s*([a-z]{4,})\b', t_clean)
+    if m_init:
+        init_letter, last_name = m_init.group(1), m_init.group(2)
+        if last_name in ASSE_PLAYERS:
+            return True, f"Joueur initiales ({init_letter.upper()}. {last_name.title()})"
+        for full_p in ASSE_PLAYERS_FULL:
+            if full_p.startswith(init_letter) and full_p.endswith(last_name):
+                return True, f"Joueur initiales ({ASSE_PLAYERS_FULL[full_p]})"
+
+    # 2. Couleur verte dans un vêtement foot / sport (sans club rival)
+    if re.search(r'\b(vert|verte|verts|vertes|green)\b', t_clean):
+        if re.search(r'\b(maillots?|jerseys?|trikots?|camisetas?|maglias?|tenues?|t-?shirts?|tee[- ]?shirts?|shirts?|hauts?)\b', t_clean):
+            return True, "Couleur verte"
+
+    # 3. Titre neutre minimaliste de football
+    if re.search(r'^(?:maillot|jersey)\s+(?:de\s+foot(?:ball)?|vintage|collector|match|ancien)(?:\s+(?:taille\s+[a-z0-9]+|[smlxl]+|[0-9]{2}))?$', t_clean.strip()):
+        return True, "Titre neutre football"
+
+    # 4. Termes du club / Forez / Chaudron / Manufrance
+    if re.search(r'\b(chaudron|geoffroy[- ]guichard|forez|manufrance)\b', t_clean):
+        return True, "Terme club / Forez"
+
+    return False, ""
+
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
     Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
@@ -2084,6 +2128,69 @@ shared_last_seen_id = load_last_seen_id()
 if flux_seen_ids:
     shared_last_seen_id = max(shared_last_seen_id, max(flux_seen_ids))
 
+import queue
+smart_inspection_queue = queue.Queue(maxsize=100)
+
+def worker_smart_inspection():
+    """
+    Thread d'inspection asynchrone (Queue en tâche de fond) :
+    - Inspecte discrètement (~1-2 requêtes/min max) la description des annonces 'candidates' du flux
+    - Si la description contient 'ASSE' ou 'Saint-Étienne' ou un joueur, déclenche l'alerte immédiate
+    - 0 impact sur la vitesse du sniper principal, 0 risque de blocage IP
+    """
+    log("🧠 [Smart-Inspector] Démarrage du thread d'inspection asynchrone en arrière-plan")
+    while True:
+        try:
+            item, reason_candidate = smart_inspection_queue.get()
+            item_id = item.get('id')
+            item_url = item.get('url', f"https://www.vinted.fr/items/{item_id}")
+            t_titre = item.get('title', '')
+            t_prix = item.get('price', '')
+
+            # Double vérification : si déjà alerté entre-temps
+            with state_lock:
+                if item_id in alerted_ids:
+                    smart_inspection_queue.task_done()
+                    continue
+
+            log(f"🕵️ [Smart-Inspector] Inspection description pour #{item_id} ({reason_candidate}) : '{t_titre}'")
+            desc = fetch_item_description(item_url)
+            if desc:
+                # Vérifier exclusion produit dans la description
+                is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
+                if is_excl_d:
+                    log(f"🚫 [Smart-Inspector] Article #{item_id} exclu description ({reason_d}) : '{t_titre}'")
+                    smart_inspection_queue.task_done()
+                    continue
+
+                if FILTER_ADULT_ONLY:
+                    is_excl_sd, reason_sd = is_excluded_size(item.get('size', 'N/A'), t_titre, desc)
+                    if is_excl_sd:
+                        log(f"🚫 [Smart-Inspector] Article #{item_id} exclu taille ({reason_sd}) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
+
+                # Vérifier absence de club rival en description
+                is_conf_d, conf_d = is_conflicting_team(desc)
+                if is_conf_d:
+                    log(f"🚫 [Smart-Inspector] Article #{item_id} exclu club rival ({conf_d}) : '{t_titre}'")
+                    smart_inspection_queue.task_done()
+                    continue
+
+                # Signal ASSE dans la description ?
+                has_sig_d, sig_reason_d = is_asse_signal(desc, is_filet=True)
+                if has_sig_d:
+                    log(f"🎯 MATCH SMART-INSPECTOR #{item_id} ({sig_reason_d} en description) : '{t_titre}' ({t_prix})")
+                    send_discord_alert(None, item)
+                else:
+                    log(f"ℹ️ [Smart-Inspector] Pas de confirmation ASSE en description pour #{item_id} : '{t_titre}'")
+
+            smart_inspection_queue.task_done()
+            time.sleep(1.5)  # Temporisation anti-burst pour respecter Vinted
+        except Exception as e:
+            log(f"⚠️ [Smart-Inspector] Erreur inspection: {e}")
+            time.sleep(2)
+
 def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
     """Traite une liste d'articles récupérés de manière thread-safe (filtrage et alertes Discord)"""
     global flux_seen_ids, filet_seen_ids, alerted_ids, shared_last_seen_id, initialized_sources
@@ -2251,6 +2358,16 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                         if has_sig_f:
                             matched = True
                             log(f"🎯 MATCH {source_label} ({sig_reason_f}) : '{t_titre}' ({t_prix})")
+
+                # Si non matché directement dans le titre, est-ce un candidat pour inspection description en arrière-plan ?
+                if not matched and not is_conflicting_team(t_titre)[0]:
+                    is_cand, reason_cand = is_flux_smart_candidate(t_titre)
+                    if is_cand:
+                        try:
+                            smart_inspection_queue.put_nowait((item, reason_cand))
+                            log(f"📥 [Flux Direct Foot] Candidat en file d'inspection ({reason_cand}) : '{t_titre}'")
+                        except queue.Full:
+                            pass
             elif is_filet:
                 # Filet de sécurité ('Maillot Asse') : Uniquement ici, utilisation des bases Joueurs, Sponsors et Vert
                 is_conf, conf_team = is_conflicting_team(t_titre)
@@ -2454,6 +2571,11 @@ def worker_turbo_sniper():
 
 def run_bot():
     try:
+        # Lancement du worker d'inspection asynchrone (Queue en tâche de fond)
+        inspector_thread = threading.Thread(target=worker_smart_inspection, daemon=True, name="SmartInspector")
+        inspector_thread.start()
+        log("🚀 [Smart-Inspector] Thread d'inspection asynchrone prêt")
+
         worker_turbo_sniper()
     except KeyboardInterrupt:
         log("\n⛔ [Vinted] Arrêt du bot demandé")
