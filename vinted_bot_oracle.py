@@ -1132,6 +1132,11 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(reedition_pat, cleaned_reed, re.IGNORECASE):
         return True, "Réédition / Reproduction non d'époque"
 
+    # 32. Réédition Duarig Manufrance (anachronisme historique : Manufrance 1970s réédité par Duarig 2000s)
+    # Ex: 'Maillot asse manufrance duarig XL'
+    if re.search(r'\bmanufrance\b', full_reed) and re.search(r'\bduarig\b', full_reed):
+        return True, "Réédition Manufrance Duarig (anachronisme)"
+
     return False, "OK"
 
 def get_api_search_url(query, color_id=None):
