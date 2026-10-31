@@ -17,6 +17,7 @@ except ImportError:
     pass
 import time
 import json
+import fcntl
 import random
 import requests
 import signal
@@ -41,6 +42,7 @@ STATE_FILE = "last_seen_id.txt"
 SEEN_IDS_FILE = "seen_ids_cache.json"
 ALERTED_IDS_FILE = "alerted_ids_cache.json"
 FILET_SEEN_IDS_FILE = "filet_seen_ids_cache.json"
+TRACKED_ITEMS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracked_items.json")
 ERRORS_LOG_FILE = os.environ.get("ERRORS_LOG_FILE", "/root/vinted_errors.log" if os.path.exists("/root/JerseyAlert") else "vinted_errors.log")
 BLACKLIST_FILE = os.environ.get("BLACKLIST_FILE", "/root/JerseyAlert/blacklisted_sellers.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_sellers.json")
 BLACKLIST_KEYWORDS_FILE = os.environ.get("BLACKLIST_KEYWORDS_FILE", "/root/JerseyAlert/blacklisted_keywords.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_keywords.json")
@@ -240,6 +242,24 @@ def is_excluded_size(size_str, title_str="", desc_str=""):
 
     if re.match(r'^(32|34|36)(?:\s*/\s*(?:XS|S))?$', s) or re.match(r'^(?:XS|S)\s*/\s*(32|34|36)$', s):
         return True, f"Taille numérique XS/S ({size_str})"
+
+    # 3. Exclusion des tailles supérieures à XXL (XXXL / 3XL et plus)
+    if re.search(r'\b(?:X{3,}L|[3-9]XL)\b', s):
+        return True, f"Taille supérieure à XXL ({size_str})"
+
+    if re.search(r'\b(?:X{3,}L|[3-9]XL)\b', t, re.I):
+        return True, "Taille supérieure à XXL dans le titre"
+
+    if desc_str:
+        d_low = desc_str.lower()
+        if re.search(r'\b(?:taille\s*[:\s=-]*\s*(?:x{3,}l|[3-9]xl)|en\s+(?:x{3,}l|[3-9]xl))\b', d_low):
+            return True, "Taille supérieure à XXL dans la description"
+        # Si la taille Vinted est absente/générique, vérifier aussi XS/S et tailles enfants dans la description
+        if s in ('', 'N/A', 'AUTRE', 'UNIQUE', 'TAILLE UNIQUE'):
+            if re.search(r'\btaille\s*[:\s=-]*\s*(?:x{1,3}s|s|small|extra\s*small)\b', d_low):
+                return True, "Taille XS/S détectée dans la description"
+            if re.search(r'\btaille\s*[:\s=-]*\s*(?:\d{1,2}\s*ans|enfant|junior|1[0-6]\d\s*cm)\b', d_low):
+                return True, "Taille enfant détectée dans la description"
 
     return False, "OK"
 
@@ -500,7 +520,63 @@ OTHER_TEAMS_PATTERNS = {
     'Leicester': r'\b(leicester|leicester\s+city)\b',
     'Ipswich': r'\b(ipswich|ipswich\s+town)\b',
     'Nottingham Forest': r'\b(nottingham|nottingham\s+forest)\b',
+    'Leeds': r'\b(leeds|leeds\s+united)\b',
+    'Sunderland': r'\b(sunderland|sunderland\s+afc)\b',
+    'Swansea': r'\b(swansea|swansea\s+city)\b',
+    'Watford': r'\b(watford|watford\s+fc)\b',
+    'Stoke City': r'\b(stoke\s+city)\b',
+    'West Bromwich': r'\b(west\s+bromwich|wba)\b',
+    'Middlesbrough': r'\b(middlesbrough)\b',
+    'Burnley': r'\b(burnley)\b',
+    'Sheffield': r'\b(sheffield)\b',
     'Ajax': r'\b(ajax\s+amsterdam|ajax)\b',
+    'PSV Eindhoven': r'\b(psv|psv\s+eindhoven)\b',
+    'Feyenoord': r'\b(feyenoord)\b',
+    'Porto': r'\b(fc\s+porto)\b',
+    'Benfica': r'\b(benfica|sl\s+benfica)\b',
+    'Braga': r'\b(sc\s+braga)\b',
+    'AS Roma': r'\b(as\s+roma|roma)\b',
+    'Lazio': r'\b(lazio|ss\s+lazio)\b',
+    'Naples': r'\b(napoli|ssc\s+napoli|naples)\b',
+    'Fiorentina': r'\b(fiorentina)\b',
+    'Atalanta': r'\b(atalanta)\b',
+    'Torino': r'\b(torino)\b',
+    'Sampdoria': r'\b(sampdoria)\b',
+    'Udinese': r'\b(udinese)\b',
+    'Parme': r'\b(parma|parme)\b',
+    'Valence': r'\b(valencia\s+cf|valence\s+cf)\b',
+    'Séville': r'\b(sevilla\s+fc|fc\s+s[eé]ville)\b',
+    'Villarreal': r'\b(villarreal)\b',
+    'Real Sociedad': r'\b(real\s+sociedad)\b',
+    'Athletic Bilbao': r'\b(athletic\s+bilbao|athletic\s+club)\b',
+    'Leverkusen': r'\b(bayer\s+leverkusen|leverkusen)\b',
+    'Schalke': r'\b(schalke)\b',
+    'Stuttgart': r'\b(vfb\s+stuttgart|stuttgart)\b',
+    'Francfort': r'\b(eintracht\s+frankfurt|eintracht\s+francfort)\b',
+    'Hambourg': r'\b(hamburger\s+sv|hsv)\b',
+    'Cologne': r'\b(fc\s+k[oö]ln|fc\s+cologne)\b',
+    'Mönchengladbach': r'\b(m[oö]nchengladbach|gladbach)\b',
+    'Galatasaray': r'\b(galatasaray)\b',
+    'Fenerbahçe': r'\b(fenerbah[cç]e)\b',
+    'Besiktas': r'\b(besiktas|be[sş]ikta[sş])\b',
+    'Trabzonspor': r'\b(trabzonspor)\b',
+    'Dynamo Kiev': r'\b(dynamo\s+kiev|dynamo\s+kyiv)\b',
+    'Shakhtar': r'\b(shakhtar)\b',
+    'Olympiakos': r'\b(olympiakos|olympiacos)\b',
+    'PAOK': r'\b(paok)\b',
+    'Anderlecht': r'\b(anderlecht|rsca)\b',
+    'Standard Liège': r'\b(standard\s+de\s+li[eè]ge|standard\s+li[eè]ge)\b',
+    'Club Bruges': r'\b(club\s+bruges|club\s+brugge)\b',
+    'Tours': r'\b(tours\s+fc)\b',
+    'Châteauroux': r'\b(ch[aâ]teauroux|lb\s+ch[aâ]teauroux)\b',
+    'Le Mans': r'\b(le\s+mans\s+fc|muc\s+72)\b',
+    'Niort': r'\b(chamois\s+niortais)\b',
+    'Orléans': r'\b(us\s+orl[eé]ans)\b',
+    'Quevilly': r'\b(qrm|quevilly)\b',
+    'Rodez': r'\b(rodez\s+af)\b',
+    'Pau FC': r'\b(pau\s+fc)\b',
+    'Annecy': r'\b(fc\s+annecy)\b',
+    'Dunkerque': r'\b(usl\s+dunkerque)\b',
 
     # Clubs et sélections jouant en vert ou fréquents en faux positifs
     'Celtic Glasgow': r'\b(celtic|celtic\s+glasgow|glasgow\s+celtic)\b',
@@ -599,7 +675,7 @@ def load_asse_knowledge():
     players_path = os.path.join(base_dir, "asse_players_since_1980.json")
     sponsors_path = os.path.join(base_dir, "asse_sponsors_equipementiers.json")
 
-    # Generic global stars with big careers elsewhere or ambiguous common first names
+    # Generic global stars with big careers elsewhere or ambiguous common dictionary words / first names
     generic_stars = {
         'alex', 'aloisio', 'henrique', 'silva', 'bernard', 'david', 'blanc', 'perez', 'pedro',
         'mendy', 'camara', 'traore', 'sissoko', 'cisse', 'bamba', 'fall', 'diallo', 'kante',
@@ -609,7 +685,24 @@ def load_asse_knowledge():
         'muller', 'geiger', 'leclerc', 'clement', 'marchal', 'pajot', 'roux', 'bell', 'albert',
         'cruz', 'junior', 'pinto', 'santos', 'costa', 'ferreira', 'gomez', 'lopez',
         'heinz', 'nielsen', 'robert', 'thomas', 'daniel', 'francois', 'schneider',
-        'lacroix'
+        'lacroix',
+        # Mots courants FR/EN pouvant apparaître sur un t-shirt générique (exigent prénom + nom)
+        'green', 'four', 'gros', 'plante', 'mouton', 'bouquet', 'carrot', 'marin', 'sable',
+        'moulin', 'medaillon', 'cardinal', 'reis', 'elie', 'simo', 'cuca', 'dobo', 'grax', 'haon',
+        'courault', 'cros', 'crom', 'faye', 'fomba', 'guel', 'ilan', 'jamali', 'lamba', 'lambert',
+        'lamon', 'llacer', 'macon', 'mahut', 'masudi', 'mege', 'mignot', 'millot', 'morice',
+        'nade', 'nery', 'nordin', 'ntep', 'othman', 'pagal', 'panos', 'pardo', 'passi', 'paulao',
+        'petrot', 'piatti', 'pignol', 'plante', 'ponsard', 'pontal', 'pouget', 'priou', 'quaye',
+        'ravet', 'redon', 'riou', 'rocco', 'saadi', 'saban', 'sacko', 'sagna', 'saivet', 'sako',
+        'sall', 'sanogo', 'santana', 'santini', 'sauget', 'sechet', 'soderlund', 'solignac',
+        'souici', 'tallec', 'tardieu', 'thioub', 'tormin', 'trauco', 'vada', 'vagner', 'vasseur',
+        'viviani', 'wolff', 'yahia', 'youssouf',
+        # Homonymes internationaux / stars d'autres clubs (exigent prénom + nom si "ASSE" absent)
+        'pogba', 'hernandez', 'alonso', 'sanchez', 'jorginho', 'fernandes', 'fernandez',
+        'christensen', 'oliveira', 'ramirez', 'rivera', 'laudrup', 'milla', 'almeida', 'guarin',
+        'coulibaly', 'kamara', 'ndiaye', 'gueye', 'sarr', 'sakho', 'sidibe', 'bakayoko',
+        'thiaw', 'maupay', 'saintmaximin', 'modeste', 'mirallas', 'coupet', 'malbranque',
+        'clerc', 'ferri', 'bodmer', 'pavlovic', 'dimitrov', 'machado', 'nilsson', 'esposito'
     }
 
     full_name_players = {
@@ -619,7 +712,33 @@ def load_asse_knowledge():
         'jean-pierre francois': 'Jean-Pierre François',
         'jean-christophe thomas': 'Jean-Christophe Thomas',
         'jean-francois daniel': 'Jean-François Daniel',
-        'leo lacroix': 'Léo Lacroix'
+        'leo lacroix': 'Léo Lacroix',
+        'etienne green': 'Etienne Green',
+        'julien sable': 'Julien Sablé',
+        'nicolas marin': 'Nicolas Marin',
+        'florentin pogba': 'Florentin Pogba',
+        'dominique rocheteau': 'Dominique Rocheteau',
+        'michel platini': 'Michel Platini',
+        'laurent blanc': 'Laurent Blanc',
+        'dimitri payet': 'Dimitri Payet',
+        'blaise matuidi': 'Blaise Matuidi',
+        'william saliba': 'William Saliba',
+        'pierre-emerick aubameyang': 'Pierre-Emerick Aubameyang',
+        'jean-michel larque': 'Jean-Michel Larqué',
+        'herve revelli': 'Hervé Revelli',
+        'patrick revelli': 'Patrick Revelli',
+        'osvaldo piazza': 'Osvaldo Piazza',
+        'johnny rep': 'Johnny Rep',
+        'dominique bathenay': 'Dominique Bathenay',
+        'christian lopez': 'Christian Lopez',
+        'jacques santini': 'Jacques Santini',
+        'gerard farison': 'Gérard Farison',
+        'alain merchadier': 'Alain Merchadier',
+        'christian sarramagna': 'Christian Sarramagna',
+        'georges bereta': 'Georges Bereta',
+        'robert herbin': 'Robert Herbin',
+        'salif keita': 'Salif Keita',
+        'rachid mekhloufi': 'Rachid Mekhloufi'
     }
 
     player_names = {}
@@ -628,7 +747,14 @@ def load_asse_knowledge():
             with open(players_path, 'r', encoding='utf-8') as f:
                 p_data = json.load(f)
             for p in p_data:
-                full_name = p.get('nom', '')
+                full_name = p.get('nom', '').strip()
+                if not full_name:
+                    continue
+                full_clean = ''.join(c for c in unicodedata.normalize('NFD', full_name) if unicodedata.category(c) != 'Mn').lower()
+                full_clean = re.sub(r'[^a-z\s\-]', '', full_clean).strip()
+                if len(full_clean.split()) >= 2:
+                    full_name_players[full_clean] = full_name
+                    full_name_players[full_clean.replace('-', ' ')] = full_name
                 parts = full_name.split()
                 if parts:
                     last = parts[-1]
@@ -639,38 +765,30 @@ def load_asse_knowledge():
         except Exception as e:
             log(f"⚠️ Erreur chargement joueurs ASSE: {e}")
 
-    # Joueurs emblématiques ASSE garantis
+    # Joueurs emblématiques ASSE garantis (incluant légendes 1976 + cadres modernes)
     famous_asse = [
         'khazri', 'bouanga', 'ruffier', 'perrin', 'janot', 'beric', 'hamouma', 'aouchiche',
         'krasso', 'davitashvili', 'stassin', 'cafaro', 'bouchouari', 'moueffek', 'amougou',
         'larsonneur', 'maubleu', 'feindouno', 'moravcik', 'brandao', 'gomis', 'gradel',
         'tannane', 'selnaes', 'lemoine', 'cohade', 'guilavogui', 'zouma', 'ghoulam',
-        'subotic', 'debuchy', 'cabella', 'diony', 'riviere', 'piquionne', 'sable',
+        'subotic', 'debuchy', 'cabella', 'diony', 'riviere', 'piquionne',
         'hellebuyck', 'potillon', 'castaneda', 'curkovic', 'janvion', 'zanon', 'roussey',
-        'paganelli', 'repellini'
+        'paganelli', 'repellini', 'diakhate', 'larque', 'revelli', 'piazza', 'bathenay',
+        'synaeghel', 'merchadier', 'sarramagna', 'zimako', 'larios', 'bereta', 'herbin',
+        'mekhloufi', 'bergessio', 'bocanegra', 'matsui', 'batlles', 'alonzo', 'tavlaridis'
     ]
     for fn in famous_asse:
-        player_names[fn] = fn.capitalize()
+        if fn not in player_names:
+            player_names[fn] = fn.capitalize()
 
-    # Sponsors & équipementiers distinctifs
+    # Sponsors & équipementiers exclusifs ASSE
     distinctive_sponsors = [
-        'manufrance', 'super tele', 'supertele', 'kb jardin', 'kb-jardin',
-        'cake rocher', 'dreamcast', 'game one', 'sacma', 'konica minolta',
-        'eovi', 'aesio', 'smart good things', 'kelyps', 'mister auto',
-        'mister-auto', 'markal', 'despinasse', 'duarig'
+        'manufrance', 'super tele', 'supertele', 'super télé', 'kb jardin', 'kb-jardin',
+        'cake rocher', 'konica minolta', 'eovi', 'eovi mcd mutuelle', 'aesio',
+        'aésio mutuelle', 'smart good things', 'kelyps', 'kelyps intérim',
+        'mister auto', 'mister-auto', 'markal', 'despinasse', 'duarig',
+        'sacma', 'sacma agencements', 'alliance intérim'
     ]
-    if os.path.exists(sponsors_path):
-        try:
-            with open(sponsors_path, 'r', encoding='utf-8') as f:
-                sp_data = json.load(f)
-            for sp in sp_data.get('sponsors_principaux', []):
-                nom_sp = sp.get('nom', '').lower()
-                if len(nom_sp) >= 4 and nom_sp not in ['casino']:
-                    if nom_sp not in distinctive_sponsors:
-                        distinctive_sponsors.append(nom_sp)
-        except Exception as e:
-            log(f"⚠️ Erreur chargement sponsors ASSE: {e}")
-
     return player_names, full_name_players, distinctive_sponsors
 
 ASSE_PLAYERS, ASSE_PLAYERS_FULL, ASSE_SPONSORS = load_asse_knowledge()
@@ -947,6 +1065,39 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(asse_standalone_pat, full_text_stripped):
             return True, "Maillot adverse (porté contre l'ASSE)"
 
+    # 28. Vêtements d'entraînement / Training / Échauffement / Pré-match (sauf si maillot de match officiel)
+    training_pat = r'\b(entrainement|entraînement|training|echauffement|échauffement|pr[eé][- ]?(?:match|game)|prematch|pregame|pr[eé]game|avant[- ]match)\b'
+    match_override = r'\b(domicile|ext[eé]rieur|away|third|fourth|gardien|goalkeeper|match\s*worn|match\s*issue|coupe\s+de\s+france|coupe\s+d[\'\s]?europe|port[eé]\s+par|pr[eé]par[eé]\s+par)\b'
+    if re.search(training_pat, t):
+        if not re.search(match_override, t):
+            return True, "Vêtement d'entraînement / Training"
+    if d and re.search(r'\b(?:maillot|t-?shirt|tee-?shirt|haut|tenue|veste|gamme|mod[eè]le|version)\s+(?:d[\'\s]?|de\s+)?(?:entrainement|entraînement|training|echauffement|échauffement|pr[eé][- ]?(?:match|game)|prematch|pregame|pr[eé]game|avant[- ]match)\b|\bcollection\s+training\b', d):
+        if not re.search(match_override, t) and not re.search(match_override, d):
+            return True, "Vêtement d'entraînement / Training"
+
+    # 29. T-shirts et vêtements 100% Coton / Lifestyle / Casual (non maillots de match)
+    coton_pat = r'\b(100\s*%\s*coton|100\s*%\s*cotton|mati[eè]re\s+coton|pur\s+coton|pure\s+cotton)\b'
+    if re.search(coton_pat, t):
+        if not re.search(match_override, t):
+            return True, "Vêtement 100% coton / Casual"
+    if d and re.search(coton_pat, d):
+        if re.search(r'\b(t-?shirt|tee-?shirt)\b', t) and not re.search(r'\b(maillot|jersey)\b', t):
+            if not re.search(match_override, t) and not re.search(match_override, d):
+                return True, "T-shirt 100% coton (non-maillot)"
+
+    # 30. Exclusion intégrale Sainte-Barbe (maillots, t-shirts, polos et produits dérivés compris)
+    sainte_barbe_pat = r'\b(sainte[- ]barbe|ste[- ]barbe)\b'
+    if re.search(sainte_barbe_pat, t) or (d and re.search(sainte_barbe_pat, d)):
+        return True, "Édition / Produit Sainte-Barbe"
+
+    # 31. Rééditions, remakes et reproductions non d'époque
+    reedition_neg_pat = r'\b(?:pas\s+une?|pas\s+de|non|ce\s+n[\'\s]?est\s+pas\s+une?|aucunement|rien\s+[àa]\s+voir\s+avec\s+(?:une?|les)?|pas\s+un|sans)\s+(?:r[eé][- ]?[eé]dition[s]?|remake[s]?|repro(?:duction)?s?)\b'
+    full_reed = f"{t} {d}"
+    cleaned_reed = re.sub(reedition_neg_pat, ' ', full_reed, flags=re.IGNORECASE)
+    reedition_pat = r'\b(r[eé][- ]?[eé]dition[s]?|remake[s]?|reproduction[s]?)\b'
+    if re.search(reedition_pat, cleaned_reed, re.IGNORECASE):
+        return True, "Réédition / Reproduction non d'époque"
+
     return False, "OK"
 
 def get_api_search_url(query, color_id=None):
@@ -1062,6 +1213,32 @@ def save_alerted_ids_cache(alerted_set):
             json.dump(recent_ids, f)
     except Exception as e:
         log(f"⚠️ Erreur sauvegarde cache alertes: {e}")
+
+def record_tracked_item(item_data):
+    """Enregistre un nouvel article pour le suivi individuel du cycle de vie"""
+    try:
+        lock_path = TRACKED_ITEMS_FILE + ".lock"
+        with open(lock_path, "a") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                data = {}
+                if os.path.exists(TRACKED_ITEMS_FILE):
+                    try:
+                        with open(TRACKED_ITEMS_FILE, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                    except Exception:
+                        data = {}
+                item_id_str = str(item_data["item_id"])
+                data[item_id_str] = item_data
+                tmp_file = TRACKED_ITEMS_FILE + f".tmp.{os.getpid()}"
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_file, TRACKED_ITEMS_FILE)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+        log(f"🎯 [Tracker] Article #{item_data['item_id']} enregistré pour suivi de cycle de vie (Discord ID: {item_data.get('discord_message_id')})")
+    except Exception as e:
+        log(f"⚠️ Erreur enregistrement tracking #{item_data.get('item_id')}: {e}")
 
 def load_filet_seen_ids_cache():
     """Charge l'historique des IDs déjà vus par le Filet de sécurité"""
@@ -1541,25 +1718,26 @@ def extract_items_from_page(page):
         log(f"❌ Erreur extraction liste: {e}")
         return []
 
+in_flight_alert_ids = set()
+
 def send_discord_alert(context, item):
     """Envoie une alerte Discord ultra-rapide (~0.3s) avec description Garmin et jusqu'à 10 photos HD dès le 1er envoi"""
     if not DISCORD_WEBHOOK_URL: return
 
-    global alerted_ids
+    global alerted_ids, in_flight_alert_ids
     raw_id = item.get('id')
     try:
         int_id = int(raw_id)
     except (ValueError, TypeError):
         int_id = raw_id
 
-    # VERROU ABSOLU ANTI-DOUBLON (Empêche strictement 2 alertes pour le même item ID)
+    # VERROU ABSOLU ANTI-DOUBLON (Empêche strictement 2 alertes simultanées ou déjà envoyées)
     with state_lock:
-        if int_id and int_id in alerted_ids:
-            log(f"🛡️ [Anti-Doublon Absolu] Alerte déjà envoyée pour #{int_id}, envoi bloqué !")
+        if int_id and (int_id in alerted_ids or int_id in in_flight_alert_ids):
+            log(f"🛡️ [Anti-Doublon Absolu] Alerte déjà envoyée ou en cours pour #{int_id}, envoi bloqué !")
             return
         if int_id:
-            alerted_ids.add(int_id)
-            save_alerted_ids_cache(alerted_ids)
+            in_flight_alert_ids.add(int_id)
 
     try:
         import re
@@ -1620,6 +1798,7 @@ def send_discord_alert(context, item):
         photos = [photo_url] if photo_url else []
         desc_clean = ""
         seller_name = item.get('seller', '')
+        initial_fav_count = 0
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1629,6 +1808,18 @@ def send_discord_alert(context, item):
             if resp.status_code == 200:
                 resp.encoding = 'utf-8'
                 html = resp.text
+
+                # Extraction du nombre initial de favoris ❤️
+                m_fav = (
+                    re.search(r"ajouté aux favoris par (\d+) utilisateur", html, re.I)
+                    or re.search(r'data-testid="favourite-button"[^>]*>.*?<span[^>]*>(\d+)</span>', html, re.S)
+                    or re.search(r'"favourite_count"\s*:\s*(\d+)', html)
+                )
+                if m_fav:
+                    try:
+                        initial_fav_count = int(m_fav.group(1))
+                    except ValueError:
+                        initial_fav_count = 0
 
                 # Récupération du pseudo vendeur
                 m_user = re.search(r'\"login\":\"([^\"]+)\"', html)
@@ -1689,11 +1880,25 @@ def send_discord_alert(context, item):
                     if is_excl:
                         log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
                         return
+                    if FILTER_ADULT_ONLY:
+                        is_excl_s, reason_s = is_excluded_size(final_size, raw_title_val, desc_clean)
+                        if is_excl_s:
+                            log(f"🚫 [Vinted] Alerte filtrée ({reason_s}) : {final_title} (Taille: {final_size})")
+                            return
+                    # Si le titre ne mentionne pas explicitement ASSE/Saint-Étienne (match via Joueur/Sponsor),
+                    # vérifier que la description ne désigne pas un autre club concurrent
+                    if not is_asse_jersey_match(final_title) and not is_asse_jersey_match(desc_clean):
+                        is_conf_d, conf_d = is_conflicting_team(desc_clean)
+                        if is_conf_d:
+                            log(f"🚫 [Vinted] Alerte filtrée (Équipe concurrente dans la description : {conf_d}) : {final_title}")
+                            return
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
         # Description formatée pour Discord embed
-        description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**"
+        fav_line_init = f"❤️ **{initial_fav_count} favori{'s' if initial_fav_count > 1 else ''}** sur Vinted"
+        fav_badge_init = f" • ❤️ {initial_fav_count} favori{'s' if initial_fav_count > 1 else ''}"
+        description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**\n{fav_line_init}"
         if seller_name:
             description_text += f"\n👤 Vendeur: **{seller_name}**"
         if desc_clean:
@@ -1705,7 +1910,7 @@ def send_discord_alert(context, item):
             "url": item_url,
             "description": description_text,
             "color": 0x09B83E,
-            "footer": {"text": f"Vinted Sniper • ID: {item_id}"},
+            "footer": {"text": f"Vinted Sniper • ID: {item_id}{fav_badge_init}"},
             "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
 
@@ -1736,7 +1941,31 @@ def send_discord_alert(context, item):
             "embeds": embeds_batch1
         }
 
-        requests.post(DISCORD_WEBHOOK_URL, json=payload1, timeout=8)
+        discord_msg_id = None
+        sent_ok = False
+        try:
+            resp1 = requests.post(DISCORD_WEBHOOK_URL + "?wait=true", json=payload1, timeout=8)
+            if resp1.status_code in [200, 204]:
+                sent_ok = True
+                try:
+                    discord_msg_id = resp1.json().get("id")
+                except Exception:
+                    pass
+            else:
+                log(f"⚠️ Réponse Discord inhabituelle ({resp1.status_code}): {resp1.text[:100]}")
+        except Exception as e_post:
+            log(f"⚠️ Erreur envoi webhook Discord batch1: {e_post}")
+
+        if not sent_ok:
+            with state_lock:
+                in_flight_alert_ids.discard(int_id)
+            return
+
+        with state_lock:
+            if int_id:
+                alerted_ids.add(int_id)
+                save_alerted_ids_cache(alerted_ids)
+                in_flight_alert_ids.discard(int_id)
 
         # Si l'annonce contient plus de 10 photos (jusqu'à 20 photos au total) :
         # Envoi d'un 2ème lot 100% silencieux (flags: 4096 SUPPRESS_NOTIFICATIONS - aucune notif ni vibration)
@@ -1755,8 +1984,36 @@ def send_discord_alert(context, item):
 
         log(f"✅ [Vinted] Alerte envoyée #{item_id} ({min(len(photos), 20)} photos certifiées, description Garmin incluse)")
 
+        # Enregistrement dans le tracker individuel de cycle de vie
+        now_ts = time.time()
+        record_tracked_item({
+            "item_id": str(item_id),
+            "discord_message_id": discord_msg_id,
+            "title": final_title,
+            "price": final_price,
+            "size": final_size,
+            "brand": final_brand,
+            "status_item": final_status,
+            "seller": seller_name,
+            "url": item_url,
+            "photos": photos[:10] if photos else [],
+            "description": description_text,
+            "fav_count": initial_fav_count,
+            "created_at": now_ts,
+            "status": "ACTIVE",
+            "check_count": 0,
+            "last_checked_at": None,
+            "next_check_at": now_ts + 600,
+            "sold_at": None,
+            "sold_duration_seconds": None,
+            "sold_duration_str": None
+        })
+
     except Exception as e:
         log(f"❌ Erreur Discord: {e}")
+    finally:
+        with state_lock:
+            in_flight_alert_ids.discard(int_id)
 
 def watchdog_handler(signum, frame):
     """Tue le bot si un cycle prend trop de temps (Freeze detection)"""
@@ -1903,10 +2160,24 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
 
             # 3. Correspondance ASSE
             matched = False
-            # Flux Général : Strictement comme avant (exclusivité mention ASSE / Saint-Étienne)
             if is_asse_jersey_match(t_titre):
                 matched = True
                 log(f"🎯 MATCH {source_label} : '{t_titre}' ({t_prix})")
+            elif not is_filet:
+                # Flux Direct Foot : Détection aussi par Joueur ASSE / Sponsor historique / Chaudron
+                # si le titre contient un mot de maillot ou t-shirt et aucune équipe concurrente
+                import re
+                has_shirt_kw = bool(re.search(
+                    r'\b(maillots?|jerseys?|trikots?|camisetas?|maglias?|tenues?|ensembles?|t-?shirts?|tee[- ]?shirts?|shirts?|hauts?)\b',
+                    t_titre, re.IGNORECASE
+                ))
+                if has_shirt_kw:
+                    is_conf_f, conf_team_f = is_conflicting_team(t_titre)
+                    if not is_conf_f:
+                        has_sig_f, sig_reason_f = is_asse_signal(t_titre, is_filet=False)
+                        if has_sig_f:
+                            matched = True
+                            log(f"🎯 MATCH {source_label} ({sig_reason_f}) : '{t_titre}' ({t_prix})")
             elif is_filet:
                 # Filet de sécurité ('Maillot Asse') : Uniquement ici, utilisation des bases Joueurs, Sponsors et Vert
                 is_conf, conf_team = is_conflicting_team(t_titre)
@@ -1927,6 +2198,11 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                         if is_excl_d:
                             log(f"🚫 Article ignoré après vérification description ({reason_d}) : '{t_titre}'")
                             continue
+                        if FILTER_ADULT_ONLY:
+                            is_excl_sd, reason_sd = is_excluded_size(item.get('size', 'N/A'), t_titre, desc)
+                            if is_excl_sd:
+                                log(f"🚫 Article ignoré après vérification taille description ({reason_sd}) : '{t_titre}'")
+                                continue
                         is_conf_d, conf_d = is_conflicting_team(desc)
                         if is_conf_d:
                             log(f"🚫 Article Filet ignoré (Équipe concurrente dans la description : {conf_d}) : '{t_titre}'")
@@ -2066,24 +2342,13 @@ def worker_turbo_sniper():
                         consecutive_errors += 1
                         err_str = str(e).lower()
                         is_transient = any(k in err_str for k in ["timeout", "interrupted", "err_aborted"])
-                        # Si c'est un incident réseau isolé (< 2 consécutifs), on purge l'onglet pour éviter tout conflit de navigation
+                        # En cas d'incident réseau ou timeout, on recycle la session Chromium proprement
+                        # plutôt que de fermer/réouvrir un onglet sous un socket réseau gelé (cause du freeze watchdog)
                         if is_transient and consecutive_errors < 2:
-                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors}/2) sur {scan_label} : reprise fluide...")
-                            try:
-                                page.close()
-                            except Exception:
-                                pass
-                            try:
-                                page = context.new_page()
-                                page.set_default_timeout(12000)
-                            except Exception:
-                                break
+                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors}/2) sur {scan_label} : recyclage propre immédiat...")
+                            break
                         else:
                             log(f"⚠️ [Vinted] Erreur locale ({consecutive_errors} consécutives) : {e}")
-
-                        # Si crash du processus ou 2 erreurs consécutives, recyclage propre et immédiat en 1s
-                        if any(k in err_str for k in ["crash", "closed", "destroyed"]) or consecutive_errors >= 2:
-                            log("♻️ [Vinted] Recyclage propre de la session Chromium...", to_error_log=False)
                             break
                     finally:
                         if hasattr(signal, "SIGALRM"):
@@ -2099,10 +2364,6 @@ def worker_turbo_sniper():
             time.sleep(6)
 
 def run_bot():
-    try:
-        os.nice(10)
-    except Exception:
-        pass
     try:
         worker_turbo_sniper()
     except KeyboardInterrupt:
