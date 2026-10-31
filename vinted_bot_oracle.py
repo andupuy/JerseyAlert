@@ -793,6 +793,29 @@ def load_asse_knowledge():
 
 ASSE_PLAYERS, ASSE_PLAYERS_FULL, ASSE_SPONSORS = load_asse_knowledge()
 
+MAGIC_FANS_COLLECTOR_PATTERN = re.compile(
+    r'\b(magic\s+fans\s+le\s+livre|snk\s+magic\s+fans|fanzine\s+magic\s+fans|livre\s+magic\s+fans)\b',
+    re.IGNORECASE
+)
+
+def is_magic_fans_collector_match(text):
+    """
+    Détecte uniquement les 4 séquences exactes de mots qui se suivent :
+    - 'Magic Fans le livre'
+    - 'SNK Magic Fans'
+    - 'Fanzine Magic Fans'
+    - 'livre Magic Fans'
+    """
+    if not text:
+        return False, ""
+    import unicodedata
+    t_norm = ''.join(c for c in unicodedata.normalize('NFD', str(text)) if unicodedata.category(c) != 'Mn')
+    t_norm = re.sub(r'\s+', ' ', t_norm)
+    m = MAGIC_FANS_COLLECTOR_PATTERN.search(t_norm)
+    if m:
+        return True, m.group(1)
+    return False, ""
+
 def is_asse_signal(text, is_filet=False):
     """
     Vérifie la présence d'un signal formel ASSE :
@@ -1720,7 +1743,7 @@ def extract_items_from_page(page):
 
 in_flight_alert_ids = set()
 
-def send_discord_alert(context, item):
+def send_discord_alert(context, item, bypass_jersey_filters=False):
     """Envoie une alerte Discord ultra-rapide (~0.3s) avec description Garmin et jusqu'à 10 photos HD dès le 1er envoi"""
     if not DISCORD_WEBHOOK_URL: return
 
@@ -1776,18 +1799,22 @@ def send_discord_alert(context, item):
                 if cand and len(cand) <= 10:
                     final_size = cand
 
-        # Filtrage des produits indésirables (Mug, Panini, Prix > 350€)
-        is_excl, reason = is_excluded_product(final_title, '', final_price)
-        if is_excl:
-            log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
-            return
+        if not bypass_jersey_filters and is_magic_fans_collector_match(final_title)[0]:
+            bypass_jersey_filters = True
 
-        # Filtrage des tailles enfants et XS/S
-        if FILTER_ADULT_ONLY:
-            is_excl, reason = is_excluded_size(final_size, raw_title_val)
+        # Filtrage des produits indésirables (Mug, Panini, Prix > 350€) sauf Collector Magic Fans
+        if not bypass_jersey_filters:
+            is_excl, reason = is_excluded_product(final_title, '', final_price)
             if is_excl:
-                log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
+                log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
                 return
+
+            # Filtrage des tailles enfants et XS/S
+            if FILTER_ADULT_ONLY:
+                is_excl, reason = is_excluded_size(final_size, raw_title_val)
+                if is_excl:
+                    log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} (Taille: {final_size})")
+                    return
 
         # Filtrage vendeur bloqué préalable
         if item.get('seller') and is_seller_blacklisted(item['seller']):
@@ -1876,22 +1903,25 @@ def send_discord_alert(context, item):
                         desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
                 desc_clean = clean_text(desc_raw)
                 if desc_clean:
-                    is_excl, reason = is_excluded_product(final_title, desc_clean, final_price)
-                    if is_excl:
-                        log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
-                        return
-                    if FILTER_ADULT_ONLY:
-                        is_excl_s, reason_s = is_excluded_size(final_size, raw_title_val, desc_clean)
-                        if is_excl_s:
-                            log(f"🚫 [Vinted] Alerte filtrée ({reason_s}) : {final_title} (Taille: {final_size})")
+                    if not bypass_jersey_filters and is_magic_fans_collector_match(desc_clean)[0]:
+                        bypass_jersey_filters = True
+                    if not bypass_jersey_filters:
+                        is_excl, reason = is_excluded_product(final_title, desc_clean, final_price)
+                        if is_excl:
+                            log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
                             return
-                    # Si le titre ne mentionne pas explicitement ASSE/Saint-Étienne (match via Joueur/Sponsor),
-                    # vérifier que la description ne désigne pas un autre club concurrent
-                    if not is_asse_jersey_match(final_title) and not is_asse_jersey_match(desc_clean):
-                        is_conf_d, conf_d = is_conflicting_team(desc_clean)
-                        if is_conf_d:
-                            log(f"🚫 [Vinted] Alerte filtrée (Équipe concurrente dans la description : {conf_d}) : {final_title}")
-                            return
+                        if FILTER_ADULT_ONLY:
+                            is_excl_s, reason_s = is_excluded_size(final_size, raw_title_val, desc_clean)
+                            if is_excl_s:
+                                log(f"🚫 [Vinted] Alerte filtrée ({reason_s}) : {final_title} (Taille: {final_size})")
+                                return
+                        # Si le titre ne mentionne pas explicitement ASSE/Saint-Étienne (match via Joueur/Sponsor),
+                        # vérifier que la description ne désigne pas un autre club concurrent
+                        if not is_asse_jersey_match(final_title) and not is_asse_jersey_match(desc_clean):
+                            is_conf_d, conf_d = is_conflicting_team(desc_clean)
+                            if is_conf_d:
+                                log(f"🚫 [Vinted] Alerte filtrée (Équipe concurrente dans la description : {conf_d}) : {final_title}")
+                                return
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
@@ -2145,6 +2175,25 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 log(f"🚫 Article ignoré dès la liste (Vendeur bloqué @{seller_val}) : '{t_titre}'")
                 continue
 
+            # Cas spécial prioritaire : Recherche Collector 'Magic Fans' (toutes les 2 min ou via flux)
+            is_magic_fans_scan = "Magic Fans" in source_label
+            has_mf_title, mf_phrase_t = is_magic_fans_collector_match(t_titre)
+            if has_mf_title:
+                log(f"🎯 MATCH COLLECTOR MAGIC FANS ('{mf_phrase_t}' dans le titre) : '{t_titre}' ({t_prix})")
+                send_discord_alert(None, item, bypass_jersey_filters=True)
+                continue
+
+            if is_magic_fans_scan:
+                desc_mf = fetch_item_description(item_url)
+                if desc_mf:
+                    has_mf_desc, mf_phrase_d = is_magic_fans_collector_match(desc_mf)
+                    if has_mf_desc:
+                        log(f"🎯 MATCH COLLECTOR MAGIC FANS ('{mf_phrase_d}' dans la description) : '{t_titre}' ({t_prix})")
+                        send_discord_alert(None, item, bypass_jersey_filters=True)
+                        continue
+                log(f"🚫 Article Magic Fans ignoré (Aucune des 4 expressions exactes dans titre/description) : '{t_titre}'")
+                continue
+
             # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€, Vestes)
             is_excl, reason = is_excluded_product(t_titre, '', t_prix)
             if is_excl:
@@ -2258,13 +2307,15 @@ def worker_turbo_sniper():
         ("Maillot Saint Etienne", get_search_url("Maillot Saint Etienne") + "&catalog_ids[]=3267"),
         ("Maillot St Etienne", get_search_url("Maillot St Etienne") + "&catalog_ids[]=3267"),
     ]
+    MAGIC_FANS_URL = get_search_url("Magic Fans")
 
     log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité Foot Temps Réel + Filet Sécurité Alterné)")
-    log("⚡ [Vinted] 4 Scans Foot Direct pour 1 Scan Filet Sécurité en rotation continue")
+    log("⚡ [Vinted] 4 Scans Foot Direct pour 1 Scan Filet Sécurité + Scan Collector 'Magic Fans' toutes les 2 min")
     log("📸 [Vinted] Support jusqu'à 20 photos HD avec notifications silencieuses")
 
     safety_index = 0
     is_initial_scan = True
+    last_magic_fans_scan = 0
 
     while True:
         paris_now = get_paris_time()
@@ -2316,8 +2367,14 @@ def worker_turbo_sniper():
                             page.set_default_timeout(12000)
                         except: pass
 
-                    # Choix de la cible : 4 scans Foot pour 1 scan Filet de sécurité
-                    if cycle_count % 5 == 0:
+                    # Choix de la cible :
+                    # - Toutes les 2 min (120s) : 1 scan rapide Collector 'Magic Fans' (0 impact sur le reste)
+                    # - Sinon : 4 scans Foot pour 1 scan Filet de sécurité
+                    if not is_initial_scan and (now - last_magic_fans_scan) >= 120:
+                        target_url = MAGIC_FANS_URL
+                        scan_label = "Filet Collector 'Magic Fans'"
+                        last_magic_fans_scan = now
+                    elif cycle_count % 5 == 0:
                         label, target_url = SAFETY_QUERIES[safety_index % len(SAFETY_QUERIES)]
                         safety_index += 1
                         scan_label = f"Filet '{label}'"
