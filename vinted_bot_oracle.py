@@ -2519,8 +2519,8 @@ def worker_turbo_sniper():
         ("Magic Fans Fanzine", get_search_url("Fanzine Magic Fans")),
     ]
 
-    log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité Foot Temps Réel + Filet Sécurité Alterné)")
-    log("⚡ [Vinted] 4 Scans Foot Direct pour 1 Scan Filet Sécurité + Cycle Collector 'Magic Fans' toutes les 2 min")
+    log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité 90% Foot Temps Réel + Timeout Ultra-Court 4.5s)")
+    log("⚡ [Vinted] 9 Scans Foot Direct pour 1 Scan Filet Sécurité + Cycle Collector 'Magic Fans'")
     log("📸 [Vinted] Support jusqu'à 20 photos HD avec notifications silencieuses")
 
     safety_index = 0
@@ -2550,7 +2550,7 @@ def worker_turbo_sniper():
                 context.route("**/*", safe_route_filter)
 
                 page = context.new_page()
-                page.set_default_timeout(12000)
+                page.set_default_timeout(4500)
 
                 session_start_time = time.time()
                 cycle_count = 0
@@ -2575,18 +2575,18 @@ def worker_turbo_sniper():
                         except: pass
                         try:
                             page = context.new_page()
-                            page.set_default_timeout(12000)
+                            page.set_default_timeout(4500)
                         except: pass
 
-                    # Choix de la cible :
-                    # - Toutes les 40s (cycle complet en 2 min) : 1 scan rapide Collector 'Magic Fans' (0 impact sur le reste)
-                    # - Sinon : 4 scans Foot pour 1 scan Filet de sécurité
-                    if not is_initial_scan and (now - last_magic_fans_scan) >= 40:
+                    # Choix de la cible (Priorité 90%+ au Flux Direct Foot, surtout aux heures de pointe 17h-22h) :
+                    is_peak_hour = 17 <= paris_now.hour < 22
+                    mf_interval = 90 if is_peak_hour else 60
+                    if not is_initial_scan and (now - last_magic_fans_scan) >= mf_interval:
                         mf_label, target_url = MAGIC_FANS_QUERIES[magic_fans_index % len(MAGIC_FANS_QUERIES)]
                         magic_fans_index += 1
                         scan_label = f"Filet Collector '{mf_label}'"
                         last_magic_fans_scan = now
-                    elif cycle_count % 5 == 0:
+                    elif cycle_count % 10 == 0:
                         label, target_url = SAFETY_QUERIES[safety_index % len(SAFETY_QUERIES)]
                         safety_index += 1
                         scan_label = f"Filet '{label}'"
@@ -2599,7 +2599,7 @@ def worker_turbo_sniper():
                             signal.signal(signal.SIGALRM, watchdog_handler)
                             signal.alarm(120)
 
-                        page.goto(target_url, wait_until='commit', timeout=12000)
+                        page.goto(target_url, wait_until='commit', timeout=4500)
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted] Scan {scan_label} : {len(items)} annonces")
                         consecutive_errors = 0
@@ -2611,10 +2611,16 @@ def worker_turbo_sniper():
                         consecutive_errors += 1
                         err_str = str(e).lower()
                         is_transient = any(k in err_str for k in ["timeout", "interrupted", "err_aborted"])
-                        # En cas d'incident réseau ou timeout, on recycle la session Chromium proprement
-                        # plutôt que de fermer/réouvrir un onglet sous un socket réseau gelé (cause du freeze watchdog)
-                        if is_transient and consecutive_errors < 2:
-                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors}/2) sur {scan_label} : recyclage propre immédiat...")
+                        # Sur 1er timeout court (>4.5s), on abandonne immédiatement ce scan et on relance le suivant en 0.3s
+                        # sans perdre 8s à redémarrer Chromium. Si 2 erreurs de suite, recyclage complet.
+                        if is_transient and consecutive_errors == 1:
+                            log(f"⚡ [Vinted] Réponse lente (>4.5s) sur {scan_label} : abandon immédiat et relance directe...", to_error_log=False)
+                            if hasattr(signal, "SIGALRM"):
+                                signal.alarm(0)
+                            time.sleep(0.3)
+                            continue
+                        elif is_transient and consecutive_errors < 3:
+                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors} consécutives) sur {scan_label} : recyclage propre immédiat...")
                             break
                         else:
                             log(f"⚠️ [Vinted] Erreur locale ({consecutive_errors} consécutives) : {e}")
@@ -2623,8 +2629,11 @@ def worker_turbo_sniper():
                         if hasattr(signal, "SIGALRM"):
                             signal.alarm(0)
 
-                    # Pause équilibrée anti-détection (1.2s à 1.8s avec jitter, cycle global ~2.0s)
-                    time.sleep(random.uniform(1.2, 1.8))
+                    # Pause ultra-réactive (0.8s à 1.2s sur le Flux Direct Foot, 1.1s à 1.5s sur le Filet)
+                    if scan_label == "Flux Direct Foot":
+                        time.sleep(random.uniform(0.8, 1.2))
+                    else:
+                        time.sleep(random.uniform(1.1, 1.5))
 
                 try: browser.close()
                 except: pass
