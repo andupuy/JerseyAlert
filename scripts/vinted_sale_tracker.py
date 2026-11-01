@@ -64,14 +64,28 @@ def format_duration(seconds):
             return f"{days}j {hours}h"
         return f"{days}j"
 
+def parse_price_num(price_str):
+    """Extrait la valeur numérique d'un prix (ex: '80.00 €' -> 80.0)"""
+    if not price_str:
+        return None
+    m = re.search(r"(\d+(?:[\.,]\d+)?)", str(price_str))
+    if m:
+        try:
+            return float(m.group(1).replace(",", "."))
+        except ValueError:
+            return None
+    return None
+
 def get_next_interval(age_seconds):
     """Calcule l'intervalle dégressif en secondes selon l'âge de l'article"""
-    if age_seconds < 3600:
-        return 600       # 0h à 1h : 10 minutes
+    if age_seconds < 360:
+        return 420       # Après le 1er pointage rapide à t+3 min -> prochain à t+10 min (+7 min)
+    elif age_seconds < 3600:
+        return 600       # 0h à 1h : toutes les 10 minutes
     elif age_seconds < 21600:
-        return 1800      # 1h à 6h : 30 minutes
+        return 1800      # 1h à 6h : toutes les 30 minutes
     elif age_seconds < 86400:
-        return 7200      # 6h à 24h : 2 heures
+        return 7200      # 6h à 24h : toutes les 2 heures
     elif age_seconds < 7 * 86400:
         return 86400     # 24h à 7 jours : 24 heures (1x / jour)
     else:
@@ -137,6 +151,7 @@ def patch_discord_message(item, state_type, duration_str=None, fav_count=0):
     patch_url = f"{DISCORD_WEBHOOK_URL}/messages/{msg_id}"
     title = item.get("title", "Article Vinted")
     price = item.get("price", "")
+    initial_price = item.get("initial_price") or price
     size = item.get("size", "")
     brand = item.get("brand", "")
     url = item.get("url", "")
@@ -144,11 +159,22 @@ def patch_discord_message(item, state_type, duration_str=None, fav_count=0):
     base_desc = item.get("description", "")
     item_id = item.get("item_id", "")
 
+    curr_p_num = parse_price_num(price)
+    init_p_num = parse_price_num(initial_price)
+    if curr_p_num is not None and init_p_num is not None and curr_p_num < init_p_num - 0.05:
+        price_display = f"{price} (↘ au lieu de {initial_price})"
+        price_desc_bold = f"**{price}** *(↘ au lieu de {initial_price})*"
+    else:
+        price_display = price
+        price_desc_bold = f"**{price}**"
+
     fav_count = max(0, int(fav_count or 0))
     fav_badge = f" • ❤️ {fav_count} favori{'s' if fav_count > 1 else ''}"
 
-    # Injection / mise à jour propre de la ligne favoris en haut de la description
+    # Injection / mise à jour propre du prix et de la ligne favoris en haut de la description
     desc = base_desc
+    if desc:
+        desc = re.sub(r"💰 \*\*[^\|]+\*\*(?: \*\(↘ au lieu de [^\)]+\)\*)?", f"💰 {price_desc_bold}", desc, count=1)
     fav_line = f"❤️ **{fav_count} favori{'s' if fav_count > 1 else ''}** sur Vinted"
     if "❤️ **" in desc:
         desc = re.sub(r"❤️ \*\*\d+ favoris?\*\* sur Vinted", fav_line, desc)
@@ -165,25 +191,25 @@ def patch_discord_message(item, state_type, duration_str=None, fav_count=0):
         new_title = f"🔴 VENDU [en {dur_label}] • {title}"
         new_color = 0xED4245  # Rouge vif Discord
         footer_text = f"Vinted Sniper • ID: {item_id} • Vendu en {dur_label}{fav_badge}"
-        new_content = f"~~@everyone | {title}~~\n🔴 **VENDU** en **{dur_label}**{fav_badge} | 💰 {price} | 📏 {size} | 🏷️ {brand}"
+        new_content = f"~~@everyone | {title}~~\n🔴 **VENDU** en **{dur_label}**{fav_badge} | 💰 {price_display} | 📏 {size} | 🏷️ {brand}"
 
     elif state_type == "RESERVED":
         new_title = f"🟠 RÉSERVÉ • {title}"
         new_color = 0xFAA61A  # Orange Discord
         footer_text = f"Vinted Sniper • ID: {item_id} • Article réservé{fav_badge}"
-        new_content = f"🟠 **RÉSERVÉ**{fav_badge} | {title}\n💰 {price} | 📏 {size} | 🏷️ {brand}"
+        new_content = f"🟠 **RÉSERVÉ**{fav_badge} | {title}\n💰 {price_display} | 📏 {size} | 🏷️ {brand}"
 
     elif state_type == "REMOVED":
         new_title = f"⚫ SUPPRIMÉ / RETIRÉ • {title}"
         new_color = 0x747F8D  # Gris sombre Discord
         footer_text = f"Vinted Sniper • ID: {item_id} • Annonce retirée{fav_badge}"
-        new_content = f"~~@everyone | {title}~~\n⚫ **ANNONCE SUPPRIMÉE / RETIRÉE** | 💰 {price} | 📏 {size} | 🏷️ {brand}"
+        new_content = f"~~@everyone | {title}~~\n⚫ **ANNONCE SUPPRIMÉE / RETIRÉE** | 💰 {price_display} | 📏 {size} | 🏷️ {brand}"
 
     else:  # AVAILABLE
         new_title = f"🔔 {title}"
         new_color = 0x09B83E  # Vert d'origine
         footer_text = f"Vinted Sniper • ID: {item_id}{fav_badge}"
-        new_content = f"@everyone | {title}\n💰 {price} | 📏 {size} | 🏷️ {brand}{fav_badge}"
+        new_content = f"@everyone | {title}\n💰 {price_display} | 📏 {size} | 🏷️ {brand}{fav_badge}"
 
     embed1 = {
         "title": new_title,
@@ -220,9 +246,9 @@ def patch_discord_message(item, state_type, duration_str=None, fav_count=0):
 
 def check_item_http(session, url):
     """
-    Vérifie le statut réel et le nombre de favoris (❤️) via simple requête HTTP (~0.18s, 0 Chromium).
+    Vérifie le statut réel, le nombre de favoris (❤️) et le prix actuel via simple requête HTTP (~0.18s, 0 Chromium).
     Purge automatiquement les cookies expirés (access_token_web Vinted expire au bout de 2h).
-    Retourne (status, fav_count).
+    Retourne (status, fav_count, price_val).
     """
     for attempt in range(2):
         try:
@@ -232,7 +258,7 @@ def check_item_http(session, url):
 
             resp = session.get(url, timeout=10, allow_redirects=True)
             if resp.status_code == 404:
-                return "SUPPRIMÉ", None
+                return "SUPPRIMÉ", None, None
             if resp.status_code in [401, 403, 429] or resp.status_code >= 500:
                 if resp.status_code == 429:
                     log(f"⏳ Rate-limit Vinted (HTTP 429) sur {url}, pause 15s avant nouvel essai...")
@@ -241,7 +267,7 @@ def check_item_http(session, url):
                 if attempt == 0:
                     continue
                 log(f"⚠️ HTTP {resp.status_code} sur {url}")
-                return "ERROR", None
+                return "ERROR", None, None
 
             resp.encoding = "utf-8"
             html = resp.text
@@ -257,6 +283,15 @@ def check_item_http(session, url):
                     fav_count = int(m_fav.group(1))
                 except ValueError:
                     fav_count = 0
+
+            # Extraction du prix actuel hors protection acheteur
+            price_val = None
+            m_price = re.search(r'\\?"price\\?"\s*:\s*\{[^\}]{0,120}\\?"amount\\?"\s*:\s*\\?"([0-9\.]+)', html)
+            if m_price:
+                try:
+                    price_val = float(m_price.group(1))
+                except ValueError:
+                    price_val = None
 
             has_buy = 'data-testid="item-buy-button"' in html or '"item-buy-button"' in html
 
@@ -279,29 +314,29 @@ def check_item_http(session, url):
             )
 
             if is_vendu:
-                return "VENDU", fav_count
+                return "VENDU", fav_count, price_val
             if is_reserve:
-                return "RÉSERVÉ", fav_count
+                return "RÉSERVÉ", fav_count, price_val
             if is_supprime:
-                return "SUPPRIMÉ", fav_count
+                return "SUPPRIMÉ", fav_count, price_val
             if has_buy:
-                return "DISPONIBLE", fav_count
+                return "DISPONIBLE", fav_count, price_val
 
             # Si ni bouton acheter ni marqueur vendu (ex: cookie access_token_web expiré), on purge et réessaie
             if attempt == 0:
                 continue
-            return "ERROR", None
+            return "ERROR", None, None
 
         except requests.Timeout:
             if attempt == 0:
                 continue
-            return "TIMEOUT", None
+            return "TIMEOUT", None, None
         except Exception as e:
             if attempt == 0:
                 continue
             log(f"⚠️ Erreur HTTP {url}: {e}")
-            return "ERROR", None
-    return "ERROR", None
+            return "ERROR", None, None
+    return "ERROR", None, None
 
 def run_tracker():
     # Priorité CPU basse pour ne jamais concurrencer le sniper temps réel sur un VPS 1 vCPU
@@ -361,9 +396,19 @@ def run_tracker():
 
                 # 2. Vérification HTTP ultra-légère sur Vinted
                 url = item.get("url") or f"https://www.vinted.fr/items/{item_id}"
-                status, fav_count = check_item_http(session, url)
+                status, fav_count, price_val = check_item_http(session, url)
 
                 current_fav = fav_count if fav_count is not None else prev_fav
+                initial_price = item.get("initial_price") or item.get("price", "")
+                prev_price_str = item.get("price", "")
+                prev_price_num = parse_price_num(prev_price_str)
+                price_changed = False
+                if price_val is not None and prev_price_num is not None and abs(price_val - prev_price_num) >= 0.05:
+                    new_price_str = f"{price_val:.2f} €"
+                    item["price"] = new_price_str
+                    item["initial_price"] = initial_price
+                    price_changed = True
+                    log(f"💰 [Tracker] Changement de prix détecté pour #{item_id} : {prev_price_str} -> {new_price_str} (initial: {initial_price})")
 
                 if status == "VENDU":
                     duration = now - created_at
@@ -375,6 +420,8 @@ def run_tracker():
                     update_tracked_item(item_id, {
                         "status": "SOLD",
                         "sub_status": "SOLD",
+                        "price": item.get("price", prev_price_str),
+                        "initial_price": initial_price,
                         "fav_count": current_fav,
                         "sold_at": now,
                         "sold_duration_seconds": duration,
@@ -394,10 +441,12 @@ def run_tracker():
 
                 elif status == "RÉSERVÉ":
                     log(f"⏳ [Tracker] Article #{item_id} RÉSERVÉ (❤️ {current_fav}). Prochain check dans 10 min.")
-                    if prev_sub != "RESERVED" or current_fav != prev_fav:
+                    if prev_sub != "RESERVED" or current_fav != prev_fav or price_changed:
                         patch_discord_message(item, "RESERVED", fav_count=current_fav)
                     update_tracked_item(item_id, {
                         "sub_status": "RESERVED",
+                        "price": item.get("price", prev_price_str),
+                        "initial_price": initial_price,
                         "fav_count": current_fav,
                         "check_count": item.get("check_count", 0) + 1,
                         "last_checked_at": now,
@@ -411,13 +460,15 @@ def run_tracker():
                     else:
                         dur_age_str = format_duration(age)
                         dur_next_str = format_duration(interval)
-                        log(f"✅ [Tracker] #{item_id} DISPONIBLE (❤️ {current_fav} fav | âge: {dur_age_str} | prochain check: {dur_next_str})")
+                        log(f"✅ [Tracker] #{item_id} DISPONIBLE (💰 {item.get('price')} | ❤️ {current_fav} fav | âge: {dur_age_str} | prochain check: {dur_next_str})")
                         
-                        if prev_sub == "RESERVED" or current_fav != prev_fav or int(item.get("check_count") or 0) == 0:
+                        if prev_sub == "RESERVED" or current_fav != prev_fav or price_changed or int(item.get("check_count") or 0) == 0:
                             patch_discord_message(item, "AVAILABLE", fav_count=current_fav)
 
                         update_tracked_item(item_id, {
                             "sub_status": "AVAILABLE",
+                            "price": item.get("price", prev_price_str),
+                            "initial_price": initial_price,
                             "fav_count": current_fav,
                             "check_count": item.get("check_count", 0) + 1,
                             "last_checked_at": now,

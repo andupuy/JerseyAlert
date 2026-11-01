@@ -908,13 +908,15 @@ def is_flux_smart_candidate(title_str):
         if re.search(r'\b(maillots?|jerseys?|trikots?|camisetas?|maglias?|tenues?|t[- ]?shirts?|tee[- ]?shirts?|shirts?|hauts?)\b', t_clean):
             return True, "Couleur verte"
 
-    # 3. Titre neutre minimaliste de football (accepte 1 à 3 qualificatifs neutres + taille optionnelle)
+    # 3. Titre neutre minimaliste de football (nettoie la ponctuation et accepte 1 à 3 qualificatifs + tailles M..4XL)
+    t_words = re.sub(r'[\.,;!\?\-\(\)\[\]/\:]+', ' ', t_clean)
+    t_words = re.sub(r'\s+', ' ', t_words).strip()
     neutral_foot_pat = (
         r'^(?:maillots?|jerseys?|t[- ]?shirts?|tee[- ]?shirts?)'
-        r'(?:\s+(?:de\s+foot(?:ball)?|foot(?:ball)?|vintage|collector|match|ancien|retro|porte|prepare|officiel|authentique|domicile|exterieur|gardien|pro)){1,3}'
-        r'(?:\s+(?:taille\s+[a-z0-9/]+|[smlxl]{1,3}|[0-9]{2,4}))?$'
+        r'(?:\s+(?:de\s+foot(?:ball)?|foot(?:ball)?|sport|vintage|collector|match|ancien|retro|porte|prepare|officiel|authentique|domicile|exterieur|gardien|pro)){1,3}'
+        r'(?:\s+(?:taille\s+[a-z0-9/]+|[0-9]?[smlxl]{1,4}|[0-9]{2,4}))?$'
     )
-    if re.search(neutral_foot_pat, t_clean.strip()):
+    if re.search(neutral_foot_pat, t_words):
         return True, "Titre neutre football"
 
     # 4. Termes du club / Forez / Chaudron / Manufrance
@@ -1938,6 +1940,25 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                             log(f"🚫 [Vinted] Alerte filtrée (Catégorie Vinted non-textile : {m_cat.group(1)}) : {final_title}")
                             return
 
+                # Récupération de secours de la taille / marque / état depuis le JSON de la fiche produit si N/A
+                if final_size == 'N/A':
+                    m_sz = re.search(r'\\?"code\\?"\s*:\s*\\?"size\\?"[^\}]{0,200}\\?"value\\?"\s*:\s*\\?"([^"\\]+)', html)
+                    if m_sz and m_sz.group(1).strip():
+                        final_size = clean_text(m_sz.group(1).strip())
+                        if not bypass_jersey_filters and FILTER_ADULT_ONLY:
+                            is_excl_sz, reason_sz = is_excluded_size(final_size, raw_title_val)
+                            if is_excl_sz:
+                                log(f"🚫 [Vinted] Alerte filtrée après lecture fiche ({reason_sz}) : {final_title} (Taille: {final_size})")
+                                return
+                if final_brand == 'N/A':
+                    m_br = re.search(r'\\?"code\\?"\s*:\s*\\?"brand\\?"[^\}]{0,200}\\?"title\\?"\s*:\s*\\?"([^"\\]+)', html)
+                    if m_br and m_br.group(1).strip():
+                        final_brand = clean_text(m_br.group(1).strip())
+                if final_status in ['N/A', 'Non spécifié']:
+                    m_st = re.search(r'\\?"code\\?"\s*:\s*\\?"status\\?"[^\}]{0,200}\\?"value\\?"\s*:\s*\\?"([^"\\]+)', html)
+                    if m_st and m_st.group(1).strip():
+                        final_status = clean_text(m_st.group(1).strip())
+
                 # Récupération du pseudo vendeur
                 m_user = re.search(r'\"login\":\"([^\"]+)\"', html)
                 if m_user:
@@ -2104,13 +2125,14 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
 
         log(f"✅ [Vinted] Alerte envoyée #{item_id} ({min(len(photos), 20)} photos certifiées, description Garmin incluse)")
 
-        # Enregistrement dans le tracker individuel de cycle de vie
+        # Enregistrement dans le tracker individuel de cycle de vie (1er pointage rapide à t + 3 min)
         now_ts = time.time()
         record_tracked_item({
             "item_id": str(item_id),
             "discord_message_id": discord_msg_id,
             "title": final_title,
             "price": final_price,
+            "initial_price": final_price,
             "size": final_size,
             "brand": final_brand,
             "status_item": final_status,
@@ -2123,7 +2145,7 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
             "status": "ACTIVE",
             "check_count": 0,
             "last_checked_at": None,
-            "next_check_at": now_ts + 600,
+            "next_check_at": now_ts + 180,
             "sold_at": None,
             "sold_duration_seconds": None,
             "sold_duration_str": None
