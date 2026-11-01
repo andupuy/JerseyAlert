@@ -698,7 +698,7 @@ def load_asse_knowledge():
         'souici', 'tallec', 'tardieu', 'thioub', 'tormin', 'trauco', 'vada', 'vagner', 'vasseur',
         'viviani', 'wolff', 'yahia', 'youssouf',
         # Homonymes internationaux / stars d'autres clubs (exigent prénom + nom si "ASSE" absent)
-        'pogba', 'hernandez', 'alonso', 'sanchez', 'jorginho', 'fernandes', 'fernandez',
+        'fournier', 'pogba', 'hernandez', 'alonso', 'sanchez', 'jorginho', 'fernandes', 'fernandez',
         'christensen', 'oliveira', 'ramirez', 'rivera', 'laudrup', 'milla', 'almeida', 'guarin',
         'coulibaly', 'kamara', 'ndiaye', 'gueye', 'sarr', 'sakho', 'sidibe', 'bakayoko',
         'thiaw', 'maupay', 'saintmaximin', 'modeste', 'mirallas', 'coupet', 'malbranque',
@@ -1078,14 +1078,14 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
             if re.search(kw_pat, t) or (d and re.search(kw_pat, d)):
                 return True, f"Mot-clé bloqué ({kw})"
 
-    # 18. Sports hors-football (rugby, RCT, etc.) et vêtements non sportifs (blouse, pull, chemisier, gilet)
-    off_clothing = r'\b(rugby|rct|top\s*14|six\s*nations|blouse|blouses|chemisier|chemisiers|pull|pulls|gilet|gilets|cardigan|cardigans)\b'
+    # 18. Sports hors-football (rugby, basket, NBA, NFL, etc.) et vêtements non sportifs (blouse, pull, chemisier, gilet)
+    off_clothing = r'\b(rugby|rct|top\s*14|six\s*nations|basket|basketball|nba|wnba|nfl|baseball|mlb|hockey|nhl|blouse|blouses|chemisier|chemisiers|pull|pulls|gilet|gilets|cardigan|cardigans)\b'
     if re.search(off_clothing, t):
         if not is_asse_jersey_match(t):
-            return True, "Sport hors-football ou vêtement non sportif (rugby/blouse/pull)"
+            return True, "Sport hors-football ou vêtement non sportif (rugby/basket/nba/pull)"
     if d and re.search(off_clothing, d):
         if not is_asse_jersey_match(t) and not is_asse_jersey_match(d):
-            return True, "Sport hors-football ou vêtement non sportif (rugby/blouse/pull)"
+            return True, "Sport hors-football ou vêtement non sportif (rugby/basket/nba/pull)"
 
     # 19. Mangas, animés, esports, fiction (Captain Tsubasa, Olive et Tom, Inazuma, Blue Lock)
     anime_pattern = r'\b(captain\s+tsubasa|tsubasa|olive\s+et\s+tom|inazuma|blue\s+lock)\b'
