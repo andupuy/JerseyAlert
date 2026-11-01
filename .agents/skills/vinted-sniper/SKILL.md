@@ -26,7 +26,21 @@ Ce guide opérationnel régit la maintenance, le diagnostic et le déploiement d
 
 ---
 
-## 2. Procédure d'Audit d'une Annonce Vinted
+## 2. Contrôle de Santé Instantané (Healthcheck)
+
+Pour vérifier l'état complet du système en 1 clic :
+```bash
+python3 ".agents/skills/vinted-sniper/scripts/healthcheck.py"
+```
+Il vérifie :
+* L'état des 3 services systemd (`vinted-bot`, `vinted-tracker`, `vinted-dashboard`).
+* La RAM, le Swap et la charge processeur du VPS.
+* Le compteur d'erreurs réelles du dashboard.
+* La cadence et les timestamps des derniers scans Vinted en direct.
+
+---
+
+## 3. Procédure d'Audit d'une Annonce Vinted
 
 Lorsqu'un utilisateur demande **"Pourquoi j'ai reçu ça ?"** ou signale une annonce ratée / doublée :
 
@@ -44,7 +58,7 @@ Lorsqu'un utilisateur demande **"Pourquoi j'ai reçu ça ?"** ou signale une ann
 
 ---
 
-## 3. Procédure de Déploiement Sécurisé sur le VPS
+## 4. Procédure de Déploiement Sécurisé sur le VPS
 
 Ne jamais déployer sans tester la syntaxe locale.
 
@@ -63,7 +77,7 @@ Ne jamais déployer sans tester la syntaxe locale.
 
 ---
 
-## 4. Règles Métier de Détection ASSE
+## 5. Règles Métier de Détection ASSE
 
 ### A. Flux Direct Foot (Temps Réel - 90% des scans)
 * Balaye le catalogue Vinted football (maillots + t-shirts de sport) trié par nouveautés.
