@@ -2409,7 +2409,6 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
             elif not is_filet:
                 # Flux Direct Foot : Détection aussi par Joueur ASSE / Sponsor historique / Chaudron
                 # si le titre contient un mot de maillot ou t-shirt et aucune équipe concurrente
-                import re
                 has_shirt_kw = bool(re.search(
                     r'\b(maillots?|jerseys?|trikots?|camisetas?|maglias?|tenues?|ensembles?|t-?shirts?|tee[- ]?shirts?|shirts?|hauts?)\b',
                     t_titre, re.IGNORECASE
