@@ -858,6 +858,16 @@ def is_asse_signal(text, is_filet=False):
         if re.search(r'\b' + re.escape(p_last) + r'\b', t_clean):
             return True, f"Joueur ({p_full})"
 
+    # 3b. Initiale + point + nom de joueur ASSE (en mode Filet / inspection description)
+    if is_filet:
+        for m_init in re.finditer(r'\b([a-z])\s*\.\s*([a-z]{4,})\b', t_clean):
+            init_letter, last_name = m_init.group(1), m_init.group(2)
+            if last_name in ASSE_PLAYERS and ASSE_PLAYERS[last_name].lower().startswith(init_letter):
+                return True, f"Joueur initiales ({ASSE_PLAYERS[last_name]})"
+            for full_p, full_label in ASSE_PLAYERS_FULL.items():
+                if full_p.startswith(init_letter) and full_p.split()[-1] == last_name:
+                    return True, f"Joueur initiales ({full_label})"
+
     # 4. Mots-clés club / Chaudron / Forez / Peuple Vert / Les Verts
     for kw in ['chaudron', 'geoffroy guichard', 'geoffroy-guichard', 'forez', 'peuple vert', 'allez les verts', 'les verts', 'des verts']:
         if kw in t_clean:
@@ -871,7 +881,7 @@ def is_flux_smart_candidate(title_str):
     une inspection asynchrone de sa description en tâche de fond (Queue) :
     1. Présence d'une initiale + nom de joueur (ex: 'J. Clement', 'L. Perrin')
     2. Titre avec couleur verte (vert, green) sans club rival
-    3. Titre neutre court de football (ex: 'Maillot de foot', 'Maillot vintage')
+    3. Titre neutre court de football (ex: 'Maillot de foot', 'Maillot vintage', 'T-shirt collector')
     4. Termes / sponsors club (Chaudron, Geoffroy-Guichard, Forez, Manufrance...)
     """
     if not title_str:
@@ -884,23 +894,27 @@ def is_flux_smart_candidate(title_str):
     if re.search(r'\b(ciclismo|cyclisme|velo|radsport|gymshark|fitness|running|trail|basket|nba|nfl|rugby)\b', t_clean):
         return False, ""
 
-    # 1. Initiale + nom de joueur (ex: 'j. clement', 'j clement', 'l. perrin', 's. ruffier')
-    m_init = re.search(r'\b([a-z])\s*[\.\s]\s*([a-z]{4,})\b', t_clean)
-    if m_init:
+    # 1. Initiale + nom de joueur (ex: 'j. clement', 'l. perrin', 's. ruffier' - scan de toutes les occurrences)
+    for m_init in re.finditer(r'\b([a-z])\s*\.\s*([a-z]{4,})\b', t_clean):
         init_letter, last_name = m_init.group(1), m_init.group(2)
-        if last_name in ASSE_PLAYERS:
-            return True, f"Joueur initiales ({init_letter.upper()}. {last_name.title()})"
-        for full_p in ASSE_PLAYERS_FULL:
-            if full_p.startswith(init_letter) and full_p.endswith(last_name):
-                return True, f"Joueur initiales ({ASSE_PLAYERS_FULL[full_p]})"
+        if last_name in ASSE_PLAYERS and ASSE_PLAYERS[last_name].lower().startswith(init_letter):
+            return True, f"Joueur initiales ({ASSE_PLAYERS[last_name]})"
+        for full_p, full_label in ASSE_PLAYERS_FULL.items():
+            if full_p.startswith(init_letter) and full_p.split()[-1] == last_name:
+                return True, f"Joueur initiales ({full_label})"
 
     # 2. Couleur verte dans un vêtement foot / sport (sans club rival)
     if re.search(r'\b(vert|verte|verts|vertes|green)\b', t_clean):
-        if re.search(r'\b(maillots?|jerseys?|trikots?|camisetas?|maglias?|tenues?|t-?shirts?|tee[- ]?shirts?|shirts?|hauts?)\b', t_clean):
+        if re.search(r'\b(maillots?|jerseys?|trikots?|camisetas?|maglias?|tenues?|t[- ]?shirts?|tee[- ]?shirts?|shirts?|hauts?)\b', t_clean):
             return True, "Couleur verte"
 
-    # 3. Titre neutre minimaliste de football
-    if re.search(r'^(?:maillot|jersey)\s+(?:de\s+foot(?:ball)?|vintage|collector|match|ancien)(?:\s+(?:taille\s+[a-z0-9]+|[smlxl]+|[0-9]{2}))?$', t_clean.strip()):
+    # 3. Titre neutre minimaliste de football (accepte 1 à 3 qualificatifs neutres + taille optionnelle)
+    neutral_foot_pat = (
+        r'^(?:maillots?|jerseys?|t[- ]?shirts?|tee[- ]?shirts?)'
+        r'(?:\s+(?:de\s+foot(?:ball)?|foot(?:ball)?|vintage|collector|match|ancien|retro|porte|prepare|officiel|authentique|domicile|exterieur|gardien|pro)){1,3}'
+        r'(?:\s+(?:taille\s+[a-z0-9/]+|[smlxl]{1,3}|[0-9]{2,4}))?$'
+    )
+    if re.search(neutral_foot_pat, t_clean.strip()):
         return True, "Titre neutre football"
 
     # 4. Termes du club / Forez / Chaudron / Manufrance
@@ -974,14 +988,17 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
             return True, "Livre / Magazine / Journal"
 
     # 7b. Programme de match / Revue officielle ASSE intitulée 'Maillot Vert' (sans le mot 'magazine')
-    # Ex: 'ASSE – Maillot Vert – n° 33 - 2020' ou 'ASSE Maillot Vert n° 32 du 25/01/2020'
+    # Ex: 'ASSE – Maillot Vert – n° 33 - 2020', 'ASSE Maillot Vert n° 32 du 25/01/2020' ou 'ASSE –Maillot Vert – 2019'
     mv_mag_pattern = (
         r'\bmaillot\s+vert\b[\s–\-\—:]*'
         r'(?:(?:n[°oº]|num[eé]ro|#)\s*\d+\s*(?:du\s+\d{1,2}[/\-\.]\d{1,2}|[–\-\—]\s*(?:19|20)\d{2}\b)'
         r'|hors[- ]s[eé]rie\b)'
-        r'|\b(?:programme|hebdo|mensuel|parution|exemplaire)\s+maillot\s+vert\b'
+        r'|\b(?:programme|hebdo|hebdomadaire|mensuel|parution|exemplaire|revue|abonnement)\s+maillot\s+vert\b'
+        r'|^asse\s*[–\-\—]+\s*maillot\s+vert\s*[–\-\—]+\s*(?:19|20)\d{2}\s*$'
     )
     if re.search(mv_mag_pattern, t) or (d and re.search(mv_mag_pattern, d)):
+        return True, "Programme / Magazine 'Maillot Vert'"
+    if re.search(r'\bmaillot\s+vert\b', t) and d and re.search(r'\b(revue|mensuel|hebdomadaire|num[eé]ros?|parution|abonnement)\b', d):
         return True, "Programme / Magazine 'Maillot Vert'"
 
     # 8. Fanions, drapeaux, bannières, écharpes, foulards
@@ -1350,7 +1367,7 @@ def save_filet_seen_ids_cache(seen_set):
     except Exception as e:
         log(f"⚠️ Erreur sauvegarde cache Filet: {e}")
 
-def fetch_item_description(item_url):
+def fetch_item_description(item_url, item=None):
     """Récupère rapidement la description d'une annonce via une mini-requête HTTP optimisée avec retry silencieux"""
     if not item_url:
         return ""
@@ -1364,6 +1381,8 @@ def fetch_item_description(item_url):
             if resp.status_code == 200:
                 resp.encoding = 'utf-8'
                 html = resp.text
+                if isinstance(item, dict):
+                    item['_prefetched_html'] = html
                 desc_raw = ""
                 m_json = re.search(r'\"description\":\"(.*?)\"', html)
                 if m_json:
@@ -1881,20 +1900,23 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
             log(f"🚫 [Vinted] Alerte bloquée : vendeur '{item['seller']}' dans la liste noire !")
             return
 
-        # Micro-fetch ultra-rapide HTTP (200-300ms) pour récupérer description, photos HD et vendeur
+        # Micro-fetch ultra-rapide HTTP (200-300ms) ou réutilisation instantanée (0ms) si déjà pré-chargé
         photos = [photo_url] if photo_url else []
         desc_clean = ""
         seller_name = item.get('seller', '')
         initial_fav_count = 0
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept-Language': 'fr-FR,fr;q=0.9',
-            }
-            resp = requests.get(item_url, headers=headers, timeout=4)
-            if resp.status_code == 200:
-                resp.encoding = 'utf-8'
-                html = resp.text
+            html = item.pop('_prefetched_html', None)
+            if not html:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'fr-FR,fr;q=0.9',
+                }
+                resp = requests.get(item_url, headers=headers, timeout=4)
+                if resp.status_code == 200:
+                    resp.encoding = 'utf-8'
+                    html = resp.text
+            if html:
 
                 # Extraction du nombre initial de favoris ❤️ (supporte JSON normal et échappé Next.js)
                 m_fav = (
@@ -2154,11 +2176,25 @@ def worker_smart_inspection():
                     continue
 
             log(f"🕵️ [Smart-Inspector] Inspection description pour #{item_id} ({reason_candidate}) : '{t_titre}'")
-            desc = fetch_item_description(item_url)
+            desc = fetch_item_description(item_url, item=item)
             if desc:
+                # Cas particulier : inspection Collector Magic Fans déportée hors du verrou principal
+                if reason_candidate == "Magic Fans Collector":
+                    has_mf_desc, mf_phrase_d = is_magic_fans_collector_match(desc)
+                    if has_mf_desc:
+                        log(f"🎯 MATCH COLLECTOR MAGIC FANS ('{mf_phrase_d}' dans la description) : '{t_titre}' ({t_prix})")
+                        send_discord_alert(None, item, bypass_jersey_filters=True)
+                    else:
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans ignoré (Aucune des 4 expressions exactes) : '{t_titre}'")
+                    smart_inspection_queue.task_done()
+                    time.sleep(1.5)
+                    continue
+
                 # Vérifier exclusion produit dans la description
                 is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
                 if is_excl_d:
+                    item.pop('_prefetched_html', None)
                     log(f"🚫 [Smart-Inspector] Article #{item_id} exclu description ({reason_d}) : '{t_titre}'")
                     smart_inspection_queue.task_done()
                     continue
@@ -2166,6 +2202,7 @@ def worker_smart_inspection():
                 if FILTER_ADULT_ONLY:
                     is_excl_sd, reason_sd = is_excluded_size(item.get('size', 'N/A'), t_titre, desc)
                     if is_excl_sd:
+                        item.pop('_prefetched_html', None)
                         log(f"🚫 [Smart-Inspector] Article #{item_id} exclu taille ({reason_sd}) : '{t_titre}'")
                         smart_inspection_queue.task_done()
                         continue
@@ -2173,16 +2210,18 @@ def worker_smart_inspection():
                 # Vérifier absence de club rival en description
                 is_conf_d, conf_d = is_conflicting_team(desc)
                 if is_conf_d:
+                    item.pop('_prefetched_html', None)
                     log(f"🚫 [Smart-Inspector] Article #{item_id} exclu club rival ({conf_d}) : '{t_titre}'")
                     smart_inspection_queue.task_done()
                     continue
 
-                # Signal ASSE dans la description ?
+                # Signal ASSE dans la description (ou combiné titre + description) ?
                 has_sig_d, sig_reason_d = is_asse_signal(desc, is_filet=True)
                 if has_sig_d:
                     log(f"🎯 MATCH SMART-INSPECTOR #{item_id} ({sig_reason_d} en description) : '{t_titre}' ({t_prix})")
                     send_discord_alert(None, item)
                 else:
+                    item.pop('_prefetched_html', None)
                     log(f"ℹ️ [Smart-Inspector] Pas de confirmation ASSE en description pour #{item_id} : '{t_titre}'")
 
             smart_inspection_queue.task_done()
@@ -2315,14 +2354,16 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 continue
 
             if is_magic_fans_scan:
-                desc_mf = fetch_item_description(item_url)
-                if desc_mf:
-                    has_mf_desc, mf_phrase_d = is_magic_fans_collector_match(desc_mf)
-                    if has_mf_desc:
-                        log(f"🎯 MATCH COLLECTOR MAGIC FANS ('{mf_phrase_d}' dans la description) : '{t_titre}' ({t_prix})")
-                        send_discord_alert(None, item, bypass_jersey_filters=True)
-                        continue
-                log(f"🚫 Article Magic Fans ignoré (Aucune des 4 expressions exactes dans titre/description) : '{t_titre}'")
+                # Pré-filtrage rapide des articles manifestement hors-sujet (Magic The Gathering, NBA, Harry Potter, Disney...)
+                mf_noise_pat = r'\b(magic\s+the\s+gathering|mtg|magic\s+johnson|orlando\s+magic|harry\s+potter|disney|winx|pokemon|yu[- ]?gi[- ]?oh|campanilla|clochette|barbie|lego|playmobil|funko|kpop|bts|stray\s+kids|5\s+majeur|nba|basket)\b'
+                if re.search(mf_noise_pat, t_titre, re.IGNORECASE):
+                    log(f"🚫 Article Magic Fans ignoré dès le titre (Hors-sujet) : '{t_titre}'")
+                    continue
+                try:
+                    smart_inspection_queue.put_nowait((item, "Magic Fans Collector"))
+                    log(f"📥 [Magic Fans] Candidat en file d'inspection asynchrone : '{t_titre}'")
+                except queue.Full:
+                    pass
                 continue
 
             # 1. Filtrage des produits indésirables (Mug, Panini, Prix > 350€, Vestes)
@@ -2382,7 +2423,7 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                     log(f"🎯 MATCH {source_label} ({sig_reason_t}) : '{t_titre}' ({t_prix})")
                 else:
                     # Si pas de signal direct dans le titre, test dans la description
-                    desc = fetch_item_description(item_url)
+                    desc = fetch_item_description(item_url, item=item)
                     if desc:
                         is_excl_d, reason_d = is_excluded_product(t_titre, desc, t_prix)
                         if is_excl_d:
