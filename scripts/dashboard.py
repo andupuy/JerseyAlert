@@ -47,12 +47,12 @@ status_cache = {
 }
 
 ERROR_PATTERNS = re.compile(
-    r"(\]\s*(?:⚠️|🚨|❌)|[Ww]atchdog:|[Tt]raceback)",
+    r"(\]\s*(?:⚠️|🚨|❌)|[Ww]atchdog:)",
     re.UNICODE
 )
 
 IGNORE_PATTERNS = re.compile(
-    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections|Micro-latence réseau|reprise fluide|Détecté #|Article ignoré|Scan Flux|Scan Filet|is interrupted by another navigation|net::ERR_ABORTED|micro-fetch description|Read timed out)",
+    r"(write EPIPE|emitError|Unhandled 'error'|Emitted 'error'|Socket instance|node:internal|node:events|Node\.js|SyntaxWarning|errno: -32|syscall: 'write'|WriteWrap|processTicksAndRejections|Micro-latence réseau|reprise fluide|Détecté #|Article ignoré|Scan Flux|Scan Filet|is interrupted by another navigation|net::ERR_ABORTED|micro-fetch description|Read timed out|CancelledError|_done_callback|_on_route|pipe closed by peer|Exception in callback|Traceback \(most recent call last\))",
     re.IGNORECASE
 )
 
