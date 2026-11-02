@@ -180,7 +180,7 @@ def audit(item_arg):
     print(f"   Signal ASSE Description      : {'🎯 ' + sig_reason_desc if is_sig_desc else '❌ Aucun'}")
 
     # 4. Filtre d'exclusion produit (vélos, nba, training, etc.)
-    is_excl_p, reason_p = bot.is_excluded_product(title, brand, desc)
+    is_excl_p, reason_p = bot.is_excluded_product(title, desc, price)
     print(f"4️⃣ Exclusion Produit / Sport    : {'🚫 EXCLU (' + reason_p + ')' if is_excl_p else '✅ Valide'}")
 
     # 5. Filtre de taille
