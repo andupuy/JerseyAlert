@@ -509,6 +509,7 @@ OTHER_TEAMS_PATTERNS = {
     'Rouen': r'\b(fc\s+rouen|rouen)\b',
 
     # Clubs européens
+    'Sant Andreu': r'\b(sant\s+andreu|ue\s+sant\s+andreu)\b',
     'Real Madrid': r'\b(real\s+madrid)\b',
     'FC Barcelone': r'\b(barcelona|bar[çc]a)\b',
     'Atletico': r'\b(atletico\s+madrid|atletico)\b',
@@ -704,7 +705,7 @@ def load_asse_knowledge():
         'souici', 'tallec', 'tardieu', 'thioub', 'tormin', 'trauco', 'vada', 'vagner', 'vasseur',
         'viviani', 'wolff', 'yahia', 'youssouf',
         # Homonymes internationaux / stars d'autres clubs (exigent prénom + nom si "ASSE" absent)
-        'fournier', 'pogba', 'hernandez', 'alonso', 'sanchez', 'jorginho', 'fernandes', 'fernandez',
+        'fournier', 'andreu', 'pogba', 'hernandez', 'alonso', 'sanchez', 'jorginho', 'fernandes', 'fernandez',
         'christensen', 'oliveira', 'ramirez', 'rivera', 'laudrup', 'milla', 'almeida', 'guarin',
         'coulibaly', 'kamara', 'ndiaye', 'gueye', 'sarr', 'sakho', 'sidibe', 'bakayoko',
         'thiaw', 'maupay', 'saintmaximin', 'modeste', 'mirallas', 'coupet', 'malbranque',
@@ -722,6 +723,7 @@ def load_asse_knowledge():
         'etienne green': 'Etienne Green',
         'julien sable': 'Julien Sablé',
         'nicolas marin': 'Nicolas Marin',
+        'yoann andreu': 'Yoann Andreu',
         'florentin pogba': 'Florentin Pogba',
         'dominique rocheteau': 'Dominique Rocheteau',
         'michel platini': 'Michel Platini',
