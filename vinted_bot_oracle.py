@@ -44,8 +44,8 @@ ALERTED_IDS_FILE = "alerted_ids_cache.json"
 FILET_SEEN_IDS_FILE = "filet_seen_ids_cache.json"
 TRACKED_ITEMS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracked_items.json")
 ERRORS_LOG_FILE = os.environ.get("ERRORS_LOG_FILE", "/root/vinted_errors.log" if os.path.exists("/root/JerseyAlert") else "vinted_errors.log")
-BLACKLIST_FILE = os.environ.get("BLACKLIST_FILE", "/root/JerseyAlert/blacklisted_sellers.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_sellers.json")
-BLACKLIST_KEYWORDS_FILE = os.environ.get("BLACKLIST_KEYWORDS_FILE", "/root/JerseyAlert/blacklisted_keywords.json" if os.path.exists("/root/JerseyAlert") else "blacklisted_keywords.json")
+BLACKLIST_FILE = os.environ.get("BLACKLIST_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "blacklisted_sellers.json"))
+BLACKLIST_KEYWORDS_FILE = os.environ.get("BLACKLIST_KEYWORDS_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "blacklisted_keywords.json"))
 FILTER_ADULT_ONLY = os.environ.get("FILTER_ADULT_ONLY", "true").lower() == "true"
 CHECK_INTERVAL_MIN = 10
 CHECK_INTERVAL_MAX = 20

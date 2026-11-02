@@ -3,7 +3,7 @@ set -e
 
 VPS_HOST="root@151.115.67.153"
 VPS_DIR="/root/JerseyAlert"
-LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 
 echo "🚀 [Deploy] Début de la procédure de déploiement sécurisé..."
 

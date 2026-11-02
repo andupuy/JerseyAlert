@@ -89,6 +89,20 @@ def fetch_vinted_item_data(item_id):
             if m_p2:
                 price = m_p2.group(1).strip()
 
+        # Vendeur
+        seller = ""
+        m_u = re.search(r'\"login\":\"([^\"]+)\"', html)
+        if m_u:
+            seller = m_u.group(1).strip()
+        if not seller:
+            m_u2 = re.search(r'href=[\"\']/member/\d+[^\"]*[\"\'][^>]*>.*?<span[^>]*>([^<]+)</span>', html, re.DOTALL)
+            if m_u2:
+                seller = m_u2.group(1).strip()
+        if not seller:
+            m_av = re.search(r'Image__circle[^>]*>.*?<img[^>]+alt=[\"\']([^\"\']+)[\"\']', html, re.DOTALL)
+            if m_av and m_av.group(1).strip():
+                seller = m_av.group(1).strip()
+
     return {
         "id": item_id,
         "title": title or f"Article #{item_id}",
@@ -96,6 +110,7 @@ def fetch_vinted_item_data(item_id):
         "brand": brand,
         "size": size,
         "price": price,
+        "seller": seller or "Inconnu",
         "url": url,
         "html_fetched": bool(html)
     }
@@ -120,13 +135,23 @@ def audit(item_arg):
     size = data["size"]
     price = data["price"]
 
+    seller = data["seller"]
+    is_seller_blocked = bot.is_seller_blacklisted(seller)
+
     print(f"📌 Titre       : {title}")
     print(f"💶 Prix        : {price}")
     print(f"🏷️  Marque      : {brand}")
     print(f"📏 Taille      : {size}")
+    print(f"👤 Vendeur     : @{seller} {'🚫 (LISTE NOIRE)' if is_seller_blocked else '✅'}")
     print(f"📝 Description : {desc[:150]}..." if len(desc) > 150 else f"📝 Description : {desc or '(Vide)'}")
     print(f"🔗 URL         : {data['url']}")
     print(f"--------------------------------------------------")
+
+    # 0. Vérification Vendeur Bloqué
+    if is_seller_blocked:
+        print(f"0️⃣ Vendeur Liste Noire         : 🚫 OUI (@{seller}) -> BLOQUÉ")
+    else:
+        print(f"0️⃣ Vendeur Liste Noire         : ✅ NON (@{seller} autorisé)")
 
     # 1. Vérification Mot-clé Maillot
     has_shirt_kw = bool(re.search(
@@ -168,31 +193,33 @@ def audit(item_arg):
     print(f"==================================================")
 
     # Flux Direct Foot
-    foot_match = has_shirt_kw and not is_conf_t and is_sig_direct and not is_excl_p and not is_excl_s
-    filet_match = not is_conf_t and not is_conf_d and (is_sig_filet or is_sig_desc) and not is_excl_p and not is_excl_s
+    foot_match = not is_seller_blocked and has_shirt_kw and not is_conf_t and is_sig_direct and not is_excl_p and not is_excl_s
+    filet_match = not is_seller_blocked and not is_conf_t and not is_conf_d and (is_sig_filet or is_sig_desc) and not is_excl_p and not is_excl_s
 
     if foot_match:
         print(f"🚀 [Flux Direct Foot] : 🎯 ALERTÉ IMMÉDIATEMENT ({sig_reason_direct})")
     else:
         reasons = []
+        if is_seller_blocked: reasons.append(f"Vendeur @{seller} sur liste noire")
         if not has_shirt_kw: reasons.append("Pas de mot-clé maillot")
         if is_conf_t: reasons.append(f"Club adverse dans titre ({team_t})")
         if not is_sig_direct: reasons.append("Aucun signal ASSE direct dans le titre")
         if is_excl_p: reasons.append(f"Produit exclu ({reason_p})")
         if is_excl_s: reasons.append(f"Taille exclue ({reason_s})")
-        print(f"⏩ [Flux Direct Foot] : 🚫 IGNORÉ ({', '.join(reasons)})")
+        print(f"⏩ [Flux Direct Foot] : 🚫 BLOQUÉ / IGNORÉ ({', '.join(reasons)})")
 
     if filet_match:
         sig = sig_reason_filet or sig_reason_desc
         print(f"🛡️  [Filet Sécurité]   : 🎯 ALERTÉ ({sig})")
     else:
         reasons = []
+        if is_seller_blocked: reasons.append(f"Vendeur @{seller} sur liste noire")
         if is_conf_t: reasons.append(f"Club adverse dans titre ({team_t})")
         if is_conf_d: reasons.append(f"Club adverse dans description ({team_d})")
         if not (is_sig_filet or is_sig_desc): reasons.append("Aucun signal ASSE")
         if is_excl_p: reasons.append(f"Produit exclu ({reason_p})")
         if is_excl_s: reasons.append(f"Taille exclue ({reason_s})")
-        print(f"🛡️  [Filet Sécurité]   : 🚫 IGNORÉ ({', '.join(reasons)})")
+        print(f"🛡️  [Filet Sécurité]   : 🚫 BLOQUÉ / IGNORÉ ({', '.join(reasons)})")
     print(f"==================================================\n")
 
 
