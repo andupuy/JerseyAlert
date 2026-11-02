@@ -2165,11 +2165,27 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
         with state_lock:
             in_flight_alert_ids.discard(int_id)
 
+_last_scan_heartbeat = time.time()
+
+def update_watchdog_heartbeat():
+    global _last_scan_heartbeat
+    _last_scan_heartbeat = time.time()
+
+def watchdog_thread_worker():
+    """Surveille en continu l'activité du bot et force le redémarrage si aucun scan depuis 90s"""
+    while True:
+        time.sleep(15)
+        elapsed = time.time() - _last_scan_heartbeat
+        if elapsed > 90:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{timestamp}] 🚨 WATCHDOG: Aucun scan depuis {int(elapsed)}s (bot figé) ! Redémarrage forcé...", flush=True)
+            os._exit(1)
+
 def watchdog_handler(signum, frame):
     """Tue le bot si un cycle prend trop de temps (Freeze detection)"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{timestamp}] 🚨 WATCHDOG: Bot figé depuis trop longtemps ! Redémarrage forcé...", flush=True)
-    os._exit(1) # Sortie brutale pour forcer Railway à relancer
+    os._exit(1) # Sortie brutale pour forcer le redémarrage systemd
 
 state_lock = threading.RLock()
 flux_seen_ids = load_seen_ids_cache()
@@ -2609,6 +2625,7 @@ def worker_turbo_sniper():
                         page.goto(target_url, wait_until='commit', timeout=4500)
                         items = extract_items_from_page(page)
                         log(f"⚡ [Vinted] Scan {scan_label} : {len(items)} annonces")
+                        update_watchdog_heartbeat()
                         consecutive_errors = 0
                         if items:
                             process_incoming_items_safe(items, scan_label, is_initial=is_initial_scan)
@@ -2618,16 +2635,10 @@ def worker_turbo_sniper():
                         consecutive_errors += 1
                         err_str = str(e).lower()
                         is_transient = any(k in err_str for k in ["timeout", "interrupted", "err_aborted"])
-                        # Sur 1er timeout court (>4.5s), on abandonne immédiatement ce scan et on relance le suivant en 0.3s
-                        # sans perdre 8s à redémarrer Chromium. Si 2 erreurs de suite, recyclage complet.
-                        if is_transient and consecutive_errors == 1:
-                            log(f"⚡ [Vinted] Réponse lente (>4.5s) sur {scan_label} : abandon immédiat et relance directe...", to_error_log=False)
-                            if hasattr(signal, "SIGALRM"):
-                                signal.alarm(0)
-                            time.sleep(0.3)
-                            continue
-                        elif is_transient and consecutive_errors < 3:
-                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors} consécutives) sur {scan_label} : recyclage propre immédiat...")
+                        # En cas de micro-latence ou timeout (>4.5s), recyclage propre et immédiat du navigateur
+                        # plutôt que de tenter une relance sur un onglet Playwright au socket gelé
+                        if is_transient and consecutive_errors < 2:
+                            log(f"ℹ️ [Vinted] Micro-latence réseau ({consecutive_errors}/2) sur {scan_label} : recyclage propre immédiat...")
                             break
                         else:
                             log(f"⚠️ [Vinted] Erreur locale ({consecutive_errors} consécutives) : {e}")
@@ -2654,6 +2665,11 @@ def run_bot():
         inspector_thread = threading.Thread(target=worker_smart_inspection, daemon=True, name="SmartInspector")
         inspector_thread.start()
         log("🚀 [Smart-Inspector] Thread d'inspection asynchrone prêt")
+
+        # Lancement du watchdog de surveillance autonome en tâche de fond
+        watchdog_thread = threading.Thread(target=watchdog_thread_worker, daemon=True, name="WatchdogMonitor")
+        watchdog_thread.start()
+        log("🛡️ [Watchdog] Thread de surveillance autonome actif (détection de gel >90s)")
 
         worker_turbo_sniper()
     except KeyboardInterrupt:
