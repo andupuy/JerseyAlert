@@ -175,7 +175,7 @@ def repair_mojibake(text):
         'cÅur': 'cœur', 'cÅ“ur': 'cœur', 'Å“': 'œ',
         'Â°': '°', 'Â«': '«', 'Â»': '»', 'â€™': "'",
         'â€“': '-', 'â€”': '-', 'â€¦': '...',
-        'Ãtienne': 'Étienne', 'Ãtat': 'État', 'Ã ': 'à '
+        'Ãtienne': 'Étienne', 'Ãtat': 'État'
     }
     for bad, good in mojibake_map.items():
         text = text.replace(bad, good)
@@ -242,6 +242,11 @@ def is_excluded_size(size_str, title_str="", desc_str=""):
 
     if re.match(r'^(32|34|36)(?:\s*/\s*(?:XS|S))?$', s) or re.match(r'^(?:XS|S)\s*/\s*(32|34|36)$', s):
         return True, f"Taille numérique XS/S ({size_str})"
+
+    # Détection XS/S dans le titre si la taille transmise est absente, générique ou non-adulte
+    if s in ('', 'N/A', 'AUTRE', 'UNIQUE', 'TAILLE UNIQUE') or not s:
+        if re.search(r'(?:\b(?:taille|size|t\.|gr(?:öße)?|taglia|talla)\s*[:\s=-]*\s*(?:x{1,3}s|s|small)\b|(?:^|[\s\-_/])(?:taille\s*)?(?:x{1,3}s|s)\s*$)', t, re.I):
+            return True, "Taille XS/S détectée dans le titre"
 
     # 3. Exclusion des tailles supérieures à XXL (XXXL / 3XL et plus)
     if re.search(r'\b(?:X{3,}L|[3-9]XL)\b', s):
@@ -423,6 +428,11 @@ OTHER_TEAMS_PATTERNS = {
     'Sénégal': r'\b(s[eé]n[eé]gal|senegal)\b',
     'Cameroun': r'\b(cameroun|cameroon)\b',
     'Côte d\'Ivoire': r'\b(c[oô]te\s+d[\'\s]ivoire|ivory\s+coast)\b',
+    'Ghana': r'\b(ghana|black\s+stars)\b',
+    'Gabon': r'\b(gabon|panth[eè]res\s+du\s+gabon)\b',
+    'Mali': r'\b(mali|aigles\s+du\s+mali)\b',
+    'Guinée': r'\b(guin[eé]e|guinea|syli)\b',
+    'RD Congo': r'\b(rdc|rd\s+congo|congo|l[eé]opards)\b',
     'Égypte': r'\b([eé]gypte|egypt)\b',
     'Nigéria': r'\b(nig[eé]ria|nigeria)\b',
     'Japon': r'\b(japon|japan)\b',
@@ -589,7 +599,6 @@ OTHER_TEAMS_PATTERNS = {
     'Schalke': r'\b(schalke)\b',
     'Stuttgart': r'\b(vfb\s+stuttgart|stuttgart)\b',
     'Francfort': r'\b(eintracht\s+frankfurt|eintracht\s+francfort)\b',
-    'Hambourg': r'\b(hamburger\s+sv|hsv)\b',
     'Cologne': r'\b(fc\s+k[oö]ln|fc\s+cologne)\b',
     'Mönchengladbach': r'\b(m[oö]nchengladbach|gladbach)\b',
     'Galatasaray': r'\b(galatasaray)\b',
@@ -656,7 +665,139 @@ OTHER_TEAMS_PATTERNS = {
     'Bolivie': r'\b(bolivie|bolivia)\b',
     'Zambie': r'\b(zambie|zambia)\b',
     'Afrique du Sud': r'\b(afrique\s+du\s+sud|south\s+africa|bafana\s+bafana|springboks)\b',
-    'Malte': r'\b(malte|malta)\b'
+    'Malte': r'\b(malte|malta)\b',
+
+    # Sélections nationales (Europe, Afrique, Amériques, Asie)
+    'Islande': r'\b(islande|iceland)\b',
+    'Slovaquie': r'\b(slovaquie|slovakia)\b',
+    'Slovénie': r'\b(slov[eé]nie|slovenia)\b',
+    'Albanie': r'\b(albanie|albania)\b',
+    'Bosnie': r'\b(bosnie|bosnia)\b',
+    'Macédoine': r'\b(mac[eé]doine|macedonia)\b',
+    'Finlande': r'\b(finlande|finland)\b',
+    'Luxembourg': r'\b(luxembourg)\b',
+    'Géorgie': r'\b(g[eé]orgie|georgia)\b',
+    'Israël': r'\b(isra[eë]l)\b',
+    'Burkina Faso': r'\b(burkina\s+faso|burkina|[eé]talons\s+du\s+burkina)\b',
+    'Togo': r'\b(togo|[eé]perviers\s+du\s+togo)\b',
+    'Bénin': r'\b(b[eé]nin|gu[eé]pards\s+du\s+b[eé]nin)\b',
+    'Angola': r'\b(angola|palancas\s+negras)\b',
+    'Mauritanie': r'\b(mauritanie|mourabitounes)\b',
+    'Cap-Vert': r'\b(cap[\-\s]vert|cabo\s+verde|tubar[oõ]es\s+azuis)\b',
+    'Comores': r'\b(comores|coelacanthes)\b',
+    'Gambie': r'\b(gambie|gambia|scorpions\s+de\s+gambie)\b',
+    'Guinée Équatoriale': r'\b(guin[eé]e\s+[eé]quatoriale|nzalang\s+nacional)\b',
+    'Guinée-Bissau': r'\b(guin[eé]e[\-\s]bissau|djurtus)\b',
+    'Madagascar': r'\b(madagascar|barea)\b',
+    'Mozambique': r'\b(mozambique|mambas)\b',
+    'Namibie': r'\b(namibie|namibia|brave\s+warriors)\b',
+    'Soudan': r'\b(soudan|sudan)\b',
+    'Tanzanie': r'\b(tanzanie|tanzania|taifa\s+stars)\b',
+    'Ouganda': r'\b(ouganda|uganda|cranes)\b',
+    'Zimbabwe': r'\b(zimbabwe|warriors)\b',
+    'Paraguay': r'\b(paraguay|albirroja)\b',
+    'Équateur': r'\b([eé]quateur|ecuador|la\s+tri)\b',
+    'Venezuela': r'\b(venezuela|vinotinto)\b',
+    'Costa Rica': r'\b(costa\s+rica|los\s+ticos)\b',
+    'Panama': r'\b(panama|los\s+canaleros)\b',
+    'Jamaïque': r'\b(jama[iï]que|jamaica|reggae\s+boyz)\b',
+    'Honduras': r'\b(honduras|los\s+catrachos)\b',
+    'Haïti': r'\b(ha[iï]ti|grenadiers)\b',
+    'Iran': r'\b(iran|team\s+melli)\b',
+    'Irak': r'\b(irak|iraq)\b',
+    'Qatar': r'\b(qatar|al[\-\s]?annabi)\b',
+    'Émirats': r'\b([eé]mirats|emirates|eau|uae)\b',
+    'Chine': r'\b(chine|china)\b',
+    'Ouzbékistan': r'\b(ouzb[eé]kistan|uzbekistan)\b',
+    'Nouvelle-Zélande': r'\b(nouvelle[\-\s]z[eé]lande|new\s+zealand|all\s+whites)\b',
+
+    # Clubs majeurs européens (Liga, Serie A, Bundesliga, Championship, C1/C3)
+    'Girona': r'\b(girona\s+fc|girona|g[eé]rone)\b',
+    'Celta Vigo': r'\b(celta\s+vigo|celta)\b',
+    'Espanyol Barcelone': r'\b(espanyol|rcd\s+espanyol)\b',
+    'Osasuna': r'\b(osasuna|ca\s+osasuna)\b',
+    'Mallorca': r'\b(rcd\s+mallorca|mallorca|majorque)\b',
+    'Rayo Vallecano': r'\b(rayo\s+vallecano|rayo)\b',
+    'Getafe': r'\b(getafe\s+cf|getafe)\b',
+    'Alavés': r'\b(alav[eé]s|deportivo\s+alav[eé]s)\b',
+    'Las Palmas': r'\b(ud\s+las\s+palmas|las\s+palmas)\b',
+    'Valladolid': r'\b(real\s+valladolid|valladolid)\b',
+    'Cadix': r'\b(c[aá]diz\s+cf|c[aá]diz|cadix)\b',
+    'Grenade': r'\b(granada\s+cf|granada)\b',
+    'Deportivo La Corogne': r'\b(deportivo\s+la\s+coru[nñ]a|depor|la\s+corogne)\b',
+    'Saragosse': r'\b(real\s+zaragoza|zaragoza|saragosse)\b',
+    'Bologne': r'\b(bologna\s+fc|bologna|bologne)\b',
+    'Genoa': r'\b(genoa|cfc\s+genoa)\b',
+    'Hellas Vérone': r'\b(hellas\s+verona|hellas|v[eé]rone)\b',
+    'Cagliari': r'\b(cagliari\s+calcio|cagliari)\b',
+    'Lecce': r'\b(us\s+lecce|lecce)\b',
+    'Monza': r'\b(ac\s+monza|monza)\b',
+    'Côme': r'\b(como\s+1907|c[oô]me)\b',
+    'Empoli': r'\b(empoli\s+fc|empoli)\b',
+    'Venise': r'\b(venezia\s+fc|venise|venezia)\b',
+    'Salernitana': r'\b(salernitana)\b',
+    'Palerme': r'\b(palermo\s+fc|palermo|palerme)\b',
+    'Bari': r'\b(ssc\s+bari|bari)\b',
+    'Holstein Kiel': r'\b(holstein\s+kiel|kiel)\b',
+    'Paderborn': r'\b(sc\s+paderborn|paderborn)\b',
+    'Arminia Bielefeld': r'\b(arminia\s+bielefeld|bielefeld)\b',
+    'Hansa Rostock': r'\b(hansa\s+rostock|rostock)\b',
+    'Magdebourg': r'\b(1\.\s*fc\s+magdeburg|magdeburg|magdebourg)\b',
+    'Norwich': r'\b(norwich|norwich\s+city)\b',
+    'Blackburn': r'\b(blackburn|blackburn\s+rovers)\b',
+    'Cardiff': r'\b(cardiff|cardiff\s+city)\b',
+    'Portsmouth': r'\b(portsmouth|pompey)\b',
+    'QPR': r'\b(qpr|queens\s+park\s+rangers)\b',
+    'Luton': r'\b(luton|luton\s+town)\b',
+    'Millwall': r'\b(millwall)\b',
+    'Derby County': r'\b(derby\s+county)\b',
+    'Coventry': r'\b(coventry|coventry\s+city)\b',
+    'Preston': r'\b(preston\s+north\s+end)\b',
+    'Hull City': r'\b(hull\s+city)\b',
+    'Bristol City': r'\b(bristol\s+city)\b',
+    'Glasgow Rangers': r'\b(glasgow\s+rangers|rangers\s+fc|rangers)\b',
+    'Aberdeen': r'\b(aberdeen\s+fc|aberdeen)\b',
+    'Hearts': r'\b(hearts|heart\s+of\s+midlothian)\b',
+    'Young Boys Berne': r'\b(young\s+boys|yb\s+bern|bsc\s+young\s+boys)\b',
+    'FC Bâle': r'\b(fc\s+b[aâ]le|fc\s+basel|basel)\b',
+    'FC Zurich': r'\b(fc\s+z[uü]rich|z[uü]rich)\b',
+    'Servette Genève': r'\b(servette\s+fc|servette\s+gen[eè]ve|servette)\b',
+    'Red Bull Salzbourg': r'\b(rb\s+salzburg|salzburg|salzbourg)\b',
+    'Sturm Graz': r'\b(sturm\s+graz|graz)\b',
+    'Austria Vienne': r'\b(austria\s+wien|austria\s+vienne)\b',
+    'Union Saint-Gilloise': r'\b(union\s+saint[\-\s]gilloise|usg)\b',
+    'KRC Genk': r'\b(krc\s+genk|racing\s+genk|genk)\b',
+    'La Gantoise': r'\b(la\s+gantoise|kaa\s+gent|gent)\b',
+    'Royal Antwerp': r'\b(royal\s+antwerp|antwerp|anvers)\b',
+    'Charleroi': r'\b(sporting\s+charleroi|charleroi)\b',
+    'Cercle Bruges': r'\b(cercle\s+brugge|cercle\s+bruges)\b',
+    'AZ Alkmaar': r'\b(az\s+alkmaar|alkmaar)\b',
+    'FC Twente': r'\b(fc\s+twente|twente)\b',
+    'FC Utrecht': r'\b(fc\s+utrecht|utrecht)\b',
+    'Vitesse Arnhem': r'\b(vitesse\s+arnhem|vitesse)\b',
+    'Guimarães': r'\b(vit[oó]ria\s+guimar[aã]es|guimar[aã]es)\b',
+    'Boavista': r'\b(boavista)\b',
+    'Slavia Prague': r'\b(slavia\s+prague|slavia\s+praha|slavia)\b',
+    'Sparta Prague': r'\b(sparta\s+prague|sparta\s+praha|sparta)\b',
+    'Viktoria Plzen': r'\b(viktoria\s+plze[nň]|plzen)\b',
+    'Dinamo Zagreb': r'\b(dinamo\s+zagreb)\b',
+    'Hajduk Split': r'\b(hajduk\s+split|hajduk)\b',
+    'Rijeka': r'\b(hnk\s+rijeka|rijeka)\b',
+    'Etoile Rouge': r'\b([eé]toile\s+rouge|crvena\s+zvezda|red\s+star\s+belgrade)\b',
+    'Partizan Belgrade': r'\b(partizan\s+belgrade|partizan)\b',
+    'FC Copenhague': r'\b(fc\s+copenhague|copenhague|fc\s+k[oø]benhavn|k[oø]benhavn)\b',
+    'Brøndby': r'\b(br[oø]ndby|bif)\b',
+    'Midtjylland': r'\b(fc\s+midtjylland|midtjylland)\b',
+    'Bodo Glimt': r'\b(bod[oø][\s\-]glimt|glimt)\b',
+    'Rosenborg': r'\b(rosenborg|rbk)\b',
+    'Molde': r'\b(molde\s+fk|molde)\b',
+    'Malmö': r'\b(malm[oö]\s+ff|malm[oö])\b',
+    'AIK Stockholm': r'\b(aik\s+stockholm|aik)\b',
+    'Djurgården': r'\b(djurg[aå]rden|dif)\b',
+    'Maccabi Tel Aviv': r'\b(maccabi\s+tel[\-\s]?aviv)\b',
+    'Maccabi Haïfa': r'\b(maccabi\s+ha[iï]fa)\b',
+    'Qarabag': r'\b(qarabag|karabakh)\b',
+    'Basaksehir': r'\b(basaksehir|ba[sş]ak[sş]ehir)\b'
 }
 
 def is_conflicting_team(text):
@@ -818,28 +959,46 @@ def load_asse_knowledge():
 
 ASSE_PLAYERS, ASSE_PLAYERS_FULL, ASSE_SPONSORS = load_asse_knowledge()
 
-MAGIC_FANS_COLLECTOR_PATTERN = re.compile(
-    r'\b(magic\s+fans\s+le\s+livre|snk\s+magic\s+fans|fanzine\s+magic\s+fans|livre\s+magic\s+fans)\b',
+MAGIC_FANS_PATTERN = re.compile(
+    r'\b(?:magic\s*[-]?\s*fans|magicfans|magics?\s*[-]?\s*91|mf\s*[-]?\s*91|mf\s*[-]?\s*1991)\b',
     re.IGNORECASE
 )
 
-def is_magic_fans_collector_match(text):
+MAGIC_FANS_NOISE_PATTERN = re.compile(
+    r'\b(magic\s+(?:the\s+)?gathering|mtg|magic\s+johnson|orlando\s+magic|harry\s+potter|disney|winx|pokemon|yu[- ]?gi[- ]?oh|campanilla|clochette|barbie|lego|playmobil|funko|kpop|bts|stray\s+kids|5\s+majeur|nba|basket|magic\s+system|cartes?\s+magic)\b',
+    re.IGNORECASE
+)
+
+# Rétrocompatibilité nom de variable historique
+MAGIC_FANS_COLLECTOR_PATTERN = MAGIC_FANS_PATTERN
+
+def is_magic_fans_collector_match(text, price_str=None):
     """
-    Détecte uniquement les 4 séquences exactes de mots qui se suivent :
-    - 'Magic Fans le livre'
-    - 'SNK Magic Fans'
-    - 'Fanzine Magic Fans'
-    - 'livre Magic Fans'
+    Détecte tous les accessoires, écharpes, vêtements, goodies et collectors Magic Fans / MF91.
+    Règle utilisateur : tous les articles Magic Fans ou MF91 qui coûtent moins de 80€.
+    Exclut le bruit hors-sujet (Magic The Gathering, NBA Orlando, Disney, etc.).
     """
     if not text:
         return False, ""
     import unicodedata
     t_norm = ''.join(c for c in unicodedata.normalize('NFD', str(text)) if unicodedata.category(c) != 'Mn')
     t_norm = re.sub(r'\s+', ' ', t_norm)
-    m = MAGIC_FANS_COLLECTOR_PATTERN.search(t_norm)
-    if m:
-        return True, m.group(1)
-    return False, ""
+
+    # Rejeter le bruit hors-sujet
+    if MAGIC_FANS_NOISE_PATTERN.search(t_norm):
+        return False, ""
+
+    m = MAGIC_FANS_PATTERN.search(t_norm)
+    if not m:
+        return False, ""
+
+    # Plafond de prix : <= 80 € si fourni
+    if price_str is not None:
+        p_val = parse_price(price_str)
+        if p_val is not None and p_val > 80.0:
+            return False, f"Prix {p_val}€ > 80€"
+
+    return True, m.group(0)
 
 def is_asse_signal(text, is_filet=False):
     """
@@ -1905,8 +2064,15 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                 if cand and len(cand) <= 10:
                     final_size = cand
 
-        if not bypass_jersey_filters and is_magic_fans_collector_match(final_title)[0]:
-            bypass_jersey_filters = True
+        is_mf_t, mf_kw_t = is_magic_fans_collector_match(final_title)
+        is_asse_jersey_t = is_asse_jersey_match(final_title)
+        if is_mf_t:
+            p_val = parse_price(final_price)
+            if not is_asse_jersey_t and p_val is not None and p_val > 80.0:
+                log(f"🚫 [Vinted] Alerte Magic Fans non-maillot bloquée car prix ({p_val}€) > 80€ : {final_title}")
+                return
+            if p_val is None or p_val <= 80.0:
+                bypass_jersey_filters = True
 
         # Filtrage des produits indésirables (Mug, Panini, Prix > 350€) sauf Collector Magic Fans
         if not bypass_jersey_filters:
@@ -2039,8 +2205,14 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                         desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
                 desc_clean = clean_text(desc_raw)
                 if desc_clean:
-                    if not bypass_jersey_filters and is_magic_fans_collector_match(desc_clean)[0]:
-                        bypass_jersey_filters = True
+                    is_mf_d, mf_kw_d = is_magic_fans_collector_match(desc_clean)
+                    if is_mf_d:
+                        p_val = parse_price(final_price)
+                        if not is_asse_jersey_t and not is_asse_jersey_match(desc_clean) and p_val is not None and p_val > 80.0:
+                            log(f"🚫 [Vinted] Alerte Magic Fans non-maillot bloquée (description) car prix ({p_val}€) > 80€ : {final_title}")
+                            return
+                        if p_val is None or p_val <= 80.0:
+                            bypass_jersey_filters = True
                     if not bypass_jersey_filters:
                         is_excl, reason = is_excluded_product(final_title, desc_clean, final_price)
                         if is_excl:
@@ -2071,11 +2243,14 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
             embed_desc_body = desc_clean[:400] + ("..." if len(desc_clean) > 400 else "")
             description_text += f"\n\n{embed_desc_body}"
 
+        is_mf = is_magic_fans_collector_match(final_title)[0] or (bool(desc_clean) and is_magic_fans_collector_match(desc_clean)[0])
+        tag_mf = "🟢 [Magic Fans] " if is_mf else ""
+
         embed1 = {
-            "title": f"🔔 {final_title}",
+            "title": f"🔔 {tag_mf}{final_title}",
             "url": item_url,
             "description": description_text,
-            "color": 0x09B83E,
+            "color": 0x1B5E20 if is_mf else 0x09B83E,
             "footer": {"text": f"Vinted Sniper • ID: {item_id}{fav_badge_init}"},
             "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         }
@@ -2095,7 +2270,7 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
             if len(desc_clean) > 250:
                 desc_preview += "..."
 
-        notif_text = f"""@everyone | {final_title}
+        notif_text = f"""@everyone | {tag_mf}{final_title}
 💰 {final_price} | 📏 {final_size} | 🏷️ {final_brand}"""
         if desc_preview:
             notif_text += f"\n📝 {desc_preview}"
@@ -2244,12 +2419,20 @@ def worker_smart_inspection():
                 # Cas particulier : inspection Collector Magic Fans déportée hors du verrou principal
                 if reason_candidate == "Magic Fans Collector":
                     has_mf_desc, mf_phrase_d = is_magic_fans_collector_match(desc)
-                    if has_mf_desc:
+                    p_val = parse_price(t_prix)
+                    is_asse_j = is_asse_jersey_match(t_titre) or is_asse_jersey_match(desc)
+                    if has_mf_desc and (p_val is None or p_val <= 80.0):
                         log(f"🎯 MATCH COLLECTOR MAGIC FANS ('{mf_phrase_d}' dans la description) : '{t_titre}' ({t_prix})")
                         send_discord_alert(None, item, bypass_jersey_filters=True)
+                    elif has_mf_desc and is_asse_j and (p_val is None or p_val <= 350.0):
+                        log(f"🎯 MATCH MAILLOT ASSE (détecté via scan Magic Fans) : '{t_titre}' ({t_prix})")
+                        send_discord_alert(None, item, bypass_jersey_filters=False)
+                    elif has_mf_desc and p_val is not None and p_val > 80.0:
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Magic Fans non-maillot exclu car prix ({p_val}€) > 80€ : '{t_titre}'")
                     else:
                         item.pop('_prefetched_html', None)
-                        log(f"🚫 [Smart-Inspector] Article Magic Fans ignoré (Aucune des 4 expressions exactes) : '{t_titre}'")
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans ignoré (Pas de mention Magic Fans / MF91) : '{t_titre}'")
                     smart_inspection_queue.task_done()
                     time.sleep(1.5)
                     continue
@@ -2408,19 +2591,26 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 log(f"🚫 Article ignoré dès la liste (Vendeur bloqué @{seller_val}) : '{t_titre}'")
                 continue
 
-            # Cas spécial prioritaire : Recherche Collector 'Magic Fans' (toutes les 2 min ou via flux)
-            is_magic_fans_scan = "Magic Fans" in source_label
+            # Cas spécial prioritaire : Recherche Collector / Accessoires 'Magic Fans' (toutes les 45-60s ou via flux)
+            is_magic_fans_scan = "Magic Fans" in source_label or "MF91" in source_label or "MF 91" in source_label
             has_mf_title, mf_phrase_t = is_magic_fans_collector_match(t_titre)
             if has_mf_title:
-                log(f"🎯 MATCH COLLECTOR MAGIC FANS ('{mf_phrase_t}' dans le titre) : '{t_titre}' ({t_prix})")
-                send_discord_alert(None, item, bypass_jersey_filters=True)
-                continue
+                p_val = parse_price(t_prix)
+                if p_val is None or p_val <= 80.0:
+                    log(f"🎯 MATCH COLLECTOR MAGIC FANS ('{mf_phrase_t}' dans le titre) : '{t_titre}' ({t_prix})")
+                    send_discord_alert(None, item, bypass_jersey_filters=True)
+                    continue
+                else:
+                    log(f"ℹ️ Article Magic Fans > 80€ ({p_val}€) : redirection vers filtres maillots standards : '{t_titre}'")
 
             if is_magic_fans_scan:
                 # Pré-filtrage rapide des articles manifestement hors-sujet (Magic The Gathering, NBA, Harry Potter, Disney...)
-                mf_noise_pat = r'\b(magic\s+the\s+gathering|mtg|magic\s+johnson|orlando\s+magic|harry\s+potter|disney|winx|pokemon|yu[- ]?gi[- ]?oh|campanilla|clochette|barbie|lego|playmobil|funko|kpop|bts|stray\s+kids|5\s+majeur|nba|basket)\b'
-                if re.search(mf_noise_pat, t_titre, re.IGNORECASE):
+                if MAGIC_FANS_NOISE_PATTERN.search(t_titre):
                     log(f"🚫 Article Magic Fans ignoré dès le titre (Hors-sujet) : '{t_titre}'")
+                    continue
+                p_val = parse_price(t_prix)
+                if p_val is not None and p_val > 80.0:
+                    log(f"🚫 Article Magic Fans ignoré dès la liste car prix ({p_val}€) > 80€ : '{t_titre}'")
                     continue
                 try:
                     smart_inspection_queue.put_nowait((item, "Magic Fans Collector"))
@@ -2551,12 +2741,13 @@ def worker_turbo_sniper():
         ("Maillot Saint Etienne", get_search_url("Maillot Saint Etienne") + "&catalog_ids[]=3267"),
         ("Maillot St Etienne", get_search_url("Maillot St Etienne") + "&catalog_ids[]=3267"),
     ]
-    # Rotation Collector Magic Fans : 1 requête toutes les 40s = cycle complet des 4 expressions toutes les 2 min (120s)
-    # ('livre Magic Fans' couvre à la fois 'Magic Fans le livre' et 'livre Magic Fans' dans le moteur Vinted)
+    # Rotation Accessoires & Collectors Magic Fans (< 80€)
     MAGIC_FANS_QUERIES = [
-        ("Magic Fans Livre", get_search_url("livre Magic Fans")),
-        ("Magic Fans SNK", get_search_url("SNK Magic Fans")),
-        ("Magic Fans Fanzine", get_search_url("Fanzine Magic Fans")),
+        ("Magic Fans", get_search_url("Magic Fans") + "&price_to=80"),
+        ("MF91", get_search_url("MF91") + "&price_to=80"),
+        ("MF 91", get_search_url("MF 91") + "&price_to=80"),
+        ("Echarpe Magic Fans", get_search_url("echarpe Magic Fans") + "&price_to=80"),
+        ("SNK Magic Fans", get_search_url("SNK Magic Fans") + "&price_to=80"),
     ]
 
     log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité 90% Foot Temps Réel + Timeout Ultra-Court 4.5s)")
@@ -2620,7 +2811,7 @@ def worker_turbo_sniper():
 
                     # Choix de la cible (Priorité 90%+ au Flux Direct Foot, surtout aux heures de pointe 17h-22h) :
                     is_peak_hour = 17 <= paris_now.hour < 22
-                    mf_interval = 90 if is_peak_hour else 60
+                    mf_interval = 60 if is_peak_hour else 45
                     if not is_initial_scan and (now - last_magic_fans_scan) >= mf_interval:
                         mf_label, target_url = MAGIC_FANS_QUERIES[magic_fans_index % len(MAGIC_FANS_QUERIES)]
                         magic_fans_index += 1
