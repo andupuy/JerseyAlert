@@ -833,6 +833,45 @@ def is_conflicting_team(text):
             return True, team_name
     return False, None
 
+# Dictionnaire des groupes de supporters adverses (pour bloquer le tag stuffing et écharpes concurrentes)
+RIVAL_SUPPORTER_GROUPS = {
+    'bad_gones_lyon': r'\b(bad\s+gones|bg\s*87|bg87|kop\s+virage\s+nord|lyon\s*1950)\b',
+    'om_supporters': r'\b(commando\s+ultras|cu\s*84|cu84|south\s+winners|sw\s*87|sw87|marseille\s+trop\s+puissant|mtp|fanatics\s*(?:88|1988|marseille|om)|ultras\s+fanatics|dodgers)\b',
+    'psg_supporters': r'\b(supras\s+auteuil|sa\s*91|sa91|boulogne\s+boys|bb\s*85|bb85|collectif\s+ultras\s+paris|c\.u\.p|cup\s+(?:paris|psg|auteuil)|karsud|nautaxia|microbes\s+paris|virage\s+auteuil|tribune\s+boulogne)\b',
+    'ultramarines_bordeaux': r'\b(ultramarines|ub\s*87|ub87|devils\s*bordeaux)\b',
+    'dve_lille': r'\b(dogues?\s+virage\s+est|dve\s*89|dve89)\b',
+    'brigade_loire_nantes': r'\b(brigade\s+loire|bl\s*99|bl99)\b',
+    'red_tigers_lens': r'\b(red\s+tigers|rt\s*94|rt94|kop\s+sang\s+et\s+or|bollaert\s+boys|galiboys)\b',
+    'butte_paillade_montpellier': r'\b(butte\s+paillade|bp\s*91|bp91|armata\s+ultra)\b',
+    'roazhon_celtic_kop_rennes': r'\b(roazhon\s+celtic\s+kop|rck\s*91|rck91)\b',
+    'horda_frenetik_metz': r'\b(horda\s+frenetik|hf\s*97|hf97|generation\s+grenat|gg\s*95|gg95)\b',
+    'brigade_sud_nice': r'\b(brigade\s+sud\s+nice|bsn\s*85|bsn85|populaire\s+sud)\b',
+    'valenciennes_ultras': r'\b(ultras\s+valenciennes|ultras\s+vafc|scheldt\s+fans|roisters)\b',
+    'lingons_dijon': r'\b(lingons\s+boys)\b',
+    'mnk_caen': r'\b(malherbe\s+normandy\s+kop|mnk\s*96|mnk96)\b',
+    'indians_tolosa': r'\b(indians\s+tolosa|it\s*93|it93)\b',
+    'strasbourg_ultras': r'\b(ultra\s+boys\s*90|ub\s*90|ub90|kop\s+ciel\s+et\s+blanc)\b',
+    'bastia_supporters': r'\b(bastia\s*1905|testa\s+mora)\b',
+    'ajaccio_supporters': r'\b(orisonti\s+aiaccini)\b',
+    'auxerre_supporters': r'\b(ultras\s+auxerre|ua\s*90|ua90)\b',
+    'le_havre_supporters': r'\b(barbarians\s+havrais|bh\s*93|bh93)\b',
+    'nancy_supporters': r'\b(snipers\s+nancy|saturday\s+fc)\b',
+    'sochaux_supporters': r'\b(tribune\s+nord\s+sochaux|tns\s*03)\b',
+    'nimes_supporters': r'\b(gladiators\s+nimes|gn\s*91|gn91)\b',
+}
+
+def is_conflicting_supporter_group(text):
+    """Détecte les groupes de supporters adverses (Bad Gones, Supras, CU84, UB87, etc.)"""
+    if not text:
+        return False, None
+    import unicodedata
+    t_norm = ''.join(c for c in unicodedata.normalize('NFD', str(text).lower()) if unicodedata.category(c) != 'Mn')
+    t_norm = t_norm.replace('’', "'")
+    for group_name, pat in RIVAL_SUPPORTER_GROUPS.items():
+        if re.search(pat, t_norm):
+            return True, group_name
+    return False, None
+
 def load_asse_knowledge():
     """Charge les bases de connaissances exhaustives des joueurs et sponsors ASSE"""
     import unicodedata
@@ -997,6 +1036,15 @@ def is_magic_fans_collector_match(text, price_str=None):
     # Rejeter le bruit hors-sujet
     if MAGIC_FANS_NOISE_PATTERN.search(t_norm):
         return False, ""
+
+    # Rejeter formellement si un club rival ou un groupe adverse est mentionné
+    is_conf, conf_team = is_conflicting_team(t_norm)
+    if is_conf:
+        return False, f"Club concurrent : {conf_team}"
+
+    is_conf_grp, conf_grp = is_conflicting_supporter_group(t_norm)
+    if is_conf_grp:
+        return False, f"Groupe supporter adverse : {conf_grp}"
 
     m = MAGIC_FANS_PATTERN.search(t_norm)
     if not m:
@@ -2074,6 +2122,17 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                 if cand and len(cand) <= 10:
                     final_size = cand
 
+        # Blocage absolu des clubs concurrents et groupes de supporters adverses dans le titre
+        is_conf_t, conf_team_t = is_conflicting_team(final_title)
+        if is_conf_t:
+            log(f"🚫 [Vinted] Alerte bloquée (Club concurrent dans le titre : {conf_team_t}) : {final_title}")
+            return
+
+        is_conf_grp_t, conf_grp_t = is_conflicting_supporter_group(final_title)
+        if is_conf_grp_t:
+            log(f"🚫 [Vinted] Alerte bloquée (Groupe adverse dans le titre : {conf_grp_t}) : {final_title}")
+            return
+
         is_mf_t, mf_kw_t = is_magic_fans_collector_match(final_title)
         is_asse_jersey_t = is_asse_jersey_match(final_title)
         if is_mf_t:
@@ -2215,6 +2274,18 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                         desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
                 desc_clean = clean_text(desc_raw)
                 if desc_clean:
+                    # Tag stuffing / spam multi-clubs : toujours bloqué (y compris Magic Fans)
+                    is_excl_spam, reason_spam = is_excluded_product(final_title, desc_clean, final_price)
+                    if is_excl_spam and "Spam" in reason_spam:
+                        log(f"🚫 [Vinted] Alerte bloquée ({reason_spam}) : {final_title}")
+                        return
+
+                    # Groupe adverse en description : toujours bloqué
+                    is_conf_grp_d, conf_grp_d = is_conflicting_supporter_group(desc_clean)
+                    if is_conf_grp_d:
+                        log(f"🚫 [Vinted] Alerte bloquée (Groupe adverse en description : {conf_grp_d}) : {final_title}")
+                        return
+
                     is_mf_d, mf_kw_d = is_magic_fans_collector_match(desc_clean)
                     if is_mf_d:
                         p_val = parse_price(final_price)
@@ -2233,13 +2304,14 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                             if is_excl_s:
                                 log(f"🚫 [Vinted] Alerte filtrée ({reason_s}) : {final_title} (Taille: {final_size})")
                                 return
-                        # Si le titre ne mentionne pas explicitement ASSE/Saint-Étienne (match via Joueur/Sponsor),
-                        # vérifier que la description ne désigne pas un autre club concurrent
-                        if not is_asse_jersey_match(final_title) and not is_asse_jersey_match(desc_clean):
-                            is_conf_d, conf_d = is_conflicting_team(desc_clean)
-                            if is_conf_d:
-                                log(f"🚫 [Vinted] Alerte filtrée (Équipe concurrente dans la description : {conf_d}) : {final_title}")
-                                return
+
+                    # Si le titre ne mentionne pas explicitement ASSE/Saint-Étienne (match via Joueur/Sponsor),
+                    # vérifier que la description ne désigne pas un autre club concurrent
+                    if not is_asse_jersey_match(final_title) and not is_asse_jersey_match(desc_clean):
+                        is_conf_d, conf_d = is_conflicting_team(desc_clean)
+                        if is_conf_d:
+                            log(f"🚫 [Vinted] Alerte filtrée (Équipe concurrente dans la description : {conf_d}) : {final_title}")
+                            return
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
@@ -2428,9 +2500,33 @@ def worker_smart_inspection():
             if desc:
                 # Cas particulier : inspection Collector Magic Fans déportée hors du verrou principal
                 if reason_candidate == "Magic Fans Collector":
+                    is_c_t, c_team_t = is_conflicting_team(t_titre)
+                    if is_c_t:
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Club concurrent dans le titre : {c_team_t}) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
+                    is_c_g, c_grp_t = is_conflicting_supporter_group(t_titre)
+                    if is_c_g:
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Groupe adverse dans le titre : {c_grp_t}) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
                     if MAGIC_FANS_STICKER_PATTERN.search(t_titre):
                         item.pop('_prefetched_html', None)
                         log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Autocollant / Sticker) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
+                    is_excl_sp, r_sp = is_excluded_product(t_titre, desc, t_prix)
+                    if is_excl_sp and "Spam" in r_sp:
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu ({r_sp}) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
+                    is_c_gd, c_grp_d = is_conflicting_supporter_group(desc)
+                    if is_c_gd:
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Groupe adverse en description : {c_grp_d}) : '{t_titre}'")
                         smart_inspection_queue.task_done()
                         continue
                     has_mf_desc, mf_phrase_d = is_magic_fans_collector_match(desc)
@@ -2608,6 +2704,17 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
 
             # Cas spécial prioritaire : Recherche Collector / Accessoires 'Magic Fans' (toutes les 45-60s ou via flux)
             is_magic_fans_scan = "Magic Fans" in source_label or "MF91" in source_label or "MF 91" in source_label
+            if is_magic_fans_scan:
+                # Éliminer dès le titre tout club concurrent ou groupe adverse
+                is_conf_t, conf_t = is_conflicting_team(t_titre)
+                if is_conf_t:
+                    log(f"🚫 Article Magic Fans ignoré dès le titre (Club concurrent : {conf_t}) : '{t_titre}'")
+                    continue
+                is_conf_g, conf_g = is_conflicting_supporter_group(t_titre)
+                if is_conf_g:
+                    log(f"🚫 Article Magic Fans ignoré dès le titre (Groupe adverse : {conf_g}) : '{t_titre}'")
+                    continue
+
             has_mf_title, mf_phrase_t = is_magic_fans_collector_match(t_titre)
             if has_mf_title:
                 p_val = parse_price(t_prix)
