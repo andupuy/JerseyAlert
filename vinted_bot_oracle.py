@@ -969,20 +969,30 @@ MAGIC_FANS_NOISE_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+MAGIC_FANS_STICKER_PATTERN = re.compile(
+    r'\b(autocollants?|stickers?|sticks?|adh[eé]sifs?)\b',
+    re.IGNORECASE
+)
+
 # Rétrocompatibilité nom de variable historique
 MAGIC_FANS_COLLECTOR_PATTERN = MAGIC_FANS_PATTERN
 
 def is_magic_fans_collector_match(text, price_str=None):
     """
-    Détecte tous les accessoires, écharpes, vêtements, goodies et collectors Magic Fans / MF91.
+    Détecte tous les accessoires, écharpes, vêtements et collectors Magic Fans / MF91.
     Règle utilisateur : tous les articles Magic Fans ou MF91 qui coûtent moins de 80€.
-    Exclut le bruit hors-sujet (Magic The Gathering, NBA Orlando, Disney, etc.).
+    Exclut le bruit hors-sujet (Magic The Gathering, NBA Orlando, Disney, etc.) et les autocollants/stickers.
     """
     if not text:
         return False, ""
     import unicodedata
     t_norm = ''.join(c for c in unicodedata.normalize('NFD', str(text)) if unicodedata.category(c) != 'Mn')
     t_norm = re.sub(r'\s+', ' ', t_norm)
+
+    # Rejeter les autocollants / stickers / sticks (demande utilisateur explicite)
+    if MAGIC_FANS_STICKER_PATTERN.search(t_norm):
+        if not re.search(r'\b(maillot|jersey|echarpe|écharpe|veste|pull|sweat|bonnet|bob|casquette|livre|fanzine)\b', t_norm, re.IGNORECASE):
+            return False, "Exclusion autocollant / sticker"
 
     # Rejeter le bruit hors-sujet
     if MAGIC_FANS_NOISE_PATTERN.search(t_norm):
@@ -1136,8 +1146,8 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not re.search(r'\b(maillot|jersey|veste|tenue|ensemble)\b', t):
             return True, "Mug / Tasse"
 
-    # 3. Panini / Stickers / Vignettes / Topps / Trading cards / Autocollants
-    card_pattern = r'\b(panini|sticker|stickers|autocollant|autocollants|vignette|vignettes|topps|adrenalyn|trading\s*cards?)\b'
+    # 3. Panini / Stickers / Vignettes / Topps / Trading cards / Autocollants / Sticks
+    card_pattern = r'\b(panini|stickers?|sticks?|autocollants?|adh[eé]sifs?|vignettes?|topps|adrenalyn|trading\s*cards?)\b'
     if re.search(card_pattern, t):
         return True, "Panini / Sticker / Autocollant"
     if d and re.search(card_pattern, d):
@@ -2418,6 +2428,11 @@ def worker_smart_inspection():
             if desc:
                 # Cas particulier : inspection Collector Magic Fans déportée hors du verrou principal
                 if reason_candidate == "Magic Fans Collector":
+                    if MAGIC_FANS_STICKER_PATTERN.search(t_titre):
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Autocollant / Sticker) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
                     has_mf_desc, mf_phrase_d = is_magic_fans_collector_match(desc)
                     p_val = parse_price(t_prix)
                     is_asse_j = is_asse_jersey_match(t_titre) or is_asse_jersey_match(desc)
@@ -2604,9 +2619,12 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                     log(f"ℹ️ Article Magic Fans > 80€ ({p_val}€) : redirection vers filtres maillots standards : '{t_titre}'")
 
             if is_magic_fans_scan:
-                # Pré-filtrage rapide des articles manifestement hors-sujet (Magic The Gathering, NBA, Harry Potter, Disney...)
+                # Pré-filtrage rapide des articles manifestement hors-sujet ou autocollants
                 if MAGIC_FANS_NOISE_PATTERN.search(t_titre):
                     log(f"🚫 Article Magic Fans ignoré dès le titre (Hors-sujet) : '{t_titre}'")
+                    continue
+                if MAGIC_FANS_STICKER_PATTERN.search(t_titre):
+                    log(f"🚫 Article Magic Fans ignoré dès le titre (Autocollant / Sticker) : '{t_titre}'")
                     continue
                 p_val = parse_price(t_prix)
                 if p_val is not None and p_val > 80.0:
