@@ -900,7 +900,7 @@ def load_asse_knowledge():
         'ravet', 'redon', 'riou', 'rocco', 'saadi', 'saban', 'sacko', 'sagna', 'saivet', 'sako',
         'sall', 'sanogo', 'santana', 'santini', 'sauget', 'sechet', 'soderlund', 'solignac',
         'souici', 'tallec', 'tardieu', 'thioub', 'tormin', 'trauco', 'vada', 'vagner', 'vasseur',
-        'viviani', 'wolff', 'yahia', 'youssouf',
+        'viviani', 'wolff', 'yahia', 'youssouf', 'pantaloni',
         # Homonymes internationaux / stars d'autres clubs (exigent prénom + nom si "ASSE" absent)
         'fournier', 'andreu', 'pogba', 'hernandez', 'alonso', 'sanchez', 'jorginho', 'fernandes', 'fernandez',
         'christensen', 'oliveira', 'ramirez', 'rivera', 'laudrup', 'milla', 'almeida', 'guarin',
@@ -943,6 +943,7 @@ def load_asse_knowledge():
         'georges bereta': 'Georges Bereta',
         'robert herbin': 'Robert Herbin',
         'salif keita': 'Salif Keita',
+        'olivier pantaloni': 'Olivier Pantaloni',
         'rachid mekhloufi': 'Rachid Mekhloufi'
     }
 
@@ -1133,7 +1134,7 @@ def is_flux_smart_candidate(title_str):
     t_clean = t_clean.replace('’', "'")
 
     # Éliminer d'emblée les sports non-football
-    if re.search(r'\b(ciclismo|cyclisme|velo|radsport|gymshark|fitness|running|trail|basket|nba|nfl|rugby)\b', t_clean):
+    if re.search(r'\b(ciclismo|cyclisme|velo|radsport|gymshark|fitness|running|trail|basket|nba|nfl|rugby|bici)\b', t_clean):
         return False, ""
 
     # 1. Initiale + nom de joueur (ex: 'j. clement', 'l. perrin', 's. ruffier' - scan de toutes les occurrences)
@@ -1342,7 +1343,7 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
             return True, "Maillot d'arbitre (non-club)"
 
     # 21. Cyclisme / Vélo / Tour de France / Radsport (verrouillage strict)
-    cycling_pat = r'\b(cyclis(?:me|te|tes)|v[eé]lo|v[eé]los|tour\s+de\s+france|letour|peloton|skoda|bicyclette|santini|castelli|uci|giro|giro\s+d[\'\s]italia|vuelta|cuissard|cuissards|vtt|radsport|rennrad|rennradtrikot|fahrrad|cycling|ciclismo)\b'
+    cycling_pat = r'\b(cyclis(?:me|te|tes)|v[eé]lo|v[eé]los|tour\s+de\s+france|letour|peloton|skoda|bicyclette|santini|castelli|uci|giro|giro\s+d[\'\s]italia|vuelta|cuissard|cuissards|vtt|radsport|rennrad|rennradtrikot|fahrrad|cycling|ciclismo|bici)\b'
     is_cycl_t = bool(re.search(cycling_pat, t))
     is_cycl_d = bool(d and re.search(cycling_pat, d))
     if is_cycl_t or is_cycl_d:
