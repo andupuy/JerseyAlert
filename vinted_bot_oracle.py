@@ -1005,7 +1005,7 @@ MAGIC_FANS_PATTERN = re.compile(
 )
 
 MAGIC_FANS_NOISE_PATTERN = re.compile(
-    r'\b(magic\s+(?:the\s+)?gathering|mtg|magic\s+johnson|orlando\s+magic|harry\s+potter|disney|winx|pokemon|yu[- ]?gi[- ]?oh|campanilla|clochette|barbie|lego|playmobil|funko|kpop|bts|stray\s+kids|5\s+majeur|nba|basket|magic\s+system|cartes?\s+magic)\b',
+    r'\b(?:magic[\s:]*(?:the\s+)?gathering|the\s+gathering|mtg|wizards\s+of\s+the\s+coast|wotc|booster[s]?|play[- ]booster|deck[s]?|planeswalker|commander|hobbit|tolkien|middle[- ]earth|seigneur\s+des\s+anneaux|lord\s+of\s+the\s+rings|magic\s+johnson|orlando\s+magic|harry\s+potter|disney|winx|pokemon|pok[eé]mon|yu[- ]?gi[- ]?oh|campanilla|clochette|barbie|lego|playmobil|funko|kpop|bts|stray\s+kids|5\s+majeur|nba|basket|magic\s+system|cartes?\s+magic)\b',
     re.IGNORECASE
 )
 
@@ -2134,6 +2134,14 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
             log(f"🚫 [Vinted] Alerte bloquée (Groupe adverse dans le titre : {conf_grp_t}) : {final_title}")
             return
 
+        # Rejeter le bruit hors-sujet et jeux de cartes (Magic The Gathering...)
+        if MAGIC_FANS_NOISE_PATTERN.search(final_title):
+            log(f"🚫 [Vinted] Alerte bloquée (Hors-sujet / Jeu de cartes dans le titre) : {final_title}")
+            return
+        if final_brand and re.search(r'\b(gathering|wizards|mtg)\b', final_brand, re.IGNORECASE):
+            log(f"🚫 [Vinted] Alerte bloquée (Marque jeu de cartes : {final_brand}) : {final_title}")
+            return
+
         is_mf_t, mf_kw_t = is_magic_fans_collector_match(final_title)
         is_asse_jersey_t = is_asse_jersey_match(final_title)
         if is_mf_t:
@@ -2516,6 +2524,11 @@ def worker_smart_inspection():
                     if MAGIC_FANS_STICKER_PATTERN.search(t_titre):
                         item.pop('_prefetched_html', None)
                         log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Autocollant / Sticker) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
+                    if MAGIC_FANS_NOISE_PATTERN.search(t_titre):
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Bruit / Jeu de cartes dans le titre) : '{t_titre}'")
                         smart_inspection_queue.task_done()
                         continue
                     is_excl_sp, r_sp = is_excluded_product(t_titre, desc, t_prix)
