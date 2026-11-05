@@ -191,6 +191,11 @@ def send_discord_alert(product):
         # Sécurité multi-devises Shopify : si Shopify renvoie du PLN (ex: taux ~4.5x), reconvertir en EUR
         if currency == "PLN":
             p_float = round(p_float / 4.50, 2)
+            if compare_at:
+                try:
+                    compare_at = float(compare_at) / 4.50
+                except (ValueError, TypeError):
+                    pass
         if compare_at and float(compare_at) > p_float:
             price_display = f"~~{float(compare_at):.2f} €~~ **{p_float:.2f} €** (Promo)"
         else:
