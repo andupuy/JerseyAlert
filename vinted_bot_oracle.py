@@ -1168,6 +1168,61 @@ def is_flux_smart_candidate(title_str):
 
     return False, ""
 
+# Équipementiers tiers incompatibles avec l'ASSE (n'ont jamais équipé le club)
+INCOMPATIBLE_KIT_BRANDS = [
+    r'\blegea\b',
+    r'\bgivova\b',
+    r'\berre[aà]\b',
+    r'\bjoma\b',
+    r'\bmacron\b'
+]
+INCOMPATIBLE_KIT_PATTERN = re.compile(r'|'.join(INCOMPATIBLE_KIT_BRANDS), re.IGNORECASE)
+
+def is_incompatible_kit_brand(brand_str="", title_str="", desc_str=""):
+    """
+    Bloque les maillots d'équipementiers tiers qui n'ont jamais équipé l'ASSE :
+    LEGEA, Givova, Erreà, Joma, Macron.
+    """
+    b = (brand_str or "").strip()
+    if b and b.upper() != "N/A":
+        m = INCOMPATIBLE_KIT_PATTERN.search(b)
+        if m:
+            brand_name = m.group(0).lower()
+            if brand_name in ('errea', 'erreà'):
+                display_name = 'Erreà'
+            elif brand_name == 'legea':
+                display_name = 'LEGEA'
+            elif brand_name == 'givova':
+                display_name = 'Givova'
+            elif brand_name == 'joma':
+                display_name = 'Joma'
+            elif brand_name == 'macron':
+                display_name = 'Macron'
+            else:
+                display_name = brand_name.capitalize()
+            return True, f"Équipementier incompatible ({display_name})"
+
+    t = (title_str or "").strip()
+    if t:
+        m = INCOMPATIBLE_KIT_PATTERN.search(t)
+        if m:
+            brand_name = m.group(0).lower()
+            if brand_name in ('errea', 'erreà'):
+                display_name = 'Erreà'
+            elif brand_name == 'legea':
+                display_name = 'LEGEA'
+            elif brand_name == 'givova':
+                display_name = 'Givova'
+            elif brand_name == 'joma':
+                display_name = 'Joma'
+            elif brand_name == 'macron':
+                display_name = 'Macron'
+            else:
+                display_name = brand_name.capitalize()
+            return True, f"Équipementier incompatible ({display_name})"
+
+    return False, ""
+
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
     Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
@@ -1442,6 +1497,11 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     # Ex: 'Maillot asse manufrance duarig XL'
     if re.search(r'\bmanufrance\b', full_reed) and re.search(r'\bduarig\b', full_reed):
         return True, "Réédition Manufrance Duarig (anachronisme)"
+
+    # 33. Équipementiers incompatibles avec l'ASSE (LEGEA, Givova, Erreà, Joma, Macron)
+    is_bad_kit, bad_kit_reason = is_incompatible_kit_brand("", title_str)
+    if is_bad_kit:
+        return True, bad_kit_reason
 
     return False, "OK"
 
@@ -2142,6 +2202,12 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
             log(f"🚫 [Vinted] Alerte bloquée (Marque jeu de cartes : {final_brand}) : {final_title}")
             return
 
+        # Bloquer les équipementiers incompatibles (LEGEA, Givova, Erreà, Joma, Macron)
+        is_bad_brand, bad_brand_reason = is_incompatible_kit_brand(final_brand, final_title)
+        if is_bad_brand:
+            log(f"🚫 [Vinted] Alerte bloquée ({bad_brand_reason}) : {final_title} (Marque: {final_brand})")
+            return
+
         is_mf_t, mf_kw_t = is_magic_fans_collector_match(final_title)
         is_asse_jersey_t = is_asse_jersey_match(final_title)
         if is_mf_t:
@@ -2223,6 +2289,10 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                     m_br = re.search(r'\\?"code\\?"\s*:\s*\\?"brand\\?"[^\}]{0,200}\\?"title\\?"\s*:\s*\\?"([^"\\]+)', html)
                     if m_br and m_br.group(1).strip():
                         final_brand = clean_text(m_br.group(1).strip())
+                is_bad_brand, bad_brand_reason = is_incompatible_kit_brand(final_brand, final_title)
+                if is_bad_brand:
+                    log(f"🚫 [Vinted] Alerte filtrée après lecture fiche ({bad_brand_reason}) : {final_title} (Marque: {final_brand})")
+                    return
                 if final_status in ['N/A', 'Non spécifié']:
                     m_st = re.search(r'\\?"code\\?"\s*:\s*\\?"status\\?"[^\}]{0,200}\\?"value\\?"\s*:\s*\\?"([^"\\]+)', html)
                     if m_st and m_st.group(1).strip():
@@ -2570,6 +2640,13 @@ def worker_smart_inspection():
                     smart_inspection_queue.task_done()
                     continue
 
+                is_bad_brand, bad_brand_reason = is_incompatible_kit_brand(item.get('brand'), t_titre)
+                if is_bad_brand:
+                    item.pop('_prefetched_html', None)
+                    log(f"🚫 [Smart-Inspector] Article #{item_id} exclu ({bad_brand_reason}) : '{t_titre}' (Marque: {item.get('brand')})")
+                    smart_inspection_queue.task_done()
+                    continue
+
                 if FILTER_ADULT_ONLY:
                     is_excl_sd, reason_sd = is_excluded_size(item.get('size', 'N/A'), t_titre, desc)
                     if is_excl_sd:
@@ -2763,6 +2840,12 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
             if is_excl:
                 log(f"🚫 Article ignoré dès la liste ({reason}) : '{t_titre}' ({t_prix})")
                 continue
+
+            if item.get('brand'):
+                is_bad_brand, bad_brand_reason = is_incompatible_kit_brand(item.get('brand'), t_titre)
+                if is_bad_brand:
+                    log(f"🚫 Article ignoré dès la liste ({bad_brand_reason}) : '{t_titre}' (Marque: {item.get('brand')})")
+                    continue
 
             # 2. Filtrage des tailles enfants et XS/S
             if FILTER_ADULT_ONLY and item.get('size') and item.get('size') != 'N/A':

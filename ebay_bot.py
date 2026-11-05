@@ -328,6 +328,19 @@ def run_ebay_sniper():
                         log(f"🚫 [eBay] Vendeur bloqué @{seller_name} : '{title}'")
                         continue
 
+                    # 6. Extraction et filtrage de la taille (Adultes M, L, XL, XXL uniquement - Exclusion XS/S et enfants)
+                    if FILTER_ADULT_ONLY:
+                        size_val = it.get("size", "")
+                        if not size_val:
+                            for asp in it.get("localizedAspects", []):
+                                if asp.get("name", "").lower() in ["taille", "size", "größe", "taglia", "talla"]:
+                                    size_val = asp.get("value", "")
+                                    break
+                        is_excl_s, reason_s = is_excluded_size(size_val, title)
+                        if is_excl_s:
+                            log(f"🚫 [eBay] Article exclu taille ({reason_s}) : '{title}'")
+                            continue
+
                     new_matches.append(it)
 
                 save_seen_ids(seen_ids)

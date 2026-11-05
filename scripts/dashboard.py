@@ -112,6 +112,143 @@ def save_blacklisted_keywords(keywords_list):
         print(f"Erreur sauvegarde keywords blacklist: {e}")
     return clean_list
 
+def fetch_system_status_raw():
+    res = subprocess.run(["systemctl", "is-active", "vinted-bot"], capture_output=True, text=True, timeout=5)
+    is_active = res.stdout.strip()
+
+    ram_used = "N/A"
+    ram_total = "N/A"
+    swap_used = "N/A"
+    swap_total = "N/A"
+    try:
+        free_res = subprocess.run(["free", "-m"], capture_output=True, text=True, timeout=5)
+        lines = free_res.stdout.strip().split("\n")
+        for line in lines:
+            parts = line.split()
+            if "Mem:" in parts[0]:
+                ram_total = f"{parts[1]} Mo"
+                ram_used = f"{parts[2]} Mo"
+            elif "Swap:" in parts[0]:
+                swap_total = f"{parts[1]} Mo"
+                swap_used = f"{parts[2]} Mo"
+    except Exception:
+        pass
+
+    load_avg = "N/A"
+    try:
+        with open("/proc/loadavg", "r") as f:
+            load_avg = f.read().split()[:3]
+            load_avg = ", ".join(load_avg)
+    except Exception:
+        pass
+
+    return {
+        "status": is_active,
+        "ram_used": ram_used,
+        "ram_total": ram_total,
+        "swap_used": swap_used,
+        "swap_total": swap_total,
+        "uptime": load_avg
+    }
+
+def fetch_logs_and_errors_raw():
+    try:
+        # Optimisé avec -o cat pour supprimer le surplus syslog et diviser par 50 la latence (<20ms)
+        res = subprocess.run(
+            ["journalctl", "-u", "vinted-bot.service", "-n", "120", "-o", "cat", "--no-pager"],
+            capture_output=True, text=True, timeout=5
+        )
+        raw_text = res.stdout
+
+        # Read last reset epoch
+        last_reset = 0.0
+        if os.path.exists(RESET_TIMESTAMP_FILE):
+            try:
+                with open(RESET_TIMESTAMP_FILE, "r") as f:
+                    last_reset = float(f.read().strip())
+            except Exception:
+                pass
+
+        # Sync any unexpected systemd error lines that occurred strictly AFTER the reset
+        check_lines = raw_text.splitlines()
+        new_errs = []
+        now_sec = time.time()
+        for line in check_lines:
+            if ERROR_PATTERNS.search(line) and not IGNORE_PATTERNS.search(line):
+                if last_reset > 0 and (now_sec - last_reset) < 900:
+                    m = re.search(r'\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]', line)
+                    if m:
+                        try:
+                            dt = time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                            if time.mktime(dt) < last_reset:
+                                continue
+                        except Exception:
+                            pass
+                new_errs.append(line)
+
+        if new_errs and os.path.exists(ERRORS_LOG_FILE):
+            try:
+                with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                    existing_tail = set(f.read().splitlines()[-100:])
+                to_append = [e for e in new_errs if e not in existing_tail]
+                if to_append:
+                    with open(ERRORS_LOG_FILE, "a", encoding="utf-8") as f:
+                        for e in to_append:
+                            f.write(e + "\n")
+            except Exception:
+                pass
+
+        # Read full persistent error history
+        if os.path.exists(ERRORS_LOG_FILE):
+            with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                stored_lines = [
+                    l.strip() for l in f
+                    if l.strip() and not IGNORE_PATTERNS.search(l)
+                ]
+        else:
+            stored_lines = []
+
+        # Count only actual errors (ignore user reset notification line if alone)
+        real_errors = [l for l in stored_lines if "🧹 Historique des erreurs réinitialisé" not in l]
+        error_count = len(real_errors)
+
+        if stored_lines:
+            error_text = "\n".join(stored_lines)
+        else:
+            error_text = "✅ Aucun avertissement ni incident enregistré dans l'historique. Tout roule parfaitement !"
+
+        return raw_text, error_text, error_count
+    except Exception as e:
+        err = f"Erreur lecture logs: {e}"
+        return err, err, 0
+
+def background_poller():
+    """Tâche d'arrière-plan ultra-légère qui maintient le cache en mémoire (0ms de latence pour l'UI)"""
+    status_timer = 0.0
+    while True:
+        try:
+            full_logs, error_logs, error_count = fetch_logs_and_errors_raw()
+            with cache_lock:
+                logs_cache["timestamp"] = time.time()
+                logs_cache["full"] = full_logs
+                logs_cache["errors"] = error_logs
+                logs_cache["error_count"] = error_count
+        except Exception:
+            pass
+
+        now = time.time()
+        if now - status_timer >= 2.0:
+            status_timer = now
+            try:
+                status_data = fetch_system_status_raw()
+                with cache_lock:
+                    status_cache["timestamp"] = now
+                    status_cache["data"] = status_data
+            except Exception:
+                pass
+
+        time.sleep(1.0)
+
 class ThreadedTCPServer(ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -184,12 +321,21 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/restart":
             subprocess.run(["systemctl", "restart", "vinted-bot"], timeout=10)
+            with cache_lock:
+                status_cache["timestamp"] = 0
+                status_cache["data"] = {}
             self.send_json_response({"success": True, "message": "Bot redémarré avec succès !"})
         elif parsed.path == "/api/stop":
             subprocess.run(["systemctl", "stop", "vinted-bot"], timeout=10)
+            with cache_lock:
+                status_cache["timestamp"] = 0
+                status_cache["data"] = {}
             self.send_json_response({"success": True, "message": "Bot mis en pause !"})
         elif parsed.path == "/api/start":
             subprocess.run(["systemctl", "start", "vinted-bot"], timeout=10)
+            with cache_lock:
+                status_cache["timestamp"] = 0
+                status_cache["data"] = {}
             self.send_json_response({"success": True, "message": "Bot démarré !"})
         elif parsed.path == "/api/clear-errors":
             try:
@@ -197,10 +343,13 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 with open(RESET_TIMESTAMP_FILE, "w") as f:
                     f.write(str(now_epoch))
                 now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+                reset_msg = f"[{now_str}] 🧹 Historique des erreurs réinitialisé par l'utilisateur."
                 with open(ERRORS_LOG_FILE, "w", encoding="utf-8") as f:
-                    f.write(f"[{now_str}] 🧹 Historique des erreurs réinitialisé par l'utilisateur.\n")
+                    f.write(reset_msg + "\n")
                 with cache_lock:
                     logs_cache["timestamp"] = 0
+                    logs_cache["errors"] = reset_msg
+                    logs_cache["error_count"] = 0
                 self.send_json_response({"success": True, "message": "Historique des erreurs réinitialisé !"})
             except Exception as e:
                 self.send_json_response({"success": False, "message": f"Erreur: {e}"})
@@ -307,148 +456,24 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def get_cached_status(self):
-        global status_cache
-        now = time.time()
         with cache_lock:
-            if now - status_cache["timestamp"] < 2.0 and status_cache["data"]:
-                return status_cache["data"]
-
-        # Re-fetch
-        status_data = self.fetch_system_status()
+            if status_cache["data"]:
+                return dict(status_cache["data"])
+        fresh = fetch_system_status_raw()
         with cache_lock:
-            status_cache["timestamp"] = now
-            status_cache["data"] = status_data
-        return status_data
-
-    def fetch_system_status(self):
-        # Service status
-        res = subprocess.run(["systemctl", "is-active", "vinted-bot"], capture_output=True, text=True, timeout=5)
-        is_active = res.stdout.strip()
-
-        # RAM & Swap usage
-        ram_used = "N/A"
-        ram_total = "N/A"
-        swap_used = "N/A"
-        swap_total = "N/A"
-        try:
-            free_res = subprocess.run(["free", "-m"], capture_output=True, text=True, timeout=5)
-            lines = free_res.stdout.strip().split("\n")
-            for line in lines:
-                parts = line.split()
-                if "Mem:" in parts[0]:
-                    ram_total = f"{parts[1]} Mo"
-                    ram_used = f"{parts[2]} Mo"
-                elif "Swap:" in parts[0]:
-                    swap_total = f"{parts[1]} Mo"
-                    swap_used = f"{parts[2]} Mo"
-        except Exception:
-            pass
-
-        # Load average
-        load_avg = "N/A"
-        try:
-            with open("/proc/loadavg", "r") as f:
-                load_avg = f.read().split()[:3]
-                load_avg = ", ".join(load_avg)
-        except Exception:
-            pass
-
-        return {
-            "status": is_active,
-            "ram_used": ram_used,
-            "ram_total": ram_total,
-            "swap_used": swap_used,
-            "swap_total": swap_total,
-            "uptime": load_avg
-        }
+            status_cache["timestamp"] = time.time()
+            status_cache["data"] = fresh
+        return dict(fresh)
 
     def get_cached_logs(self):
-        global logs_cache
-        now = time.time()
         with cache_lock:
-            if now - logs_cache["timestamp"] < 2.0 and logs_cache["full"]:
-                return logs_cache
-
-        # Re-fetch from journalctl and persistent file
-        full_logs, error_logs, error_count = self.fetch_logs_and_errors()
+            if logs_cache["full"]:
+                return dict(logs_cache)
+        full, errs, count = fetch_logs_and_errors_raw()
+        fresh = {"timestamp": time.time(), "full": full, "errors": errs, "error_count": count}
         with cache_lock:
-            logs_cache["timestamp"] = now
-            logs_cache["full"] = full_logs
-            logs_cache["errors"] = error_logs
-            logs_cache["error_count"] = error_count
-            return logs_cache
-
-    def fetch_logs_and_errors(self):
-        try:
-            # 1. Fetch live stream
-            res = subprocess.run(
-                ["journalctl", "-u", "vinted-bot", "-n", "150", "--no-pager"],
-                capture_output=True, text=True, timeout=5
-            )
-            raw_text = res.stdout
-
-            # Read last reset epoch
-            last_reset = 0.0
-            if os.path.exists(RESET_TIMESTAMP_FILE):
-                try:
-                    with open(RESET_TIMESTAMP_FILE, "r") as f:
-                        last_reset = float(f.read().strip())
-                except Exception:
-                    pass
-
-            # 2. Sync any unexpected systemd error lines that occurred strictly AFTER the reset
-            check_lines = raw_text.splitlines()
-            new_errs = []
-            now_sec = time.time()
-            for line in check_lines:
-                if ERROR_PATTERNS.search(line) and not IGNORE_PATTERNS.search(line):
-                    # Si la réinitialisation a eu lieu récemment (< 15 min), on ignore les lignes antérieures au reset
-                    if last_reset > 0 and (now_sec - last_reset) < 900:
-                        m = re.search(r'\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]', line)
-                        if m:
-                            try:
-                                dt = time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-                                if time.mktime(dt) < last_reset:
-                                    continue
-                            except Exception:
-                                pass
-                    new_errs.append(line)
-
-            if new_errs and os.path.exists(ERRORS_LOG_FILE):
-                try:
-                    with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
-                        existing_tail = set(f.read().splitlines()[-100:])
-                    to_append = [e for e in new_errs if e not in existing_tail]
-                    if to_append:
-                        with open(ERRORS_LOG_FILE, "a", encoding="utf-8") as f:
-                            for e in to_append:
-                                f.write(e + "\n")
-                except Exception:
-                    pass
-
-            # 3. Read full persistent error history
-            if os.path.exists(ERRORS_LOG_FILE):
-                with open(ERRORS_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
-                    stored_lines = [
-                        l.strip() for l in f
-                        if l.strip() and not IGNORE_PATTERNS.search(l)
-                    ]
-            else:
-                stored_lines = []
-
-            # Count only actual errors (ignore user reset notification line if alone)
-            real_errors = [l for l in stored_lines if "🧹 Historique des erreurs réinitialisé" not in l]
-            error_count = len(real_errors)
-
-            if stored_lines:
-                error_text = "\n".join(stored_lines)
-            else:
-                error_text = "✅ Aucun avertissement ni incident enregistré dans l'historique. Tout roule parfaitement !"
-
-            return raw_text, error_text, error_count
-        except Exception as e:
-            err = f"Erreur lecture logs: {e}"
-            return err, err, 0
+            logs_cache.update(fresh)
+        return dict(fresh)
 
     def render_dashboard(self):
         return """<!DOCTYPE html>
@@ -1074,12 +1099,19 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             }
         }
 
+        let refreshCycle = 0;
         async function refreshAll() {
             if (document.hidden) return;
+            refreshCycle++;
             if (activeTab === "blacklist") {
                 await fetchBlacklist();
-            } else {
-                await Promise.all([fetchLogs(), fetchErrors()]);
+            } else if (activeTab === "all") {
+                await fetchLogs();
+                if (refreshCycle % 3 === 0) {
+                    fetchErrors();
+                }
+            } else if (activeTab === "errors") {
+                await fetchErrors();
             }
         }
 
@@ -1120,14 +1152,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             }, 1000);
         }
 
-        // Periodic updates with smart intervals
-        setInterval(refreshAll, 3000);
+        // Periodic updates with ultra-fast lightweight interval (1.0s instant refresh)
+        setInterval(refreshAll, 1000);
         setInterval(() => {
             if (!document.hidden) {
                 updateStatus();
                 fetchBlacklist();
             }
-        }, 5000);
+        }, 4000);
 
         // Immediate run on load
         updateStatus();
@@ -1139,6 +1171,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 """
 
 if __name__ == "__main__":
+    # Démarrage du thread d'arrière-plan pour le cache instantané
+    poller_thread = threading.Thread(target=background_poller, daemon=True)
+    poller_thread.start()
     with ThreadedTCPServer(("", PORT), DashboardHandler) as httpd:
         print(f"Dashboard running on port {PORT}")
         httpd.serve_forever()

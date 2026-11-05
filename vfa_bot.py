@@ -43,9 +43,19 @@ except ImportError:
     def is_excluded_size(size_str, title_str="", desc_str=""):
         return False, ""
 
-VFA_COLLECTION_URL = "https://www.vintagefootballarea.com/collections/asse/products.json?limit=50&sort_by=created-descending"
+VFA_COLLECTION_URL = "https://www.vintagefootballarea.com/collections/asse/products.json?limit=50&sort_by=created-descending&currency=EUR"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_IDS_FILE = "seen_vfa_ids.json"
+
+VFA_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+}
+VFA_COOKIES = {
+    'cart_currency': 'EUR',
+    'localization': 'FR'
+}
 
 CHECK_INTERVAL_MIN = 45
 CHECK_INTERVAL_MAX = 75
@@ -147,15 +157,13 @@ def extract_vfa_size(prod, meta=None):
 def fetch_vfa_single_product(handle):
     if not handle:
         return None
-    url = f"https://www.vintagefootballarea.com/products/{handle}.json"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*'
-    }
+    url = f"https://www.vintagefootballarea.com/products/{handle}.json?currency=EUR"
     try:
-        resp = requests.get(url, headers=headers, timeout=8)
+        resp = requests.get(url, headers=VFA_HEADERS, cookies=VFA_COOKIES, timeout=8)
         if resp.status_code == 200:
             return resp.json().get("product")
+        elif resp.status_code == 429:
+            log(f"⚠️ HTTP 429 (Rate Limit) lors du fetch single product '{handle}'")
     except Exception as e:
         log(f"⚠️ Erreur fetch single product '{handle}': {e}")
     return None
@@ -176,9 +184,13 @@ def send_discord_alert(product):
     var = avail_vars[0] if avail_vars else (variants[0] if variants else {})
     raw_price = var.get("price", "N/A")
     compare_at = var.get("compare_at_price")
+    currency = var.get("price_currency", "EUR")
 
     try:
         p_float = float(raw_price)
+        # Sécurité multi-devises Shopify : si Shopify renvoie du PLN (ex: taux ~4.5x), reconvertir en EUR
+        if currency == "PLN":
+            p_float = round(p_float / 4.50, 2)
         if compare_at and float(compare_at) > p_float:
             price_display = f"~~{float(compare_at):.2f} €~~ **{p_float:.2f} €** (Promo)"
         else:
@@ -246,22 +258,20 @@ def send_discord_alert(product):
         log(f"❌ Erreur envoi webhook Discord: {e}")
 
 def fetch_vfa_products():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
-    }
     try:
-        resp = requests.get(VFA_COLLECTION_URL, headers=headers, timeout=12)
+        resp = requests.get(VFA_COLLECTION_URL, headers=VFA_HEADERS, cookies=VFA_COOKIES, timeout=12)
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("products", [])
+            return data.get("products", []), 200
+        elif resp.status_code == 429:
+            log("⚠️ Réponse HTTP 429 (Rate Limit) de Vintage Football Area")
+            return [], 429
         else:
             log(f"⚠️ Réponse HTTP {resp.status_code} de Vintage Football Area")
-            return []
+            return [], resp.status_code
     except Exception as e:
         log(f"⚠️ Erreur requête VFA: {e}")
-        return []
+        return [], 0
 
 def run_bot():
     log("🚀 Démarrage du Sniper Vintage Football Area ASSE (Shopify API)")
@@ -272,9 +282,15 @@ def run_bot():
     while True:
         cycle_count += 1
         try:
-            products = fetch_vfa_products()
+            products, status_code = fetch_vfa_products()
+            if status_code == 429:
+                backoff_sec = random.uniform(90, 150)
+                log(f"⏳ Rate limit Shopify détecté (HTTP 429). Pause de sécurité de {int(backoff_sec)}s...")
+                time.sleep(backoff_sec)
+                continue
+
             if not products:
-                time.sleep(30)
+                time.sleep(45)
                 continue
 
             if cycle_count % 10 == 1:
