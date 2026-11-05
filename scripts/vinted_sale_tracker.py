@@ -36,6 +36,8 @@ BASE_DIR = os.environ.get(
 )
 TRACKED_ITEMS_FILE = os.path.join(BASE_DIR, "tracked_items.json")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -244,6 +246,70 @@ def patch_discord_message(item, state_type, duration_str=None, fav_count=0):
         log(f"❌ Exception Discord PATCH #{item_id}: {e}")
         return False
 
+def patch_telegram_message(item, state_type, duration_str=None, fav_count=0):
+    """
+    Met à jour silencieusement le message Telegram d'origine (légende + boutons).
+    state_type: 'SOLD' | 'RESERVED' | 'REMOVED' | 'AVAILABLE'
+    """
+    tg_msg_id = item.get("telegram_message_id")
+    if not tg_msg_id:
+        return False
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+
+    title = item.get("title", "Article Vinted")
+    clean_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    price = item.get("price", "")
+    size = item.get("size", "")
+    brand = item.get("brand", "")
+    url = item.get("url", "")
+    buy_url = f"https://www.vinted.fr/transaction/buy/new?item_id={item.get('item_id')}"
+
+    if state_type == "SOLD":
+        dur_txt = f" en {duration_str}" if duration_str else ""
+        caption = f"🔴 <b>[VENDU{dur_txt}] {clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>\n❤️ {fav_count} favori(s)"
+        btn_text = f"🔴 ARTICLE VENDU ({price})"
+        btn_url = url
+    elif state_type == "RESERVED":
+        caption = f"🟠 <b>[RÉSERVÉ] {clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>\n❤️ {fav_count} favori(s)"
+        btn_text = "🟠 ARTICLE RÉSERVÉ"
+        btn_url = url
+    elif state_type == "REMOVED":
+        caption = f"⚫ <b>[RETIRÉ] {clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>"
+        btn_text = "⚫ ANNONCE RETIRÉE"
+        btn_url = url
+    else:
+        caption = f"🟢 <b>{clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>\n❤️ {fav_count} favori(s)"
+        btn_text = f"⚡ ACHETER EN 1 CLIC ({price})"
+        btn_url = buy_url
+
+    reply_markup = {
+        "inline_keyboard": [
+            [{"text": btn_text, "url": btn_url}],
+            [{"text": "🔍 Voir sur Vinted", "url": url}]
+        ]
+    }
+
+    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageCaption"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "message_id": tg_msg_id,
+        "caption": caption,
+        "parse_mode": "HTML",
+        "reply_markup": reply_markup
+    }
+    try:
+        r = requests.post(tg_url, json=payload, timeout=6)
+        if r.status_code == 200:
+            log(f"✅ Telegram mis à jour ({state_type}) pour #{item.get('item_id')}")
+            return True
+        else:
+            log(f"⚠️ Erreur Telegram PATCH #{item.get('item_id')}: HTTP {r.status_code}")
+            return False
+    except Exception as e:
+        log(f"❌ Exception Telegram PATCH #{item.get('item_id')}: {e}")
+        return False
+
 def check_item_http(session, url):
     """
     Vérifie le statut réel, le nombre de favoris (❤️) et le prix actuel via simple requête HTTP (~0.18s, 0 Chromium).
@@ -416,6 +482,7 @@ def run_tracker():
                     log(f"🎯 [Tracker] Article #{item_id} VENDU en {dur_str} (❤️ {current_fav}) ! ({item.get('title')})")
                     
                     patch_discord_message(item, "SOLD", duration_str=dur_str, fav_count=current_fav)
+                    patch_telegram_message(item, "SOLD", duration_str=dur_str, fav_count=current_fav)
 
                     update_tracked_item(item_id, {
                         "status": "SOLD",
@@ -432,6 +499,7 @@ def run_tracker():
                 elif status == "SUPPRIMÉ":
                     log(f"🗑️ [Tracker] Article #{item_id} SUPPRIMÉ de Vinted (❤️ {current_fav}). Fin du suivi.")
                     patch_discord_message(item, "REMOVED", fav_count=current_fav)
+                    patch_telegram_message(item, "REMOVED", fav_count=current_fav)
                     update_tracked_item(item_id, {
                         "status": "REMOVED",
                         "sub_status": "REMOVED",
@@ -443,6 +511,7 @@ def run_tracker():
                     log(f"⏳ [Tracker] Article #{item_id} RÉSERVÉ (❤️ {current_fav}). Prochain check dans 10 min.")
                     if prev_sub != "RESERVED" or current_fav != prev_fav or price_changed:
                         patch_discord_message(item, "RESERVED", fav_count=current_fav)
+                        patch_telegram_message(item, "RESERVED", fav_count=current_fav)
                     update_tracked_item(item_id, {
                         "sub_status": "RESERVED",
                         "price": item.get("price", prev_price_str),
@@ -464,6 +533,7 @@ def run_tracker():
                         
                         if prev_sub == "RESERVED" or current_fav != prev_fav or price_changed or int(item.get("check_count") or 0) == 0:
                             patch_discord_message(item, "AVAILABLE", fav_count=current_fav)
+                            patch_telegram_message(item, "AVAILABLE", fav_count=current_fav)
 
                         update_tracked_item(item_id, {
                             "sub_status": "AVAILABLE",

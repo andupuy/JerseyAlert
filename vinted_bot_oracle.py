@@ -38,6 +38,8 @@ SECONDARY_QUERIES = ["Jersey Asse", "Jersey Saint-Etienne", "Maglia Asse", "Cami
 SEARCH_QUERIES = PRIORITY_QUERIES + SECONDARY_QUERIES
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 STATE_FILE = "last_seen_id.txt"
 SEEN_IDS_FILE = "seen_ids_cache.json"
 ALERTED_IDS_FILE = "alerted_ids_cache.json"
@@ -2127,9 +2129,70 @@ def extract_items_from_page(page):
 
 in_flight_alert_ids = set()
 
+def send_telegram_alert(item_id, title, price, size, brand, status, seller, photo_url, desc_clean, item_url, buy_url, is_mf=False):
+    """Envoie une alerte Telegram ultra-réactive (<100ms) avec bouton d'achat direct en 1 clic"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return None
+
+    tag = "🟢 [Magic Fans]" if is_mf else "🟢 [Vinted]"
+    clean_title_html = (title or "Maillot ASSE").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    caption_lines = [
+        f"{tag} <b>{clean_title_html}</b>\n",
+        f"💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>",
+        f"🏷️ Marque : <b>{brand}</b> | État : <b>{status}</b>",
+    ]
+    if seller:
+        caption_lines.append(f"👤 Vendeur : <b>{seller}</b>")
+    if desc_clean:
+        clean_desc = desc_clean[:220].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").strip()
+        if len(desc_clean) > 220:
+            clean_desc += "..."
+        caption_lines.append(f"\n📖 <i>\"{clean_desc}\"</i>")
+
+    caption = "\n".join(caption_lines)
+
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": f"⚡ ACHETER EN 1 CLIC ({price})",
+                    "url": buy_url
+                }
+            ],
+            [
+                {
+                    "text": "🔍 Voir la fiche sur Vinted",
+                    "url": item_url
+                }
+            ]
+        ]
+    }
+
+    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "photo": photo_url or "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
+        "caption": caption,
+        "parse_mode": "HTML",
+        "reply_markup": reply_markup
+    }
+
+    try:
+        r = requests.post(tg_url, json=payload, timeout=6)
+        if r.status_code == 200:
+            msg_id = r.json().get("result", {}).get("message_id")
+            log(f"✅ [Telegram] Alerte #{item_id} envoyée (Msg ID: {msg_id})")
+            return msg_id
+        else:
+            log(f"⚠️ [Telegram] Erreur HTTP {r.status_code}: {r.text[:120]}")
+    except Exception as e:
+        log(f"⚠️ [Telegram] Exception: {e}")
+    return None
+
 def send_discord_alert(context, item, bypass_jersey_filters=False):
-    """Envoie une alerte Discord ultra-rapide (~0.3s) avec description Garmin et jusqu'à 10 photos HD dès le 1er envoi"""
-    if not DISCORD_WEBHOOK_URL: return
+    """Envoie une alerte Discord & Telegram ultra-rapide (~0.3s) avec bouton 1-clic et photos HD"""
+    if not DISCORD_WEBHOOK_URL and not TELEGRAM_BOT_TOKEN: return
 
     global alerted_ids, in_flight_alert_ids
     raw_id = item.get('id')
@@ -2249,7 +2312,7 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept-Language': 'fr-FR,fr;q=0.9',
                 }
-                resp = requests.get(item_url, headers=headers, timeout=4)
+                resp = requests.get(item_url, headers=headers, timeout=2.5)
                 if resp.status_code == 200:
                     resp.encoding = 'utf-8'
                     html = resp.text
@@ -2394,10 +2457,12 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
+        buy_url = f"https://www.vinted.fr/transaction/buy/new?item_id={item_id}"
+
         # Description formatée pour Discord embed
         fav_line_init = f"❤️ **{initial_fav_count} favori{'s' if initial_fav_count > 1 else ''}** sur Vinted"
         fav_badge_init = f" • ❤️ {initial_fav_count} favori{'s' if initial_fav_count > 1 else ''}"
-        description_text = f"💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**\n{fav_line_init}"
+        description_text = f"⚡ **[ACHETER EN 1 CLIC ({final_price})]({buy_url})**\n\n💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**\n{fav_line_init}"
         if seller_name:
             description_text += f"\n👤 Vendeur: **{seller_name}**"
         if desc_clean:
@@ -2444,19 +2509,50 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
         }
 
         discord_msg_id = None
+        telegram_msg_id = None
         sent_ok = False
-        try:
-            resp1 = requests.post(DISCORD_WEBHOOK_URL + "?wait=true", json=payload1, timeout=8)
-            if resp1.status_code in [200, 204]:
-                sent_ok = True
-                try:
-                    discord_msg_id = resp1.json().get("id")
-                except Exception:
-                    pass
-            else:
-                log(f"⚠️ Réponse Discord inhabituelle ({resp1.status_code}): {resp1.text[:100]}")
-        except Exception as e_post:
-            log(f"⚠️ Erreur envoi webhook Discord batch1: {e_post}")
+
+        def _send_discord():
+            if not DISCORD_WEBHOOK_URL:
+                return None
+            try:
+                resp1 = requests.post(DISCORD_WEBHOOK_URL + "?wait=true", json=payload1, timeout=8)
+                if resp1.status_code in [200, 204]:
+                    try:
+                        return resp1.json().get("id")
+                    except Exception:
+                        return "OK"
+                else:
+                    log(f"⚠️ Réponse Discord inhabituelle ({resp1.status_code}): {resp1.text[:100]}")
+            except Exception as e_post:
+                log(f"⚠️ Erreur envoi webhook Discord batch1: {e_post}")
+            return None
+
+        def _send_telegram():
+            return send_telegram_alert(
+                item_id=item_id,
+                title=final_title,
+                price=final_price,
+                size=final_size,
+                brand=final_brand,
+                status=final_status,
+                seller=seller_name,
+                photo_url=photos[0] if photos else photo_url,
+                desc_clean=desc_clean,
+                item_url=item_url,
+                buy_url=buy_url,
+                is_mf=is_mf
+            )
+
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            fut_d = executor.submit(_send_discord)
+            fut_t = executor.submit(_send_telegram)
+            discord_msg_id = fut_d.result()
+            telegram_msg_id = fut_t.result()
+
+        if discord_msg_id or telegram_msg_id:
+            sent_ok = True
 
         if not sent_ok:
             with state_lock:
@@ -2471,7 +2567,7 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
 
         # Si l'annonce contient plus de 10 photos (jusqu'à 20 photos au total) :
         # Envoi d'un 2ème lot 100% silencieux (flags: 4096 SUPPRESS_NOTIFICATIONS - aucune notif ni vibration)
-        if len(photos) > 10:
+        if DISCORD_WEBHOOK_URL and len(photos) > 10:
             embeds_batch2 = []
             for photo_url_item in photos[10:20]:
                 embeds_batch2.append({"url": item_url, "image": {"url": photo_url_item}})
@@ -2484,13 +2580,14 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                 }
                 requests.post(DISCORD_WEBHOOK_URL, json=payload2, timeout=6)
 
-        log(f"✅ [Vinted] Alerte envoyée #{item_id} ({min(len(photos), 20)} photos certifiées, description Garmin incluse)")
+        log(f"✅ [Vinted] Alerte envoyée #{item_id} (Discord & Telegram actifs, achat 1-clic inclus)")
 
         # Enregistrement dans le tracker individuel de cycle de vie (1er pointage rapide à t + 3 min)
         now_ts = time.time()
         record_tracked_item({
             "item_id": str(item_id),
             "discord_message_id": discord_msg_id,
+            "telegram_message_id": telegram_msg_id,
             "title": final_title,
             "price": final_price,
             "initial_price": final_price,
@@ -3077,11 +3174,11 @@ def worker_turbo_sniper():
                         if hasattr(signal, "SIGALRM"):
                             signal.alarm(0)
 
-                    # Pause ultra-réactive (0.8s à 1.2s sur le Flux Direct Foot, 1.1s à 1.5s sur le Filet)
+                    # Pause ultra-réactive (0.5s à 0.8s sur le Flux Direct Foot, 1.0s à 1.3s sur le Filet)
                     if scan_label == "Flux Direct Foot":
-                        time.sleep(random.uniform(0.8, 1.2))
+                        time.sleep(random.uniform(0.5, 0.8))
                     else:
-                        time.sleep(random.uniform(1.1, 1.5))
+                        time.sleep(random.uniform(1.0, 1.3))
 
                 try: browser.close()
                 except: pass
