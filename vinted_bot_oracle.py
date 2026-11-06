@@ -2175,7 +2175,8 @@ def send_telegram_alert(item_id, title, price, size, brand, status, seller, phot
         "photo": photo_url or "https://images.vinted.net/assets/icon-76x76-precomposed-3e6e4c5f0b8c7e5a5c5e5e5e5e5e5e5e.png",
         "caption": caption,
         "parse_mode": "HTML",
-        "reply_markup": reply_markup
+        "reply_markup": reply_markup,
+        "disable_notification": True
     }
 
     try:
