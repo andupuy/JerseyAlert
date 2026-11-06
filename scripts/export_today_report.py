@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Exporte un rapport d'activité du VPS (matches, scans, alertes, erreurs)
+Exporte un rapport d'activité du VPS (matches, scans, alertes, ventes, erreurs)
 vers un fichier JSON exploitable par GitHub Actions et l'assistant.
 """
 import subprocess
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 
 def generate_report():
@@ -23,6 +24,22 @@ def generate_report():
                 tracked_items = json.load(f)
         except Exception as e:
             print(f"Erreur lecture tracked_items: {e}")
+
+    now_ts = time.time()
+    ts_24h_ago = now_ts - (24 * 3600)
+
+    # Analyse des ventes sur 24h
+    sold_items_24h = []
+    if isinstance(tracked_items, dict):
+        for it in tracked_items.values():
+            sold_at = it.get("sold_at")
+            status = it.get("status")
+            sub_status = it.get("sub_status")
+            if (status == "SOLD" or sub_status == "SOLD") or (sold_at and sold_at >= ts_24h_ago):
+                # Si sold_at est dans les dernières 24h
+                if not sold_at or sold_at >= ts_24h_ago:
+                    sold_items_24h.append(it)
+        sold_items_24h.sort(key=lambda x: x.get("sold_at") or 0, reverse=True)
 
     # 2. Lecture des logs journalctl des dernières 24h
     matches = []
@@ -66,9 +83,8 @@ def generate_report():
     recent_tracked = []
     if isinstance(tracked_items, dict):
         items_list = list(tracked_items.values())
-        # Tri si created_at présent
         items_list.sort(key=lambda x: str(x.get("created_at") or x.get("timestamp") or ""), reverse=True)
-        recent_tracked = items_list[:25]
+        recent_tracked = items_list[:30]
 
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -78,12 +94,14 @@ def generate_report():
         },
         "stats_24h": {
             "matches_count": len(matches),
+            "sales_24h_count": len(sold_items_24h),
             "scan_flux_count": scan_count_flux,
             "scan_filet_count": scan_count_filet,
             "bot_restarts_count": bot_restarts,
             "errors_count": len(errors),
             "tracked_total": len(tracked_items)
         },
+        "sales_24h_items": sold_items_24h,
         "matches_24h": matches[-30:],
         "recent_tracked_items": recent_tracked,
         "recent_errors": errors[-10:]
@@ -93,7 +111,7 @@ def generate_report():
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ Rapport généré avec succès dans {output_path} ({len(matches)} matches, {len(tracked_items)} articles suivis)")
+    print(f"✅ Rapport généré avec succès dans {output_path} ({len(matches)} matches, {len(sold_items_24h)} ventes 24h, {len(tracked_items)} articles suivis)")
 
 if __name__ == "__main__":
     generate_report()
