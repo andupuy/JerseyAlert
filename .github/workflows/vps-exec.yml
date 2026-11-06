@@ -1,0 +1,19 @@
+name: VPS Command Exec
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Command to run on VPS'
+        required: true
+        default: 'systemctl status vinted-bot --no-pager'
+
+jobs:
+  execute:
+    name: Execute Command
+    runs-on: self-hosted
+    steps:
+      - name: Run command
+        run: |
+          echo "Running: ${{ github.event.inputs.command }}"
+          eval "${{ github.event.inputs.command }}"

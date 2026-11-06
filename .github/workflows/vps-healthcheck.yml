@@ -1,0 +1,27 @@
+name: VPS Healthcheck
+
+on:
+  workflow_dispatch:
+
+jobs:
+  healthcheck:
+    name: Check VPS Status
+    runs-on: self-hosted
+    steps:
+      - name: Systemd Services Status
+        run: |
+          echo "=== SERVICES STATUS ==="
+          systemctl is-active vinted-bot vinted-tracker vinted-dashboard || true
+          systemctl status vinted-bot vinted-tracker vinted-dashboard --no-pager || true
+
+      - name: System Resources
+        run: |
+          echo "=== SYSTEM METRICS ==="
+          free -h
+          df -h /
+          uptime
+
+      - name: Recent Bot Logs
+        run: |
+          echo "=== RECENT BOT LOGS ==="
+          journalctl -u vinted-bot.service -n 35 --no-pager || true

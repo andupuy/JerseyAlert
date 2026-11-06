@@ -1,0 +1,32 @@
+name: VPS Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: self-hosted
+    steps:
+      - name: Update Repository
+        run: |
+          cd /root/JerseyAlert
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Syntax Check
+        run: |
+          cd /root/JerseyAlert
+          python3 -m py_compile vinted_bot_oracle.py
+
+      - name: Restart Services
+        run: |
+          systemctl restart vinted-bot vinted-tracker vinted-dashboard
+
+      - name: Verify Services Status
+        run: |
+          systemctl is-active vinted-bot vinted-tracker vinted-dashboard
+          systemctl status vinted-bot --no-pager
