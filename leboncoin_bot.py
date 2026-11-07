@@ -235,11 +235,41 @@ def run_bot():
 
     cycle_count = 0
     consecutive_403 = 0
+    consecutive_conn_err = 0
+    conn_alert_sent = False
 
     while True:
         cycle_count += 1
         try:
             ads, status = fetch_leboncoin_ads(session)
+
+            # Surveillance et alerte coupure proxy SOCKS5 / Shield
+            if status == 0:
+                consecutive_conn_err += 1
+                if consecutive_conn_err >= 3 and not conn_alert_sent:
+                    log(f"🚨 Échec persistant du proxy LeBonCoin ({consecutive_conn_err}x erreurs de connexion SOCKS5) !")
+                    send_discord_system_alert(
+                        "🚨 [LeBonCoin] Alerte Proxy Résidentiel Déconnecté",
+                        "Les requêtes vers LeBonCoin échouent en boucle via le proxy SOCKS5 (`127.0.0.1:1055`).\n\n"
+                        "⚠️ **La Nvidia Shield semble éteinte ou déconnectée de Tailscale.**\n"
+                        "Tant que la Shield est hors-ligne, aucune alerte LeBonCoin ne peut être scannée.\n"
+                        "👉 Veuillez allumer la Shield ou vérifier l'application Tailscale.",
+                        color=0xED4245
+                    )
+                    conn_alert_sent = True
+                time.sleep(15)
+                continue
+            else:
+                if conn_alert_sent and status == 200:
+                    log("✅ Proxy LeBonCoin reconnecté et opérationnel !")
+                    send_discord_system_alert(
+                        "✅ [LeBonCoin] Proxy Résidentiel Rétabli",
+                        "La communication avec la Nvidia Shield via Tailscale refonctionne normalement !\n"
+                        "Le sniper LeBonCoin reprend la surveillance active.",
+                        color=0x57F287
+                    )
+                    conn_alert_sent = False
+                consecutive_conn_err = 0
 
             # Parachute de sécurité Datadome
             if status == 403:

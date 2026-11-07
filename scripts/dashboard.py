@@ -113,8 +113,65 @@ def save_blacklisted_keywords(keywords_list):
     return clean_list
 
 def fetch_system_status_raw():
-    res = subprocess.run(["systemctl", "is-active", "vinted-bot"], capture_output=True, text=True, timeout=5)
-    is_active = res.stdout.strip()
+    # 1. Services systemd
+    services = ["vinted-bot", "leboncoin-bot", "ebay-bot", "vfa-bot", "vinted-tracker"]
+    svc_map = {}
+    try:
+        res = subprocess.run(["systemctl", "is-active"] + services, capture_output=True, text=True, timeout=3)
+        statuses = res.stdout.strip().split("\n")
+        svc_map = dict(zip(services, statuses))
+    except Exception:
+        for s in services:
+            svc_map[s] = "unknown"
+
+    is_active = svc_map.get("vinted-bot", "inactive")
+
+    # 2. Tailscale Shield status
+    shield_online = False
+    try:
+        ts_res = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=2)
+        if ts_res.returncode == 0:
+            ts_data = json.loads(ts_res.stdout)
+            peers = ts_data.get("Peer", {})
+            for p in peers.values():
+                if "SHIELD" in p.get("HostName", "").upper():
+                    shield_online = p.get("Online", False)
+                    break
+    except Exception:
+        shield_online = False
+
+    # LeBonCoin status: both systemd active AND shield online
+    lbc_active = (svc_map.get("leboncoin-bot") == "active")
+    lbc_ok = lbc_active and shield_online
+    lbc_label = "En ligne" if lbc_ok else ("Shield KO" if lbc_active else "Arrêté")
+
+    services_info = {
+        "vinted": {
+            "name": "Vinted",
+            "ok": svc_map.get("vinted-bot") == "active",
+            "label": "En ligne" if svc_map.get("vinted-bot") == "active" else "Arrêté"
+        },
+        "leboncoin": {
+            "name": "LeBonCoin",
+            "ok": lbc_ok,
+            "label": lbc_label
+        },
+        "shield": {
+            "name": "Proxy Shield",
+            "ok": shield_online,
+            "label": "Connecté" if shield_online else "Hors-ligne"
+        },
+        "ebay": {
+            "name": "eBay",
+            "ok": svc_map.get("ebay-bot") == "active",
+            "label": "En ligne" if svc_map.get("ebay-bot") == "active" else "Arrêté"
+        },
+        "vfa": {
+            "name": "VFA",
+            "ok": svc_map.get("vfa-bot") == "active",
+            "label": "En ligne" if svc_map.get("vfa-bot") == "active" else "Arrêté"
+        }
+    }
 
     ram_used = "N/A"
     ram_total = "N/A"
@@ -148,7 +205,8 @@ def fetch_system_status_raw():
         "ram_total": ram_total,
         "swap_used": swap_used,
         "swap_total": swap_total,
-        "uptime": load_avg
+        "uptime": load_avg,
+        "services": services_info
     }
 
 def fetch_logs_and_errors_raw():
@@ -509,6 +567,44 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; }
         .card-label { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
         .card-value { font-size: 1.05rem; font-weight: 700; color: #fff; }
+
+        /* Services Status Bar */
+        .services-card {
+            background: var(--card); border: 1px solid var(--card-border); border-radius: 12px;
+            padding: 10px 12px; margin-bottom: 12px;
+        }
+        .services-header {
+            display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+        }
+        .services-title {
+            font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .services-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px;
+        }
+        .service-pill {
+            background: #090d16; border: 1px solid var(--card-border); border-radius: 8px;
+            padding: 6px 8px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .service-name { font-size: 0.78rem; font-weight: 600; color: #f8fafc; }
+        .status-tag {
+            display: flex; align-items: center; gap: 5px; font-size: 0.7rem; font-weight: 700;
+        }
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
+        }
+        .status-dot.ok {
+            background: var(--green); box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+        }
+        .status-dot.ko {
+            background: var(--red); box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+            animation: pulse-red 1.5s infinite ease-in-out;
+        }
+        @keyframes pulse-red {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
         
         .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
         button {
@@ -643,8 +739,22 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="header">
-        <h1>🟢 Vinted ASSE Bot</h1>
+        <h1>🟢 ASSE Bot Suite</h1>
         <span id="botBadge" class="badge active">En ligne</span>
+    </div>
+
+    <!-- Services Status Bar -->
+    <div class="services-card">
+        <div class="services-header">
+            <span class="services-title">📡 État des Snipers & Proxy</span>
+        </div>
+        <div id="servicesGrid" class="services-grid">
+            <div class="service-pill"><span class="service-name">Vinted</span><span class="status-tag" style="color:var(--muted)"><span class="status-dot"></span>...</span></div>
+            <div class="service-pill"><span class="service-name">LeBonCoin</span><span class="status-tag" style="color:var(--muted)"><span class="status-dot"></span>...</span></div>
+            <div class="service-pill"><span class="service-name">Proxy Shield</span><span class="status-tag" style="color:var(--muted)"><span class="status-dot"></span>...</span></div>
+            <div class="service-pill"><span class="service-name">eBay</span><span class="status-tag" style="color:var(--muted)"><span class="status-dot"></span>...</span></div>
+            <div class="service-pill"><span class="service-name">VFA</span><span class="status-tag" style="color:var(--muted)"><span class="status-dot"></span>...</span></div>
+        </div>
     </div>
 
     <div class="stats-grid">
@@ -875,6 +985,26 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 }
                 document.getElementById("ramStat").innerText = `${data.ram_used} / ${data.ram_total}`;
                 document.getElementById("swapStat").innerText = `${data.swap_used} / ${data.swap_total}`;
+
+                if (data.services) {
+                    const grid = document.getElementById("servicesGrid");
+                    if (grid) {
+                        let html = "";
+                        for (const [key, svc] of Object.entries(data.services)) {
+                            const dotClass = svc.ok ? "ok" : "ko";
+                            const label = svc.label || (svc.ok ? "OK" : "KO");
+                            const color = svc.ok ? "var(--green)" : "var(--red)";
+                            html += `
+                                <div class="service-pill">
+                                    <span class="service-name">${escapeHtml(svc.name)}</span>
+                                    <span class="status-tag" style="color:${color}">
+                                        <span class="status-dot ${dotClass}"></span>${escapeHtml(label)}
+                                    </span>
+                                </div>`;
+                        }
+                        grid.innerHTML = html;
+                    }
+                }
             } catch(e) {}
         }
 
