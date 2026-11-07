@@ -1008,7 +1008,7 @@ def load_asse_knowledge():
         'manufrance', 'super tele', 'supertele', 'super télé', 'kb jardin', 'kb-jardin',
         'cake rocher', 'konica minolta', 'eovi', 'eovi mcd mutuelle', 'aesio',
         'aésio mutuelle', 'smart good things', 'kelyps', 'kelyps intérim',
-        'mister auto', 'mister-auto', 'markal', 'despinasse', 'duarig',
+        'mister auto', 'mister-auto', 'markal', 'despinasse',
         'sacma', 'sacma agencements', 'alliance intérim'
     ]
     return player_names, full_name_players, distinctive_sponsors
@@ -1122,6 +1122,10 @@ def is_asse_signal(text, is_filet=False):
     for sp in ASSE_SPONSORS:
         if re.search(r'\b' + re.escape(sp) + r'\b', t_clean):
             return True, f"Sponsor historique ({sp.title()})"
+
+    # 2b. Équipementier Duarig (marque multi-clubs/amateurs : exige couleur verte ou contexte ASSE)
+    if re.search(r'\bduarig\b', t_clean) and re.search(r'\b(vert|verte|verts|vertes)\b', t_clean):
+        return True, "Équipementier Duarig (Vert)"
 
     # 3. Joueurs ASSE (1980-2026 - noms complets requis pour prénoms communs)
     for p_full_key, p_full_val in ASSE_PLAYERS_FULL.items():
