@@ -921,10 +921,11 @@ def load_asse_knowledge():
         'christensen', 'oliveira', 'ramirez', 'rivera', 'laudrup', 'milla', 'almeida', 'guarin',
         'coulibaly', 'kamara', 'ndiaye', 'gueye', 'sarr', 'sakho', 'sidibe', 'bakayoko',
         'thiaw', 'maupay', 'saintmaximin', 'modeste', 'mirallas', 'coupet', 'malbranque',
-        'clerc', 'ferri', 'bodmer', 'pavlovic', 'dimitrov', 'machado', 'nilsson', 'esposito'
+        'clerc', 'ferri', 'bodmer', 'pavlovic', 'dimitrov', 'machado', 'nilsson', 'esposito', 'diomande'
     }
 
     full_name_players = {
+        'ismael diomande': 'Ismaël Diomandé',
         'marek heinz': 'Marek Heinz',
         'benny nielsen': 'Benny Nielsen',
         'christophe robert': 'Christophe Robert',
@@ -1043,6 +1044,21 @@ def is_magic_fans_collector_match(text, price_str=None):
     import unicodedata
     t_norm = ''.join(c for c in unicodedata.normalize('NFD', str(text)) if unicodedata.category(c) != 'Mn')
     t_norm = re.sub(r'\s+', ' ', t_norm)
+
+    # Couper les blocs de spam de visibilité / mots-clés dans les descriptions
+    t_norm = re.split(r'\b(?:pour\s+la\s+visibilit[eé]|pour\s+le\s+r[eé]f[eé]rencement|mots?[- ]cl[eé]s?|(?:hash)?tags?\s*:)', t_norm, flags=re.IGNORECASE)[0]
+
+    # Rejeter formellement les fanions, drapeaux, bannières, oriflammes (l'utilisateur ne veut pas de fanions)
+    if re.search(r'\b(fanions?|drapeaux?|banni[eè]res?|oriflammes?|foulards?)\b', t_norm, re.IGNORECASE):
+        if not re.search(r'\b(maillot|jersey|t-?shirt|echarpe|écharpe|sweat|hoodie|livre|fanzine)\b', t_norm, re.IGNORECASE):
+            return False, "Exclusion fanion / drapeau"
+
+    # Rejeter les vêtements de ville / prêt-à-porter non-supporters (chemises, costumes, cravates...) et marques de mode
+    if re.search(r'\b(chemise|chemisette|cravate|costume|blazer|jupe|robe|mocassins?|escarpins?)\b', t_norm, re.IGNORECASE):
+        if not re.search(r'\b(maillot|jersey|t-?shirt|echarpe|écharpe|veste|sweat|hoodie)\b', t_norm, re.IGNORECASE):
+            return False, "Vêtement de ville non-supporter"
+    if re.search(r'\b(ralph\s+lauren|polo\s+ralph|tommy\s+hilfiger|celio|jules|zara|h&m|massimo\s+dutti)\b', t_norm, re.IGNORECASE):
+        return False, "Marque prêt-à-porter de ville"
 
     # Rejeter les autocollants / stickers / sticks (demande utilisateur explicite)
     if MAGIC_FANS_STICKER_PATTERN.search(t_norm):
@@ -2713,11 +2729,21 @@ def worker_smart_inspection():
                         smart_inspection_queue.task_done()
                         continue
                     is_excl_sp, r_sp = is_excluded_product(t_titre, desc, t_prix)
-                    if is_excl_sp and "Spam" in r_sp:
-                        item.pop('_prefetched_html', None)
-                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu ({r_sp}) : '{t_titre}'")
-                        smart_inspection_queue.task_done()
-                        continue
+                    if is_excl_sp:
+                        is_allowed_collector = False
+                        if "Fanion / Drapeau / Écharpe" in r_sp:
+                            # N'autoriser que les vraies écharpes et bloquer formellement les fanions / drapeaux
+                            if re.search(r'\b(echarpes?|écharpes?)\b', t_titre, re.I) and not re.search(r'\b(fanions?|drapeaux?|banni[eè]res?|oriflammes?|foulards?)\b', t_titre, re.I):
+                                is_allowed_collector = True
+                        elif "Livre" in r_sp:
+                            if re.search(r'\b(livres?|fanzines?)\b', t_titre, re.I):
+                                is_allowed_collector = True
+
+                        if not is_allowed_collector:
+                            item.pop('_prefetched_html', None)
+                            log(f"🚫 [Smart-Inspector] Article Magic Fans exclu ({r_sp}) : '{t_titre}'")
+                            smart_inspection_queue.task_done()
+                            continue
                     is_c_gd, c_grp_d = is_conflicting_supporter_group(desc)
                     if is_c_gd:
                         item.pop('_prefetched_html', None)
