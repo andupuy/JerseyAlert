@@ -263,30 +263,30 @@ def patch_telegram_message(item, state_type, duration_str=None, fav_count=0):
     size = item.get("size", "")
     brand = item.get("brand", "")
     url = item.get("url", "")
-    buy_url = f"https://www.vinted.fr/transaction/buy/new?item_id={item.get('item_id')}"
+    clean_url = url.split("?")[0] if url else f"https://www.vinted.fr/items/{item.get('item_id')}"
+    buy_url = clean_url
 
     if state_type == "SOLD":
         dur_txt = f" en {duration_str}" if duration_str else ""
         caption = f"🔴 <b>[VENDU{dur_txt}] {clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>\n❤️ {fav_count} favori(s)"
         btn_text = f"🔴 ARTICLE VENDU ({price})"
-        btn_url = url
+        btn_url = clean_url
     elif state_type == "RESERVED":
         caption = f"🟠 <b>[RÉSERVÉ] {clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>\n❤️ {fav_count} favori(s)"
         btn_text = "🟠 ARTICLE RÉSERVÉ"
-        btn_url = url
+        btn_url = clean_url
     elif state_type == "REMOVED":
         caption = f"⚫ <b>[RETIRÉ] {clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>"
         btn_text = "⚫ ANNONCE RETIRÉE"
-        btn_url = url
+        btn_url = clean_url
     else:
         caption = f"🟢 <b>{clean_title}</b>\n\n💰 Prix : <b>{price}</b> | 📏 Taille : <b>{size}</b>\n🏷️ Marque : <b>{brand}</b>\n❤️ {fav_count} favori(s)"
-        btn_text = f"⚡ ACHETER EN 1 CLIC ({price})"
-        btn_url = buy_url
+        btn_text = f"⚡ ACHETER SUR VINTED ({price})"
+        btn_url = clean_url
 
     reply_markup = {
         "inline_keyboard": [
-            [{"text": btn_text, "url": btn_url}],
-            [{"text": "🔍 Voir sur Vinted", "url": url}]
+            [{"text": btn_text, "url": btn_url}]
         ]
     }
 

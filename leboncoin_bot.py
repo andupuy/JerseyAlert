@@ -14,6 +14,10 @@ import random
 import re
 import json
 from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 from curl_cffi import requests
 from dotenv import load_dotenv
 
@@ -42,13 +46,45 @@ SEARCH_URL = "https://www.leboncoin.fr/recherche?text=maillot%20asse&sort=time"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 SEEN_IDS_FILE = "seen_lbc_ids.json"
 PROXY_URL = os.environ.get("LBC_PROXY_URL", "socks5://127.0.0.1:1055")
+ERRORS_LOG_FILE = os.environ.get(
+    "ERRORS_LOG_FILE",
+    "/root/vinted_errors.log" if os.path.exists("/root") else "vinted_errors.log"
+)
 
-CHECK_INTERVAL_MIN = 6
-CHECK_INTERVAL_MAX = 10
+CHECK_INTERVAL_MIN = int(os.environ.get("LBC_INTERVAL_MIN", 20))
+CHECK_INTERVAL_MAX = int(os.environ.get("LBC_INTERVAL_MAX", 35))
 
-def log(msg):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now}] [LeBonCoin] {msg}", flush=True)
+def get_paris_time():
+    """Retourne l'heure courante exacte de Paris (été/hiver garanti)"""
+    if ZoneInfo:
+        try:
+            return datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            pass
+    import time
+    os.environ['TZ'] = 'Europe/Paris'
+    if hasattr(time, 'tzset'):
+        time.tzset()
+    return datetime.now()
+
+def log(msg, to_error_log=None):
+    """Log horodaté (heure de Paris) avec enregistrement automatique dans ERRORS_LOG_FILE pour le dashboard"""
+    now = get_paris_time().strftime("%Y-%m-%d %H:%M:%S")
+    formatted = f"[{now}] [LeBonCoin] {msg}"
+    print(formatted, flush=True)
+
+    if to_error_log is False:
+        return
+
+    should_record = to_error_log is True or (
+        msg.lstrip().startswith(("⚠️", "🚨", "❌", "🛡️"))
+    )
+    if should_record:
+        try:
+            with open(ERRORS_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(formatted + "\n")
+        except Exception:
+            pass
 
 def load_seen_ids():
     if os.path.exists(SEEN_IDS_FILE):
@@ -163,23 +199,13 @@ def send_discord_alert(ad):
         log(f"❌ Erreur envoi webhook Discord: {e}")
 
 def send_discord_system_alert(title, description, color=0xFFA500):
-    if not DISCORD_WEBHOOK_URL:
-        return
-    payload = {
-        "username": "LeBonCoin Sentinel",
-        "avatar_url": "https://www.leboncoin.fr/favicon.ico",
-        "embeds": [{
-            "title": title,
-            "description": description,
-            "color": color,
-            "footer": {"text": "Protection Datadome • Shield Box"},
-            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-        }]
-    }
-    try:
-        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
-    except Exception as e:
-        log(f"❌ Erreur envoi webhook Discord système: {e}")
+    """
+    Route les alertes techniques/système vers le journal d'erreurs du dashboard web (ERRORS_LOG_FILE)
+    sans envoyer de spam sur le salon Discord, réservé exclusivement aux maillots ASSE trouvés.
+    """
+    first_line = description.splitlines()[0].strip() if description else ""
+    summary = f"{title} : {first_line}" if first_line else f"{title}"
+    log(summary, to_error_log=True)
 
 def fetch_leboncoin_ads(session):
     headers = {
@@ -204,11 +230,15 @@ def fetch_leboncoin_ads(session):
     try:
         resp = session.get(SEARCH_URL, headers=headers, proxies=proxies, impersonate='chrome124', timeout=15)
         if resp.status_code != 200:
-            log(f"⚠️ Réponse HTTP {resp.status_code} reçue de LeBonCoin (Longueur: {len(resp.text)})")
+            if resp.status_code == 403:
+                # Ne pas saturer les logs d'erreurs à chaque requête isolée ; le parachute consecutive_403 prend le relais
+                log(f"⚠️ Réponse HTTP 403 reçue de LeBonCoin (Datadome actif)", to_error_log=False)
+            else:
+                log(f"⚠️ Réponse HTTP {resp.status_code} reçue de LeBonCoin (Longueur: {len(resp.text)})", to_error_log=True)
             session.cookies.clear()
             return [], resp.status_code
     except Exception as e:
-        log(f"⚠️ Erreur requête LeBonCoin: {e}")
+        log(f"⚠️ Erreur requête LeBonCoin: {e}", to_error_log=False)
         session.cookies.clear()
         return [], 0
 
@@ -227,7 +257,7 @@ def fetch_leboncoin_ads(session):
         return [], 200
 
 def run_bot():
-    log("🚀 Démarrage du Sniper LeBonCoin ASSE (curl_cffi + SOCKS5 Shield - Cadence 6-10s)")
+    log(f"🚀 Démarrage du Sniper LeBonCoin ASSE (curl_cffi + SOCKS5 Shield - Cadence {CHECK_INTERVAL_MIN}-{CHECK_INTERVAL_MAX}s)")
     seen_ids = load_seen_ids()
     is_initial_run = (len(seen_ids) == 0)
 
@@ -247,27 +277,13 @@ def run_bot():
             if status == 0:
                 consecutive_conn_err += 1
                 if consecutive_conn_err >= 3 and not conn_alert_sent:
-                    log(f"🚨 Échec persistant du proxy LeBonCoin ({consecutive_conn_err}x erreurs de connexion SOCKS5) !")
-                    send_discord_system_alert(
-                        "🚨 [LeBonCoin] Alerte Proxy Résidentiel Déconnecté",
-                        "Les requêtes vers LeBonCoin échouent en boucle via le proxy SOCKS5 (`127.0.0.1:1055`).\n\n"
-                        "⚠️ **La Nvidia Shield semble éteinte ou déconnectée de Tailscale.**\n"
-                        "Tant que la Shield est hors-ligne, aucune alerte LeBonCoin ne peut être scannée.\n"
-                        "👉 Veuillez allumer la Shield ou vérifier l'application Tailscale.",
-                        color=0xED4245
-                    )
+                    log(f"🚨 Alerte Proxy Résidentiel Déconnecté : les requêtes vers LeBonCoin échouent via SOCKS5 (127.0.0.1:1055) - Vérifier Shield / Tailscale ({consecutive_conn_err}x échecs)", to_error_log=True)
                     conn_alert_sent = True
                 time.sleep(15)
                 continue
             else:
                 if conn_alert_sent and status == 200:
-                    log("✅ Proxy LeBonCoin reconnecté et opérationnel !")
-                    send_discord_system_alert(
-                        "✅ [LeBonCoin] Proxy Résidentiel Rétabli",
-                        "La communication avec la Nvidia Shield via Tailscale refonctionne normalement !\n"
-                        "Le sniper LeBonCoin reprend la surveillance active.",
-                        color=0x57F287
-                    )
+                    log("✅ Proxy LeBonCoin reconnecté et opérationnel : reprise des scans.", to_error_log=False)
                     conn_alert_sent = False
                 consecutive_conn_err = 0
 
@@ -275,27 +291,14 @@ def run_bot():
             if status == 403:
                 consecutive_403 += 1
                 if consecutive_403 >= 2:
-                    log(f"🚨 Détection Datadome persistante ({consecutive_403}x HTTP 403) ! Pause de protection de 5 minutes.")
-                    send_discord_system_alert(
-                        "🛡️ [LeBonCoin] Détection Datadome (HTTP 403)",
-                        "2 requêtes consécutives ont reçu un code **HTTP 403** de LeBonCoin.\n\n"
-                        "🛑 **Mise en pause automatique de 5 minutes** pour protéger l'adresse IP de votre box Orange.\n"
-                        "Le bot reprendra automatiquement après ce délai.",
-                        color=0xED4245
-                    )
-                    time.sleep(300)
+                    log(f"🛡️ [Datadome] Détection persistante ({consecutive_403}x HTTP 403) ! Mise en pause automatique de 10 minutes pour protéger l'IP.", to_error_log=True)
+                    time.sleep(600)
                     consecutive_403 = 0
                     session = requests.Session()
-                    log("🔄 Fin de la pause de sécurité (5 min), reprise des scans.")
-                    send_discord_system_alert(
-                        "✅ [LeBonCoin] Reprise du Scan",
-                        "Période de refroidissement terminée.\n"
-                        "Le sniper LeBonCoin reprend la surveillance active (cadence 6-10s).",
-                        color=0x57F287
-                    )
+                    log("🔄 Fin de la pause de sécurité (10 min), reprise des scans LeBonCoin.", to_error_log=False)
                     continue
                 else:
-                    time.sleep(12)
+                    time.sleep(20)
                     continue
             else:
                 consecutive_403 = 0
@@ -351,7 +354,7 @@ def run_bot():
         except Exception as e:
             log(f"🚨 Erreur durant le cycle: {e}")
 
-        # Pause aléatoire entre 6 et 10 secondes pour discrétion et rapidité
+        # Pause aléatoire entre 20 et 35 secondes pour discrétion et protection IP
         sleep_sec = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
         time.sleep(sleep_sec)
 

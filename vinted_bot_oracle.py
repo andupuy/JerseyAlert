@@ -2220,6 +2220,26 @@ def send_telegram_alert(item_id, title, price, size, brand, status, seller, phot
             return msg_id
         else:
             log(f"⚠️ [Telegram] Erreur HTTP {r.status_code}: {r.text[:120]}")
+            # Fallback automatique en sendMessage si la photo est inaccessible (CDN Vinted temporairement indisponible pour Telegram ou 400)
+            if "failed to get HTTP URL content" in r.text or r.status_code == 400:
+                try:
+                    fallback_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                    fallback_payload = {
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "text": caption,
+                        "parse_mode": "HTML",
+                        "reply_markup": reply_markup,
+                        "disable_notification": True
+                    }
+                    fb_res = requests.post(fallback_url, json=fallback_payload, timeout=6)
+                    if fb_res.status_code == 200:
+                        msg_id = fb_res.json().get("result", {}).get("message_id")
+                        log(f"✅ [Telegram] Alerte #{item_id} délivrée en fallback texte (photo Vinted inaccessible)")
+                        return msg_id
+                    else:
+                        log(f"⚠️ [Telegram Fallback] Erreur HTTP {fb_res.status_code}: {fb_res.text[:120]}")
+                except Exception as fb_err:
+                    log(f"⚠️ [Telegram Fallback] Exception: {fb_err}")
     except Exception as e:
         log(f"⚠️ [Telegram] Exception: {e}")
     return None
@@ -2491,12 +2511,13 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
         except Exception as e:
             log(f"⚠️ [Vinted] Micro-fetch fiche produit: {e}")
 
-        buy_url = f"https://www.vinted.fr/transaction/buy/new?item_id={item_id}"
+        clean_item_url = item_url.split('?')[0] if item_url else f"https://www.vinted.fr/items/{item_id}"
+        buy_url = clean_item_url
 
         # Description formatée pour Discord embed
         fav_line_init = f"❤️ **{initial_fav_count} favori{'s' if initial_fav_count > 1 else ''}** sur Vinted"
         fav_badge_init = f" • ❤️ {initial_fav_count} favori{'s' if initial_fav_count > 1 else ''}"
-        description_text = f"⚡ **[ACHETER EN 1 CLIC ({final_price})]({buy_url})**\n\n💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**\n{fav_line_init}"
+        description_text = f"⚡ **[OUVRIR & ACHETER SUR VINTED ({final_price})]({clean_item_url})**\n\n💰 **{final_price}** | 📏 Taille: **{final_size}**\n🏷️ Marque: **{final_brand}** | État: **{final_status}**\n{fav_line_init}"
         if seller_name:
             description_text += f"\n👤 Vendeur: **{seller_name}**"
         if desc_clean:

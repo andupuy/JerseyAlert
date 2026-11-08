@@ -14,6 +14,14 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Run command
+        env:
+          EXEC_CMD: ${{ github.event.inputs.command }}
         run: |
-          echo "Running: ${{ github.event.inputs.command }}"
-          eval "${{ github.event.inputs.command }}"
+          cd /root/JerseyAlert 2>/dev/null || true
+          if [ -f "/root/JerseyAlert/venv/bin/activate" ]; then
+            source /root/JerseyAlert/venv/bin/activate
+          fi
+          echo "=== Executing Command on VPS (venv active) ==="
+          echo "$EXEC_CMD"
+          echo "============================================="
+          bash -c "$EXEC_CMD"
