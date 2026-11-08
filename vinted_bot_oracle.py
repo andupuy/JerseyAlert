@@ -3119,8 +3119,10 @@ def worker_turbo_sniper():
     # Flux combiné Temps Réel : Maillots (3267) + Hauts & T-shirts de sport (584)
     FOOTBALL_CATALOG_URL = "https://www.vinted.fr/catalog?catalog_ids[]=3267&catalog_ids[]=584&order=newest_first"
     
-    # Filet de Sécurité Turbo centré sur ASSE, Saint-Étienne et St-Étienne (catalogue football 3267 anti-pollution)
+    # Filet de Sécurité Turbo centré sur ASSE et Saint-Étienne (pondération : Asse et Saint-Étienne prioritaires, St-Étienne secondaire)
     SAFETY_QUERIES = [
+        ("Maillot Asse", get_search_url("Maillot Asse")),
+        ("Maillot Saint Etienne", get_search_url("Maillot Saint Etienne") + "&catalog_ids[]=3267"),
         ("Maillot Asse", get_search_url("Maillot Asse")),
         ("Maillot Saint Etienne", get_search_url("Maillot Saint Etienne") + "&catalog_ids[]=3267"),
         ("Maillot St Etienne", get_search_url("Maillot St Etienne") + "&catalog_ids[]=3267"),
@@ -3134,8 +3136,8 @@ def worker_turbo_sniper():
         ("SNK Magic Fans", get_search_url("SNK Magic Fans") + "&price_to=80"),
     ]
 
-    log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité 90% Foot Temps Réel + Timeout Ultra-Court 4.5s)")
-    log("⚡ [Vinted] 9 Scans Foot Direct pour 1 Scan Filet Sécurité + Cycle Collector 'Magic Fans'")
+    log("🚀 [Vinted] Démarrage du Moteur Turbo-Sniper (Priorité 75% Foot Temps Réel + 25% Filet Sécurité ASSE)")
+    log("⚡ [Vinted] 3 Scans Foot Direct pour 1 Scan Filet Sécurité (Asse / Saint-Étienne prioritaires)")
     log("📸 [Vinted] Support jusqu'à 20 photos HD avec notifications silencieuses")
 
     safety_index = 0
@@ -3193,7 +3195,7 @@ def worker_turbo_sniper():
                             page.set_default_timeout(4500)
                         except: pass
 
-                    # Choix de la cible (Priorité 90%+ au Flux Direct Foot, surtout aux heures de pointe 17h-22h) :
+                    # Choix de la cible (Priorité 75% Flux Direct Foot + 25% Filet Sécurité ASSE) :
                     is_peak_hour = 17 <= paris_now.hour < 22
                     mf_interval = 60 if is_peak_hour else 45
                     if not is_initial_scan and (now - last_magic_fans_scan) >= mf_interval:
@@ -3201,7 +3203,7 @@ def worker_turbo_sniper():
                         magic_fans_index += 1
                         scan_label = f"Filet Collector '{mf_label}'"
                         last_magic_fans_scan = now
-                    elif cycle_count % 10 == 0:
+                    elif cycle_count % 4 == 0:
                         label, target_url = SAFETY_QUERIES[safety_index % len(SAFETY_QUERIES)]
                         safety_index += 1
                         scan_label = f"Filet '{label}'"
