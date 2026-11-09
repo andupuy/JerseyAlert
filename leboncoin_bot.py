@@ -26,7 +26,7 @@ load_dotenv()
 
 # Importer les filtres ASSE officiels du projet
 try:
-    from vinted_bot_oracle import is_asse_jersey_match, is_excluded_product, clean_text
+    from vinted_bot_oracle import is_asse_jersey_match, is_excluded_product, clean_text, is_excluded_size, is_conflicting_team
 except ImportError:
     # Fallback minimal si import direct impossible
     def clean_text(txt):
@@ -40,6 +40,12 @@ except ImportError:
         return bool(re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainté|saint[- \.]*étienne|st[- \.]*étienne)\b', t))
 
     def is_excluded_product(title, price=0.0, description=""):
+        return False, ""
+
+    def is_excluded_size(size_str, title_str="", desc_str=""):
+        return False, ""
+
+    def is_conflicting_team(text):
         return False, ""
 
 SEARCH_URL = "https://www.leboncoin.fr/recherche?text=maillot%20asse&sort=time"
@@ -326,15 +332,34 @@ def run_bot():
                 price = float(prices[0]) if prices else 0.0
                 price_str = f"{price} €"
                 body = ad.get("body", "") or ""
+                attrs = ad.get("attributes", [])
+                size = get_attribute_value(attrs, "clothing_st") or ""
+                clothing_type = get_attribute_value(attrs, "clothing_type") or ""
 
                 # 1. Vérification de correspondance maillot ASSE
                 if not is_asse_jersey_match(title):
                     continue
 
-                # 2. Filtrage strict anti faux positifs (Règles 1 à 25)
+                # 2. Filtrage clubs concurrents
+                is_conf_t, conf_team = is_conflicting_team(title)
+                if is_conf_t:
+                    log(f"🚫 Annonce exclue (Club concurrent : {conf_team}) : '{title}'")
+                    continue
+
+                # 3. Filtrage strict anti faux positifs (Règles 1 à 25)
                 is_excl, reason = is_excluded_product(title, body, price_str)
                 if is_excl:
                     log(f"🚫 Annonce exclue ({reason}) : '{title}' ({price}€)")
+                    continue
+
+                # 4. Filtrage strict des tailles enfants et non souhaitées (synchronisé Vinted)
+                if clothing_type.lower() in ["enfant", "junior", "bebe", "bébé"] or clothing_type == "4":
+                    log(f"🚫 Annonce exclue (Univers Enfant) : '{title}' ({price}€)")
+                    continue
+
+                is_excl_sz, reason_sz = is_excluded_size(size, title, body)
+                if is_excl_sz:
+                    log(f"🚫 Annonce exclue ({reason_sz}) : '{title}' (Taille: {size or 'Non spécifiée'})")
                     continue
 
                 new_valid_ads.append(ad)
