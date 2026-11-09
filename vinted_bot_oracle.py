@@ -1030,6 +1030,11 @@ MAGIC_FANS_STICKER_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+GREEN_ANGELS_PATTERN = re.compile(
+    r'\b(?:green\s*[-]?\s*angels?|greenangels|ga\s*[-]?\s*92|ga\s*[-]?\s*1992)\b',
+    re.IGNORECASE
+)
+
 # Rétrocompatibilité nom de variable historique
 MAGIC_FANS_COLLECTOR_PATTERN = MAGIC_FANS_PATTERN
 
@@ -1037,16 +1042,32 @@ def is_magic_fans_collector_match(text, price_str=None):
     """
     Détecte tous les accessoires, écharpes, vêtements et collectors Magic Fans / MF91.
     Règle utilisateur : tous les articles Magic Fans ou MF91 qui coûtent moins de 80€.
-    Exclut le bruit hors-sujet (Magic The Gathering, NBA Orlando, Disney, etc.) et les autocollants/stickers.
+    Exclut le bruit hors-sujet, les autocollants/stickers, les lignes de tag-stuffing,
+    et rejette formellement toute mention de Green Angels / GA92 (cités seuls ou au même niveau).
     """
     if not text:
         return False, ""
     import unicodedata
-    t_norm = ''.join(c for c in unicodedata.normalize('NFD', str(text)) if unicodedata.category(c) != 'Mn')
+
+    # Couper les lignes de tag-stuffing (listes de mots-clés séparés par tirets / slashes / puces / hashtags)
+    clean_lines = []
+    for line in str(text).splitlines():
+        seps = len(re.findall(r'[-–—|•/#]', line))
+        words = len(line.split())
+        if seps >= 3 and words <= 20:
+            continue
+        clean_lines.append(line)
+    text_clean = "\n".join(clean_lines)
+
+    t_norm = ''.join(c for c in unicodedata.normalize('NFD', text_clean) if unicodedata.category(c) != 'Mn')
     t_norm = re.sub(r'\s+', ' ', t_norm)
 
     # Couper les blocs de spam de visibilité / mots-clés dans les descriptions
     t_norm = re.split(r'\b(?:pour\s+la\s+visibilit[eé]|pour\s+le\s+r[eé]f[eé]rencement|mots?[- ]cl[eé]s?|(?:hash)?tags?\s*:)', t_norm, flags=re.IGNORECASE)[0]
+
+    # Rejeter formellement si Green Angels / GA92 est mentionné (l'utilisateur cible exclusivement Magic Fans, et rejette le tag-stuffing MF91 + GA92)
+    if GREEN_ANGELS_PATTERN.search(t_norm):
+        return False, "Mention Green Angels / GA92"
 
     # Rejeter formellement les fanions, drapeaux, bannières, oriflammes (l'utilisateur ne veut pas de fanions)
     if re.search(r'\b(fanions?|drapeaux?|banni[eè]res?|oriflammes?|foulards?)\b', t_norm, re.IGNORECASE):
@@ -2342,6 +2363,12 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                 log(f"🚫 [Vinted] Alerte bloquée (Autocollant / Sticker dès le titre) : {final_title}")
                 return
 
+        # Rejeter formellement si Green Angels / GA92 est mentionné dès le titre pour un article collector non-maillot
+        if bypass_jersey_filters and not is_asse_jersey_t:
+            if GREEN_ANGELS_PATTERN.search(final_title):
+                log(f"🚫 [Vinted] Alerte bloquée (Mention Green Angels / GA92 dès le titre) : {final_title}")
+                return
+
         # Filtrage des produits indésirables (Mug, Panini, Prix > 350€) sauf Collector Magic Fans
         if not bypass_jersey_filters:
             is_excl, reason = is_excluded_product(final_title, '', final_price)
@@ -2495,6 +2522,12 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                             log(f"🚫 [Vinted] Alerte bloquée (Autocollant / Sticker dans description) : {final_title}")
                             return
 
+                    # Rejeter formellement si Green Angels / GA92 est en description pour un article collector non-maillot
+                    if not is_asse_jersey_t and (GREEN_ANGELS_PATTERN.search(desc_clean) or GREEN_ANGELS_PATTERN.search(final_title)):
+                        if bypass_jersey_filters:
+                            log(f"🚫 [Vinted] Alerte bloquée (Mention Green Angels / GA92 sur collector non-maillot) : {final_title}")
+                            return
+
                     is_mf_d, mf_kw_d = is_magic_fans_collector_match(desc_clean)
                     if is_mf_d:
                         p_val = parse_price(final_price)
@@ -2503,6 +2536,9 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                             return
                         if p_val is None or p_val <= 80.0:
                             bypass_jersey_filters = True
+                    elif not is_mf_t:
+                        # Si ni le titre ni la description n'est explicitement Magic Fans, ne pas bypasser les filtres de maillots
+                        bypass_jersey_filters = False
                     if not bypass_jersey_filters:
                         is_excl, reason = is_excluded_product(final_title, desc_clean, final_price)
                         if is_excl:
@@ -2788,6 +2824,11 @@ def worker_smart_inspection():
                         log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Groupe adverse en description : {c_grp_d}) : '{t_titre}'")
                         smart_inspection_queue.task_done()
                         continue
+                    if GREEN_ANGELS_PATTERN.search(t_titre) or GREEN_ANGELS_PATTERN.search(desc):
+                        item.pop('_prefetched_html', None)
+                        log(f"🚫 [Smart-Inspector] Article Magic Fans exclu (Mention Green Angels / GA92) : '{t_titre}'")
+                        smart_inspection_queue.task_done()
+                        continue
                     has_mf_desc, mf_phrase_d = is_magic_fans_collector_match(desc)
                     p_val = parse_price(t_prix)
                     is_asse_j = is_asse_jersey_match(t_titre) or is_asse_jersey_match(desc)
@@ -2979,6 +3020,9 @@ def process_incoming_items_safe(items, source_label="Flux", is_initial=False):
                 is_conf_g, conf_g = is_conflicting_supporter_group(t_titre)
                 if is_conf_g:
                     log(f"🚫 Article Magic Fans ignoré dès le titre (Groupe adverse : {conf_g}) : '{t_titre}'")
+                    continue
+                if GREEN_ANGELS_PATTERN.search(t_titre):
+                    log(f"🚫 Article Magic Fans ignoré dès le titre (Mention Green Angels / GA92) : '{t_titre}'")
                     continue
 
             has_mf_title, mf_phrase_t = is_magic_fans_collector_match(t_titre)
