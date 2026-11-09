@@ -2335,6 +2335,13 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
             if p_val is None or p_val <= 80.0:
                 bypass_jersey_filters = True
 
+        # Autocollants / stickers / adhésifs / cartes dès le titre : toujours bloqué (y compris Magic Fans) sauf si vrai vêtement / écharpe
+        card_stick_pattern = r'\b(panini|stickers?|sticks?|autocollants?|adh[eé]sifs?|vignettes?|topps|adrenalyn|trading\s*cards?)\b'
+        if re.search(card_stick_pattern, final_title, re.I):
+            if not re.search(r'\b(maillot|jersey|echarpe|écharpe|veste|pull|sweat|hoodie|bonnet|bob|casquette|livre|fanzine)\b', final_title, re.I):
+                log(f"🚫 [Vinted] Alerte bloquée (Autocollant / Sticker dès le titre) : {final_title}")
+                return
+
         # Filtrage des produits indésirables (Mug, Panini, Prix > 350€) sauf Collector Magic Fans
         if not bypass_jersey_filters:
             is_excl, reason = is_excluded_product(final_title, '', final_price)
@@ -2481,6 +2488,12 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                     if is_conf_grp_d:
                         log(f"🚫 [Vinted] Alerte bloquée (Groupe adverse en description : {conf_grp_d}) : {final_title}")
                         return
+
+                    # Autocollants / stickers / adhésifs / cartes en description : toujours bloqué (y compris Magic Fans) sauf si vrai vêtement / écharpe
+                    if re.search(card_stick_pattern, desc_clean, re.I):
+                        if not re.search(r'\b(maillot|jersey|echarpe|écharpe|veste|pull|sweat|hoodie|bonnet|bob|casquette|livre|fanzine)\b', final_title + ' ' + desc_clean, re.I):
+                            log(f"🚫 [Vinted] Alerte bloquée (Autocollant / Sticker dans description) : {final_title}")
+                            return
 
                     is_mf_d, mf_kw_d = is_magic_fans_collector_match(desc_clean)
                     if is_mf_d:
