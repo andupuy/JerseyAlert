@@ -57,8 +57,8 @@ ERRORS_LOG_FILE = os.environ.get(
     "/root/vinted_errors.log" if os.path.exists("/root") else "vinted_errors.log"
 )
 
-CHECK_INTERVAL_MIN = int(os.environ.get("LBC_INTERVAL_MIN", 20))
-CHECK_INTERVAL_MAX = int(os.environ.get("LBC_INTERVAL_MAX", 35))
+CHECK_INTERVAL_MIN = int(os.environ.get("LBC_INTERVAL_MIN", 25))
+CHECK_INTERVAL_MAX = int(os.environ.get("LBC_INTERVAL_MAX", 40))
 
 def get_paris_time():
     """Retourne l'heure courante exacte de Paris (été/hiver garanti)"""
@@ -213,6 +213,12 @@ def send_discord_system_alert(title, description, color=0xFFA500):
     summary = f"{title} : {first_line}" if first_line else f"{title}"
     log(summary, to_error_log=True)
 
+def is_night_time():
+    """Vérifie si on est en veille de nuit (01h30 à 06h30 heure de Paris)"""
+    now = get_paris_time()
+    time_min = now.hour * 60 + now.minute
+    return 90 <= time_min < 390
+
 def fetch_leboncoin_ads(session):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -237,15 +243,12 @@ def fetch_leboncoin_ads(session):
         resp = session.get(SEARCH_URL, headers=headers, proxies=proxies, impersonate='chrome124', timeout=15)
         if resp.status_code != 200:
             if resp.status_code == 403:
-                # Ne pas saturer les logs d'erreurs à chaque requête isolée ; le parachute consecutive_403 prend le relais
                 log(f"⚠️ Réponse HTTP 403 reçue de LeBonCoin (Datadome actif)", to_error_log=False)
             else:
                 log(f"⚠️ Réponse HTTP {resp.status_code} reçue de LeBonCoin (Longueur: {len(resp.text)})", to_error_log=True)
-            session.cookies.clear()
             return [], resp.status_code
     except Exception as e:
         log(f"⚠️ Erreur requête LeBonCoin: {e}", to_error_log=False)
-        session.cookies.clear()
         return [], 0
 
     # Extraction des données JSON Next.js
@@ -273,8 +276,28 @@ def run_bot():
     consecutive_403 = 0
     consecutive_conn_err = 0
     conn_alert_sent = False
+    in_night_mode = False
+    datadome_cooldown_idx = 0
+    datadome_durations = [900, 1800, 3600, 7200]  # 15 min, 30 min, 1h, 2h max
+    datadome_alert_sent = False
 
     while True:
+        # Veille nocturne (01h30 - 06h30 heure de Paris) : zéro requête la nuit pour régénérer la réputation IP
+        if is_night_time():
+            if not in_night_mode:
+                log("🌙 [LeBonCoin] Début de la veille nocturne (01h30 - 06h30). Suspension des requêtes pour reposer l'IP.", to_error_log=False)
+                in_night_mode = True
+            time.sleep(120)
+            continue
+        else:
+            if in_night_mode:
+                log("☀️ [LeBonCoin] Fin de la veille nocturne (06h30). Reprise nominale des scans.", to_error_log=False)
+                in_night_mode = False
+                session = requests.Session()
+                consecutive_403 = 0
+                datadome_cooldown_idx = 0
+                datadome_alert_sent = False
+
         cycle_count += 1
         try:
             ads, status = fetch_leboncoin_ads(session)
@@ -293,21 +316,30 @@ def run_bot():
                     conn_alert_sent = False
                 consecutive_conn_err = 0
 
-            # Parachute de sécurité Datadome
+            # Parachute de sécurité Datadome avec backoff progressif
             if status == 403:
                 consecutive_403 += 1
                 if consecutive_403 >= 2:
-                    log(f"🛡️ [Datadome] Détection persistante ({consecutive_403}x HTTP 403) ! Mise en pause automatique de 10 minutes pour protéger l'IP.", to_error_log=True)
-                    time.sleep(600)
+                    pause_sec = datadome_durations[min(datadome_cooldown_idx, len(datadome_durations) - 1)]
+                    pause_min = pause_sec // 60
+                    log_to_err = not datadome_alert_sent
+                    log(f"🛡️ [Datadome] Détection persistante ({consecutive_403}x HTTP 403) ! Mise en pause progressive de {pause_min} minutes pour protéger l'IP.", to_error_log=log_to_err)
+                    datadome_alert_sent = True
+                    datadome_cooldown_idx += 1
+                    time.sleep(pause_sec)
                     consecutive_403 = 0
                     session = requests.Session()
-                    log("🔄 Fin de la pause de sécurité (10 min), reprise des scans LeBonCoin.", to_error_log=False)
+                    log(f"🔄 Fin de la pause de sécurité ({pause_min} min), reprise des scans LeBonCoin.", to_error_log=False)
                     continue
                 else:
                     time.sleep(20)
                     continue
             else:
+                if status == 200 and datadome_cooldown_idx > 0:
+                    log("✅ [Datadome] Rétablissement complet HTTP 200 : reprise nominale des scans.", to_error_log=False)
                 consecutive_403 = 0
+                datadome_cooldown_idx = 0
+                datadome_alert_sent = False
 
             if not ads:
                 time.sleep(random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX))
@@ -379,7 +411,7 @@ def run_bot():
         except Exception as e:
             log(f"🚨 Erreur durant le cycle: {e}")
 
-        # Pause aléatoire entre 20 et 35 secondes pour discrétion et protection IP
+        # Pause aléatoire entre 25 et 40 secondes pour discrétion et protection IP
         sleep_sec = random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX)
         time.sleep(sleep_sec)
 
