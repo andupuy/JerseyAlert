@@ -1279,10 +1279,43 @@ def is_incompatible_kit_brand(brand_str="", title_str="", desc_str=""):
 
     return False, ""
 
+def _strip_reedition_replica_negations(text):
+    """Supprime uniquement les mentions de réplique/réédition/remake explicitement niées."""
+    neg_starter = (
+        r'\b(?:'
+        r'(?:ce\s+|cela\s+|ça\s+|il\s+)?(?:n[\'\u2019\s]?est|c[\'\u2019\s]?est)\s+pas|'
+        r'(?:il\s+)?ne\s+s[\'\u2019\s]?agit\s+pas|'
+        r'n[\'\u2019\s]?en\s+est\s+pas|'
+        r'pas\s+du\s+tout|absolument\s+pas|vraiment\s+pas|surtout\s+pas|'
+        r'en\s+aucun\s+cas|en\s+rien|aucunement|nullement|'
+        r'loin\s+d[\'\u2019\s]?[eê]tre|rien\s+[àa]\s+voir\s+avec|'
+        r'ne\s+pas\s+confondre\s+avec|sans\s+[eê]tre|'
+        r'non\s+pas|pas|non|ni|aucune?|sans|jamais'
+        r')\b'
+    )
+    neg_bridge_word = (
+        r'(?:une?|des?|d[\'\u2019\s]?une?|du|de\s+la|de|les?|la|l[\'\u2019]|'
+        r'simple|vulgaire|vulgaires|moderne|modernes|r[eé]cente|r[eé]centes|'
+        r'actuelle|actuelles|nouvelle|nouvelles|p[aâ]le|p[aâ]les)'
+    )
+    reed_word = r'(?:r[eé][- ]?[eé]dition[s]?|remake[s]?|repro(?:duction)?s?|r[eéèê]plique[s]?)'
+    reedition_neg_pat = (
+        f"{neg_starter}\\s+(?:{neg_bridge_word}\\s+)*{reed_word}"
+        f"(?:(?:\\s*,\\s*(?:ou|ni|et)\\s+|\\s*[,/]\\s*|\\s+(?:ou|ni|et)\\s+)(?:{neg_bridge_word}\\s+)*{reed_word})*"
+    )
+    cleaned = re.sub(reedition_neg_pat, ' ', text, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r'\br[eéèê]plique[s]?\s*[:\?=]\s*non\b(?!\s+(?:officiel(?:le)?s?|authentique|original(?:e)?s?|d[\'\u2019\s]?[eé]poque|licenci[eé]e?s?|homologu[eé]e?s?|certifi[eé]e?s?|conforme[s]?))',
+        ' ',
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned
+
 def is_excluded_product(title_str="", desc_str="", price_str=""):
     """
     Filtre les articles indésirables avec zéro faux positif sur les vrais maillots :
-    1. Plafond de prix à 350 € max
+    1. Plafond de prix à 350 € max & Répliques (hors négations explicites)
     2. Mugs, tasses, bols, chopes
     3. Cartes Panini, stickers, vignettes, topps
     4. Magnets, magnettes, aimants
@@ -1297,6 +1330,12 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     pval = parse_price(price_str)
     if pval is not None and pval > 350.0:
         return True, f"Prix supérieur à 350€ ({pval:.2f}€)"
+
+    # 1b. Répliques (prioritaire et toujours bloqué, y compris Magic Fans, hors négations explicites)
+    full_reed = f"{t} {d}"
+    cleaned_reed = _strip_reedition_replica_negations(full_reed)
+    if re.search(r'\br[eéèê]plique[s]?\b', cleaned_reed, re.IGNORECASE):
+        return True, "Réplique non d'époque"
 
     # 2. Mugs / Tasses / Bols / Chopes
     mug_pattern = r'\b(mug|mugs|tasse|tasses|bol|bols|chope|chopes)\b'
@@ -1541,10 +1580,7 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(sainte_barbe_pat, t) or (d and re.search(sainte_barbe_pat, d)):
         return True, "Édition / Produit Sainte-Barbe"
 
-    # 31. Rééditions, remakes et reproductions non d'époque
-    reedition_neg_pat = r'\b(?:pas\s+une?|pas\s+de|non|ce\s+n[\'\s]?est\s+pas\s+une?|aucunement|rien\s+[àa]\s+voir\s+avec\s+(?:une?|les)?|pas\s+un|sans)\s+(?:r[eé][- ]?[eé]dition[s]?|remake[s]?|repro(?:duction)?s?)\b'
-    full_reed = f"{t} {d}"
-    cleaned_reed = re.sub(reedition_neg_pat, ' ', full_reed, flags=re.IGNORECASE)
+    # 31. Rééditions, remakes et reproductions non d'époque (hors négations explicites)
     reedition_pat = r'\b(r[eé][- ]?[eé]dition[s]?|remake[s]?|reproduction[s]?)\b'
     if re.search(reedition_pat, cleaned_reed, re.IGNORECASE):
         return True, "Réédition / Reproduction non d'époque"
@@ -2369,13 +2405,13 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                 log(f"🚫 [Vinted] Alerte bloquée (Mention Green Angels / GA92 dès le titre) : {final_title}")
                 return
 
-        # Filtrage des produits indésirables (Mug, Panini, Prix > 350€) sauf Collector Magic Fans
-        if not bypass_jersey_filters:
-            is_excl, reason = is_excluded_product(final_title, '', final_price)
-            if is_excl:
-                log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
-                return
+        # Filtrage des produits indésirables (Mug, Panini, Prix > 350€) sauf Collector Magic Fans (Réplique toujours exclue)
+        is_excl, reason = is_excluded_product(final_title, '', final_price)
+        if is_excl and (not bypass_jersey_filters or "Réplique" in reason):
+            log(f"🚫 [Vinted] Alerte filtrée ({reason}) : {final_title} ({final_price})")
+            return
 
+        if not bypass_jersey_filters:
             # Filtrage des tailles enfants et XS/S
             if FILTER_ADULT_ONLY:
                 is_excl, reason = is_excluded_size(final_size, raw_title_val)
@@ -2504,9 +2540,9 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                         desc_raw = re.sub(r'<[^>]+>', '', m_dom.group(1)).strip()
                 desc_clean = clean_text(desc_raw)
                 if desc_clean:
-                    # Tag stuffing / spam multi-clubs : toujours bloqué (y compris Magic Fans)
+                    # Tag stuffing / spam multi-clubs & répliques : toujours bloqué (y compris Magic Fans)
                     is_excl_spam, reason_spam = is_excluded_product(final_title, desc_clean, final_price)
-                    if is_excl_spam and "Spam" in reason_spam:
+                    if is_excl_spam and ("Spam" in reason_spam or "Réplique" in reason_spam):
                         log(f"🚫 [Vinted] Alerte bloquée ({reason_spam}) : {final_title}")
                         return
 
