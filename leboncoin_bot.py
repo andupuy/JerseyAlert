@@ -213,6 +213,27 @@ def send_discord_system_alert(title, description, color=0xFFA500):
     summary = f"{title} : {first_line}" if first_line else f"{title}"
     log(summary, to_error_log=True)
 
+def send_discord_action_alert(title, description, color=0xFF4500):
+    """
+    Envoie une alerte ponctuelle et UNIQUE sur Discord lorsqu'une action manuelle est requise (ex: reboot Livebox).
+    """
+    if not DISCORD_WEBHOOK_URL:
+        return
+    payload = {
+        "username": "LeBonCoin ASSE Sniper",
+        "avatar_url": "https://www.leboncoin.fr/favicon.ico",
+        "embeds": [{
+            "title": title,
+            "description": description,
+            "color": color,
+            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        }]
+    }
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=8)
+    except Exception as e:
+        log(f"⚠️ Erreur envoi alerte action Discord: {e}", to_error_log=False)
+
 def is_night_time():
     """Vérifie si on est en veille de nuit (01h30 à 06h30 heure de Paris)"""
     now = get_paris_time()
@@ -278,7 +299,7 @@ def run_bot():
     conn_alert_sent = False
     in_night_mode = False
     datadome_cooldown_idx = 0
-    datadome_durations = [900, 1800, 3600, 7200]  # 15 min, 30 min, 1h, 2h max
+    datadome_durations = [900]  # Plafonné à 15 min max pour ne jamais rater des heures de scans
     datadome_alert_sent = False
 
     while True:
@@ -316,15 +337,25 @@ def run_bot():
                     conn_alert_sent = False
                 consecutive_conn_err = 0
 
-            # Parachute de sécurité Datadome avec backoff progressif
+            # Parachute de sécurité Datadome plafonné à 15 min + alerte Discord unique
             if status == 403:
                 consecutive_403 += 1
                 if consecutive_403 >= 2:
                     pause_sec = datadome_durations[min(datadome_cooldown_idx, len(datadome_durations) - 1)]
                     pause_min = pause_sec // 60
-                    log_to_err = not datadome_alert_sent
-                    log(f"🛡️ [Datadome] Détection persistante ({consecutive_403}x HTTP 403) ! Mise en pause progressive de {pause_min} minutes pour protéger l'IP.", to_error_log=log_to_err)
-                    datadome_alert_sent = True
+                    if not datadome_alert_sent:
+                        log(f"🛡️ [Datadome] Détection persistante ({consecutive_403}x HTTP 403) ! Mise en pause de {pause_min} minutes pour protéger l'IP.", to_error_log=True)
+                        send_discord_action_alert(
+                            "🛡️ [LeBonCoin] Blocage Datadome détecté (Action requise)",
+                            "⚠️ L'IP de votre Livebox est actuellement bloquée par Datadome.\n\n"
+                            "👉 **Action recommandée :** Redémarrez votre Livebox pour obtenir une nouvelle IP et débloquer LeBonCoin immédiatement.\n"
+                            "*(Aucune autre alerte ne sera envoyée d'ici le rétablissement — Le bot retentera automatiquement toutes les 15 min).*",
+                            color=0xFF4500
+                        )
+                        datadome_alert_sent = True
+                    else:
+                        log(f"🛡️ [Datadome] Toujours actif. Nouvelle pause de {pause_min} minutes (en attente de renouvellement IP).", to_error_log=False)
+
                     datadome_cooldown_idx += 1
                     time.sleep(pause_sec)
                     consecutive_403 = 0
@@ -334,12 +365,20 @@ def run_bot():
                 else:
                     time.sleep(20)
                     continue
-            else:
-                if status == 200 and datadome_cooldown_idx > 0:
+            elif status == 200:
+                if datadome_alert_sent:
                     log("✅ [Datadome] Rétablissement complet HTTP 200 : reprise nominale des scans.", to_error_log=False)
+                    send_discord_action_alert(
+                        "✅ [LeBonCoin] Connexion rétablie",
+                        "🟢 Le blocage Datadome est levé (nouvelle IP active). Les scans LeBonCoin ont repris normalement.",
+                        color=0x00FF00
+                    )
                 consecutive_403 = 0
                 datadome_cooldown_idx = 0
                 datadome_alert_sent = False
+            else:
+                time.sleep(20)
+                continue
 
             if not ads:
                 time.sleep(random.uniform(CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX))
