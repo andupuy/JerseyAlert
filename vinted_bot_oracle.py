@@ -805,6 +805,7 @@ OTHER_TEAMS_PATTERNS = {
     'Midtjylland': r'\b(fc\s+midtjylland|midtjylland)\b',
     'Bodo Glimt': r'\b(bod[oø][\s\-]glimt|glimt)\b',
     'Rosenborg': r'\b(rosenborg|rbk)\b',
+    'Fredrikstad': r'\bfredrikstad\b',
     'Molde': r'\b(molde\s+fk|molde)\b',
     'Malmö': r'\b(malm[oö]\s+ff|malm[oö])\b',
     'AIK Stockholm': r'\b(aik\s+stockholm|aik)\b',
@@ -834,9 +835,11 @@ def is_conflicting_team(text):
     confrontation_pattern = r'\b(?:asse|saint[- \.]*etienne|st[- \.]*etienne|sainte)\s*[\-\/]\s*([a-z0-9\-\'\s]+)'
     t_clean = re.sub(confrontation_pattern, ' ', t_clean)
 
-    # 3. Vérifier la présence d'un signal ASSE autonome (qui n'est PAS uniquement la mention de l'adversaire affronté)
+    # 3. Vérifier la présence d'un signal ASSE autonome (qui n'est PAS uniquement la mention de l'adversaire, un #hashtag ou "ancien de l'ASSE")
     asse_opponent_pattern = r'\b(?:contre|vs\.?|face\s+[àa]|oppos[eé][es]?\s+[àa]|match\s+contre|jou[eé]\s+contre|match\s+face\s+[àa])\s+(?:l[\'\s]*)?(?:equipe\s+de\s+)?(?:as\s+)?(?:saint[- \.]*etienne|asse|st[- \.]*etienne|sainte|verts?)\b'
     t_no_asse_opp = re.sub(asse_opponent_pattern, ' ', t_norm)
+    t_no_asse_opp = re.sub(r'#\s*(?:asse|saint[- \.]*etienne|st[- \.]*etienne|sainte)\b', ' ', t_no_asse_opp)
+    t_no_asse_opp = re.sub(r'\b(?:ancien(?:ne)?|ex)(?:\s+joueur)?\s+(?:de\s+(?:l[\'\s]*)?|du\s+|d[\'\s]*)(?:asse|saint[- \.]*etienne|st[- \.]*etienne|sainte)\b', ' ', t_no_asse_opp)
     has_standalone_asse = bool(re.search(r'\b(asse|saint[- \.]*etienne|st[- \.]*etienne|sainte)\b|(?:\b|^)a[\.\s\-]+s[\.\s\-]+s[\.\s\-]*e(?:\.|\b)', t_no_asse_opp))
     has_match_context = bool(re.search(r'\b(port[eé]|match|finale|derby|demi[- ]finale|coupe|championnat)\b', t_norm))
 
@@ -2586,9 +2589,10 @@ def send_discord_alert(context, item, bypass_jersey_filters=False):
                                 log(f"🚫 [Vinted] Alerte filtrée ({reason_s}) : {final_title} (Taille: {final_size})")
                                 return
 
-                    # Si le titre ne mentionne pas explicitement ASSE/Saint-Étienne (match via Joueur/Sponsor),
-                    # vérifier que la description ne désigne pas un autre club concurrent
-                    if not is_asse_jersey_match(final_title) and not is_asse_jersey_match(desc_clean):
+                    # Si le titre ne mentionne pas explicitement ASSE/Saint-Étienne hors hashtag (match via Joueur/Sponsor/#ASSE),
+                    # vérifier que la description ne désigne pas un autre club concurrent (même si #ASSE est tagué)
+                    title_no_hashtag = re.sub(r'#\s*(?:asse|saint[- \.]*etienne|st[- \.]*etienne|saint[eé])\b', ' ', final_title, flags=re.IGNORECASE)
+                    if not is_asse_jersey_match(title_no_hashtag):
                         is_conf_d, conf_d = is_conflicting_team(desc_clean)
                         if is_conf_d:
                             log(f"🚫 [Vinted] Alerte filtrée (Équipe concurrente dans la description : {conf_d}) : {final_title}")
