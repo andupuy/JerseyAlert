@@ -1233,52 +1233,36 @@ INCOMPATIBLE_KIT_BRANDS = [
     r'\bgivova\b',
     r'\berre[aà]\b',
     r'\bjoma\b',
-    r'\bmacron\b'
+    r'\bmacron\b',
+    r'\bkempa\b'
 ]
 INCOMPATIBLE_KIT_PATTERN = re.compile(r'|'.join(INCOMPATIBLE_KIT_BRANDS), re.IGNORECASE)
 
 def is_incompatible_kit_brand(brand_str="", title_str="", desc_str=""):
     """
     Bloque les maillots d'équipementiers tiers qui n'ont jamais équipé l'ASSE :
-    LEGEA, Givova, Erreà, Joma, Macron.
+    LEGEA, Givova, Erreà, Joma, Macron, Kempa.
     """
-    b = (brand_str or "").strip()
-    if b and b.upper() != "N/A":
-        m = INCOMPATIBLE_KIT_PATTERN.search(b)
-        if m:
-            brand_name = m.group(0).lower()
-            if brand_name in ('errea', 'erreà'):
-                display_name = 'Erreà'
-            elif brand_name == 'legea':
-                display_name = 'LEGEA'
-            elif brand_name == 'givova':
-                display_name = 'Givova'
-            elif brand_name == 'joma':
-                display_name = 'Joma'
-            elif brand_name == 'macron':
-                display_name = 'Macron'
-            else:
-                display_name = brand_name.capitalize()
-            return True, f"Équipementier incompatible ({display_name})"
-
-    t = (title_str or "").strip()
-    if t:
-        m = INCOMPATIBLE_KIT_PATTERN.search(t)
-        if m:
-            brand_name = m.group(0).lower()
-            if brand_name in ('errea', 'erreà'):
-                display_name = 'Erreà'
-            elif brand_name == 'legea':
-                display_name = 'LEGEA'
-            elif brand_name == 'givova':
-                display_name = 'Givova'
-            elif brand_name == 'joma':
-                display_name = 'Joma'
-            elif brand_name == 'macron':
-                display_name = 'Macron'
-            else:
-                display_name = brand_name.capitalize()
-            return True, f"Équipementier incompatible ({display_name})"
+    for candidate in [(brand_str or "").strip(), (title_str or "").strip(), (desc_str or "").strip()]:
+        if candidate and candidate.upper() != "N/A":
+            m = INCOMPATIBLE_KIT_PATTERN.search(candidate)
+            if m:
+                brand_name = m.group(0).lower()
+                if brand_name in ('errea', 'erreà'):
+                    display_name = 'Erreà'
+                elif brand_name == 'legea':
+                    display_name = 'LEGEA'
+                elif brand_name == 'givova':
+                    display_name = 'Givova'
+                elif brand_name == 'joma':
+                    display_name = 'Joma'
+                elif brand_name == 'macron':
+                    display_name = 'Macron'
+                elif brand_name == 'kempa':
+                    display_name = 'Kempa'
+                else:
+                    display_name = brand_name.capitalize()
+                return True, f"Équipementier incompatible ({display_name})"
 
     return False, ""
 
@@ -1483,6 +1467,11 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
         if not is_asse_jersey_match(t) and not is_asse_jersey_match(d):
             return True, "Sport hors-football ou vêtement non sportif (rugby/basket/nba/pull)"
 
+    # 18b. Handball (Saint-Étienne Handball, SAM Handball, Kempa, etc.) — verrouillage strict même si 'Saint-Étienne' est dans le titre
+    handball_pat = r'\b(handball|hand[- ]ball|sam\s+hand(?:ball)?|saint[- \.]*[eé]tienne\s+hand(?:ball)?|st[- \.]*[eé]tienne\s+hand(?:ball)?|lnh|liquimoly\s+starligue|starligue|proligue)\b'
+    if re.search(handball_pat, t) or (d and re.search(handball_pat, d)):
+        return True, "Handball (non-football)"
+
     # 19. Mangas, animés, esports, fiction (Captain Tsubasa, Olive et Tom, Inazuma, Blue Lock)
     anime_pattern = r'\b(captain\s+tsubasa|tsubasa|olive\s+et\s+tom|inazuma|blue\s+lock)\b'
     if re.search(anime_pattern, t) or (d and re.search(anime_pattern, d)):
@@ -1593,8 +1582,8 @@ def is_excluded_product(title_str="", desc_str="", price_str=""):
     if re.search(r'\bmanufrance\b', full_reed) and re.search(r'\bduarig\b', full_reed):
         return True, "Réédition Manufrance Duarig (anachronisme)"
 
-    # 33. Équipementiers incompatibles avec l'ASSE (LEGEA, Givova, Erreà, Joma, Macron)
-    is_bad_kit, bad_kit_reason = is_incompatible_kit_brand("", title_str)
+    # 33. Équipementiers incompatibles avec l'ASSE (LEGEA, Givova, Erreà, Joma, Macron, Kempa)
+    is_bad_kit, bad_kit_reason = is_incompatible_kit_brand("", title_str, desc_str)
     if is_bad_kit:
         return True, bad_kit_reason
 
