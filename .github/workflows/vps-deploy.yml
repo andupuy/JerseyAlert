@@ -28,11 +28,13 @@ jobs:
       - name: Restart Services
         run: |
           systemctl restart vinted-bot vinted-tracker vinted-dashboard
+          systemctl try-restart leboncoin-bot ebay-bot vfa-bot || true
 
       - name: Verify Services Status
         run: |
           systemctl is-active vinted-bot vinted-tracker vinted-dashboard
           systemctl status vinted-bot --no-pager
+          systemctl is-active leboncoin-bot || true
 
       - name: Generate & Sync Activity Telemetry
         env:

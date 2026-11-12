@@ -92,6 +92,48 @@ def log(msg, to_error_log=None):
         except Exception:
             pass
 
+def auto_heal_tailscale_connection():
+    """
+    Tente de réveiller et de renégocier le tunnel Tailscale avec la Shield
+    dès que le proxy SOCKS5 local échoue (ex: après reboot Livebox).
+    1. tailscale ping pour forcer la renégociation DERP / nouvelle IP Livebox
+    2. Redémarrage de tailscaled local si la session SOCKS5 locale est figée
+    """
+    import subprocess
+    shield_ip = "100.110.124.54"
+    log("🔄 [Auto-Heal] Tentative de renégociation active du tunnel Tailscale vers la Shield...", to_error_log=False)
+
+    try:
+        # 1. Forcer Tailscale à pinguer la Shield pour trouver la nouvelle IP publique
+        p_res = subprocess.run(
+            ["tailscale", "ping", "-c", "3", "--until-direct=false", shield_ip],
+            capture_output=True, text=True, timeout=8
+        )
+        if "pong from" in p_res.stdout.lower():
+            log(f"🟢 [Auto-Heal] Ping réussi vers la Shield ({shield_ip}) ! Tunnel rétabli.", to_error_log=False)
+            return True
+        else:
+            log(f"⚠️ [Auto-Heal] Ping direct infructueux ({p_res.stdout.strip() or p_res.stderr.strip()})", to_error_log=False)
+    except Exception as e:
+        log(f"⚠️ [Auto-Heal] Exception ping: {e}", to_error_log=False)
+
+    # 2. Si le ping échoue, redémarrer le démon tailscaled local sur le VPS pour débloquer les sockets figées
+    try:
+        subprocess.run(["systemctl", "restart", "tailscaled"], capture_output=True, text=True, timeout=10)
+        time.sleep(3)
+        # Nouveau ping après restart tailscaled
+        p_res2 = subprocess.run(
+            ["tailscale", "ping", "-c", "2", "--until-direct=false", shield_ip],
+            capture_output=True, text=True, timeout=6
+        )
+        if "pong from" in p_res2.stdout.lower():
+            log("🟢 [Auto-Heal] Tunnel Tailscale opérationnel après rafraîchissement de tailscaled.", to_error_log=False)
+            return True
+    except Exception as e:
+        log(f"⚠️ [Auto-Heal] Exception restart tailscaled: {e}", to_error_log=False)
+
+    return False
+
 def load_seen_ids():
     if os.path.exists(SEEN_IDS_FILE):
         try:
@@ -323,13 +365,18 @@ def run_bot():
         try:
             ads, status = fetch_leboncoin_ads(session)
 
-            # Surveillance et alerte coupure proxy SOCKS5 / Shield
+            # Surveillance et alerte coupure proxy SOCKS5 / Shield avec auto-heal automatique
             if status == 0:
                 consecutive_conn_err += 1
-                if consecutive_conn_err >= 3 and not conn_alert_sent:
+                if consecutive_conn_err >= 2:
+                    # Tenter la renégociation active dès le 2e échec
+                    auto_heal_tailscale_connection()
+                    session = requests.Session()
+
+                if consecutive_conn_err >= 4 and not conn_alert_sent:
                     log(f"🚨 Alerte Proxy Résidentiel Déconnecté : les requêtes vers LeBonCoin échouent via SOCKS5 (127.0.0.1:1055) - Vérifier Shield / Tailscale ({consecutive_conn_err}x échecs)", to_error_log=True)
                     conn_alert_sent = True
-                time.sleep(15)
+                time.sleep(10)
                 continue
             else:
                 if conn_alert_sent and status == 200:
