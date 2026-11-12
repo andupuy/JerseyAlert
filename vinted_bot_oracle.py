@@ -532,6 +532,7 @@ OTHER_TEAMS_PATTERNS = {
     'Istres': r'\b(fc\s+istres|istres)\b',
     'Cannes': r'\b(as\s+cannes|cannes)\b',
     'Rouen': r'\b(fc\s+rouen|rouen)\b',
+    'Olympique de Saint-Étienne': r'\b(olympique\s+de\s+saint[- ]etienne|olympique\s+saint[- ]etienne|o\.s\.e|ose\s+(?:foot|football|saint[- ]etienne))\b',
 
     # Clubs européens
     'Freiburg': r'\b(sc\s+freiburg|freiburg|fribourg)\b',
