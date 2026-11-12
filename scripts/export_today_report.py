@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Exporte un rapport d'activité du VPS (matches, scans, alertes, ventes, erreurs)
+Exporte un rapport d'activité du VPS (matches, scans, alertes, ventes, erreurs, LeBonCoin & Shield)
 vers un fichier JSON exploitable par GitHub Actions et l'assistant.
 """
 import subprocess
@@ -36,12 +36,11 @@ def generate_report():
             status = it.get("status")
             sub_status = it.get("sub_status")
             if (status == "SOLD" or sub_status == "SOLD") or (sold_at and sold_at >= ts_24h_ago):
-                # Si sold_at est dans les dernières 24h
                 if not sold_at or sold_at >= ts_24h_ago:
                     sold_items_24h.append(it)
         sold_items_24h.sort(key=lambda x: x.get("sold_at") or 0, reverse=True)
 
-    # 2. Lecture des logs journalctl des dernières 24h
+    # 2. Lecture des logs journalctl des dernières 24h (Vinted)
     matches = []
     scan_count_flux = 0
     scan_count_filet = 0
@@ -66,9 +65,63 @@ def generate_report():
             elif "🚨" in clean or "❌" in clean:
                 errors.append(clean)
     except Exception as e:
-        print(f"Erreur journalctl: {e}")
+        print(f"Erreur journalctl vinted: {e}")
 
-    # 3. Métriques système
+    # 3. Diagnostic Services, LeBonCoin & Proxy Shield
+    services = ["vinted-bot", "leboncoin-bot", "ebay-bot", "vfa-bot", "vinted-tracker", "vinted-dashboard"]
+    svc_status = {}
+    try:
+        s_res = subprocess.run(["systemctl", "is-active"] + services, capture_output=True, text=True, timeout=5)
+        svc_status = dict(zip(services, s_res.stdout.strip().splitlines()))
+    except Exception:
+        pass
+
+    lbc_logs = []
+    try:
+        lbc_res = subprocess.run(
+            ["journalctl", "-u", "leboncoin-bot.service", "-n", "40", "--no-pager"],
+            capture_output=True, text=True, timeout=10
+        )
+        lbc_logs = [l.strip() for l in lbc_res.stdout.splitlines() if l.strip()]
+    except Exception as e:
+        lbc_logs = [f"Erreur lecture journalctl leboncoin-bot: {e}"]
+
+    tailscale_info = {}
+    try:
+        ts_res = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5)
+        if ts_res.returncode == 0:
+            ts_data = json.loads(ts_res.stdout)
+            peers = ts_data.get("Peer", {})
+            for p in peers.values():
+                hname = p.get("HostName", "")
+                tailscale_info[hname] = {
+                    "online": p.get("Online", False),
+                    "ips": p.get("TailscaleIPs", []),
+                    "last_seen": p.get("LastSeen", ""),
+                    "cur_addr": p.get("CurAddr", ""),
+                    "relay": p.get("Relay", "")
+                }
+    except Exception as e:
+        tailscale_info = {"error": str(e)}
+
+    # Test du port SOCKS5 local (1055) et test IP publique sortante + test LeBonCoin direct
+    socks_test = {}
+    try:
+        ss_res = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=5)
+        socks_test["listening_ports"] = [l for l in ss_res.stdout.splitlines() if "1055" in l or "ssh" in l or "tailscale" in l]
+    except Exception:
+        pass
+
+    try:
+        ip_res = subprocess.run(
+            ["curl", "-s", "--max-time", "8", "-x", "socks5h://127.0.0.1:1055", "https://api.ipify.org?format=json"],
+            capture_output=True, text=True, timeout=10
+        )
+        socks_test["proxy_exit_ip"] = ip_res.stdout.strip() or f"Error (rc={ip_res.returncode}): {ip_res.stderr.strip()}"
+    except Exception as e:
+        socks_test["proxy_exit_ip"] = f"Exception: {e}"
+
+    # 4. Métriques système
     ram_info = {}
     try:
         free_res = subprocess.run(["free", "-m"], capture_output=True, text=True, timeout=5)
@@ -79,7 +132,6 @@ def generate_report():
     except Exception:
         pass
 
-    # Trier et formater les articles suivis (les plus récents en premier)
     recent_tracked = []
     if isinstance(tracked_items, dict):
         items_list = list(tracked_items.values())
@@ -89,6 +141,10 @@ def generate_report():
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "bot_status": "active",
+        "services": svc_status,
+        "tailscale": tailscale_info,
+        "socks_proxy": socks_test,
+        "leboncoin_recent_logs": lbc_logs,
         "system": {
             "ram": ram_info,
         },
@@ -111,7 +167,7 @@ def generate_report():
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ Rapport généré avec succès dans {output_path} ({len(matches)} matches, {len(sold_items_24h)} ventes 24h, {len(tracked_items)} articles suivis)")
+    print(f"✅ Rapport généré avec succès dans {output_path}")
 
 if __name__ == "__main__":
     generate_report()
