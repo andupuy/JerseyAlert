@@ -435,7 +435,7 @@ OTHER_TEAMS_PATTERNS = {
     'Angleterre': r'\b(angleterre|england)\b',
     'Brésil': r'\b(br[eé]sil|brazil|brasil)\b',
     'Argentine': r'\b(argentine|argentina)\b',
-    'Pays-Bas': r'\b(pays[- ]bas|netherlands|hollande|holland)\b',
+    'Pays-Bas': r'\b(pays[- ]bas|netherlands|hollande|holland|nederland|oranje|knvb)\b',
     'Croatie': r'\b(croatie|croatia)\b',
     'Maroc': r'\b(maroc|morocco)\b',
     'Algérie': r'\b(alg[eé]rie|algeria)\b',
@@ -924,7 +924,8 @@ def load_asse_knowledge():
         'christensen', 'oliveira', 'ramirez', 'rivera', 'laudrup', 'milla', 'almeida', 'guarin',
         'coulibaly', 'kamara', 'ndiaye', 'gueye', 'sarr', 'sakho', 'sidibe', 'bakayoko',
         'thiaw', 'maupay', 'saintmaximin', 'modeste', 'mirallas', 'coupet', 'malbranque',
-        'clerc', 'ferri', 'bodmer', 'pavlovic', 'dimitrov', 'machado', 'nilsson', 'esposito', 'diomande'
+        'clerc', 'ferri', 'bodmer', 'pavlovic', 'dimitrov', 'machado', 'nilsson', 'esposito', 'diomande',
+        'makita'
     }
 
     full_name_players = {
